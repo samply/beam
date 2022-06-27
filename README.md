@@ -143,4 +143,4 @@ For example, retrieving a task's results:
 ## To-Dos
 - Make listen address & port configurable
 - Authentication. This will change the API (e.g. `worker_id` will be no longer required as this is derived from the authentication)
-- Signing (and possibly encrypting) actual messages
+- Additional client component to sign (and possibly encrypt) actual messages
