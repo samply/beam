@@ -26,5 +26,5 @@ jobs:
     - name: Upload Artifact (central)
       uses: actions/upload-artifact@v3
       with:
-        name: broker-central
-        path: target/release/broker-central
+        name: central
+        path: target/release/central

@@ -1,0 +1,52 @@
+use axum::{async_trait, extract::{FromRequest, Query, Path}, BoxError, http::StatusCode};
+
+use crate::*;
+
+#[derive(Deserialize)]
+struct HowLongToBlockAsIntegers {
+    timeout: Option<u64>,
+    resultcount: Option<u16>,
+}
+
+#[async_trait]
+impl<B> FromRequest<B> for HowLongToBlock
+where
+B: axum::body::HttpBody + Send,
+B::Data: Send,
+B::Error: Into<BoxError>
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request(req: &mut axum::extract::RequestParts<B>) -> Result<Self, Self::Rejection> {
+        match req.extract::<Query<HowLongToBlockAsIntegers>>().await {
+            Ok(value) => {
+                let timeout = match value.0.timeout {
+                    Some(millis) => Some(Duration::from_millis(millis)),
+                    None => None,
+                };
+                Ok(Self { timeout: timeout, resultcount: value.0.resultcount })
+            },
+            Err(_) => Err((StatusCode::BAD_REQUEST, "For long-polling, please define &timeout=<millisecs> and &resultcount=<count>.")),
+        }
+    }
+}
+
+#[async_trait]
+impl<B> FromRequest<B> for MyUuid
+where
+// these trait bounds are copied from `impl FromRequest for axum::Json`
+B: axum::body::HttpBody + Send,
+B::Data: Send,
+B::Error: Into<BoxError>
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request(req: &mut axum::extract::RequestParts<B>) -> Result<Self, Self::Rejection> {
+        let res = req.extract::<Path<Uuid>>().await;
+        println!("Extracting MyUuid yielded: {:#?}", res);
+        match req.extract::<Path<Uuid>>().await {
+            Ok(value) => Ok(Self(value.0)),
+            Err(_) => Err((StatusCode::BAD_REQUEST, "Invalid ID supplied.")),
+        }
+    }
+}
