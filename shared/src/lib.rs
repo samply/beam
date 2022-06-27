@@ -1,6 +1,3 @@
-#[cfg(feature = "backend-axum")]
-mod traits;
-
 use std::{time::Duration, ops::Deref, fmt::Display};
 
 use serde::{Deserialize, Serialize};
@@ -11,6 +8,8 @@ pub type MsgId = MyUuid;
 pub type ClientId = MyUuid;
 pub type MsgType = String;
 pub type TaskResponse = String;
+
+mod traits;
 
 #[derive(Debug,Serialize,Deserialize,Clone,Copy,PartialEq,Eq,Hash)]
 pub struct MyUuid(Uuid);
@@ -47,26 +46,28 @@ impl Display for MyUuid {
 }
 
 #[derive(PartialEq, Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "lowercase")]
 pub enum WorkResult {
     Unclaimed,
-    TempFail,
-    PermFail,
+    TempFail(TaskResponse),
+    PermFail(TaskResponse),
     Succeeded(TaskResponse),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "lowercase")]
 pub enum FailureStrategy {
     Discard,
     Retry {
-        backoff: Duration,
+        backoff_millisecs: usize,
         max_tries: usize,
     }, // backoff for Duration and try max. times
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HowLongToBlock {
-    pub timeout: Option<Duration>,
-    pub resultcount: Option<u16>,
+    pub poll_timeout: Option<Duration>,
+    pub poll_count: Option<u16>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -131,9 +132,9 @@ pub fn generate_example_tasks() -> HashMap<MsgId, MsgTaskRequest> {
 
     let task = MsgTaskRequest::new(
         to,
-        "MySuperTask".to_string(),
-        "Much Work".to_string(),
-        FailureStrategy::Retry { backoff: Duration::from_secs(10), max_tries: 5 },
+        "My important task".to_string(),
+        "Much work to do".to_string(),
+        FailureStrategy::Retry { backoff_millisecs: 1000, max_tries: 5 },
     );
 
     let response1 = MsgTaskResult {
@@ -147,7 +148,7 @@ pub fn generate_example_tasks() -> HashMap<MsgId, MsgTaskRequest> {
         id: MsgId::new(),
         worker_id: someone_elses_id.into(),
         task: task.id,
-        result: crate::WorkResult::PermFail,
+        result: crate::WorkResult::PermFail("Unable to complete".to_string()),
     };
     tasks.insert(task.id, task);
     let task_in_map = tasks.values_mut().next().unwrap();
@@ -170,11 +171,11 @@ mod tests {
     }
 
     #[test]
-    fn get_failed_responses() {
+    fn get_failed_responses() { //WorkResult::PermFail == resp.1.result
         let tasks = generate_example_tasks();
         let failed: Vec<&MsgTaskResult> = tasks.values().next().unwrap().results
             .iter()
-            .filter(|resp| resp.1.result == WorkResult::PermFail)
+            .filter(|resp| matches!(resp.1.result, WorkResult::PermFail(_)))
             .map(|(_, v)| v)
             .collect();
 

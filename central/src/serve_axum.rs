@@ -1,8 +1,8 @@
-use std::{collections::HashMap, sync::Arc, hash::Hash};
+use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     http::{StatusCode, header},
-    routing::{get, put},
+    routing::{get},
     Extension, Json, Router, extract::{Query, Path}, response::IntoResponse,
 };
 use serde::Deserialize;
@@ -61,13 +61,13 @@ async fn get_results_for_task(
 }
 
 fn would_wait_for_elements<S>(vec: &Vec<S>, block: &HowLongToBlock) -> bool {
-    usize::from(block.resultcount.unwrap_or(0)) > vec.len()
+    usize::from(block.poll_count.unwrap_or(0)) > vec.len()
 }
 
 fn wait_get_statuscode<S>(vec: &Vec<S>, block: &HowLongToBlock) -> StatusCode {
     /*if vec.len() == 0 {
         StatusCode::NOT_FOUND
-    } else*/ if usize::from(block.resultcount.unwrap_or(0)) > vec.len() {
+    } else*/ if usize::from(block.poll_count.unwrap_or(0)) > vec.len() {
         StatusCode::PARTIAL_CONTENT
     } else {
         StatusCode::OK
@@ -78,13 +78,13 @@ async fn wait_for_elements<K,V>(vec: &mut Vec<V>, block: &HowLongToBlock, mut ne
 where V: Clone + HasWaitId<K>, K: PartialEq
 {
     let wait_until =
-        time::Instant::now() + block.timeout.unwrap_or(time::Duration::from_secs(31536000));
+        time::Instant::now() + block.poll_timeout.unwrap_or(time::Duration::from_secs(31536000));
     println!(
         "Now is {:?}. Will wait until {:?}",
         time::Instant::now(),
         wait_until
     );
-    while usize::from(block.resultcount.unwrap_or(0)) > vec.len()
+    while usize::from(block.poll_count.unwrap_or(0)) > vec.len()
         && time::Instant::now() < wait_until {
         println!(
             "Items in vec: {}, time remaining: {:?}",

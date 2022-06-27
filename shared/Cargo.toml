@@ -17,17 +17,5 @@ serde_json = "1"
 
 tokio = { version = "1", features = ["full"] }
 url = "2.2.2"
-
-[dependencies.axum]
-version = "0.5.9"
-optional = true
-
-[dependencies.axum-macros]
-version = "0.2.2"
-optional = true
-
-[features]
-#default = ["backend-warp"]
-#backend-warp = [ "warp" ]
-default = ["backend-axum"]
-backend-axum = [ "axum", "axum-macros" ]
+axum = "0.5.9"
+#axum-macros = "0.2.2"
