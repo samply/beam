@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, process::Command, thread};
+    use std::{process::Command, thread};
 
-    use assert_cmd::{prelude::*, cargo::cargo_bin};
+    use assert_cmd::{prelude::*};
     use reqwest::StatusCode;
-    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MsgId, MyUuid};
+    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid};
 
 
     #[test]
