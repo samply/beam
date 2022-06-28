@@ -1,6 +1,5 @@
 FROM rust:slim-bullseye AS builder
 WORKDIR /usr/src/app
-RUN cargo search just_to_populate_the_cache >/dev/null
 COPY . .
 RUN cargo build --bin central --release
 
