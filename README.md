@@ -43,7 +43,7 @@ A succeeded result for the above task:
   "worker_id": "6e3cf893-c134-45d2-b9f3-b02d92ad51e0",
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
   "result": {
-    "succeeded": "All done!"
+    "succeeded": "<result payload>"
   }
 }
 ```
@@ -55,7 +55,7 @@ A failed task:
   "worker_id": "0abd8445-b4a9-4e20-8a4a-bd97ed57745c",
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
   "result": {
-    "permfail": "Unable to decrypt quantum state"
+    "permfailed": "Unable to decrypt quantum state"
   }
 }
 ```
@@ -63,8 +63,8 @@ A failed task:
 - `id`: UUID identifying the result. When the result is initially created, the value is ignored and replaced by a server-generated one.
 - `worker_id`: UUID identifying the client submitting this result. This needs to match an entry the `to` field in the task.
 - `task`: UUID identifying the task this result belongs to.
-- `result`: Defines status of this work result. Possible values `unclaimed`, `tempfail(body)`, `permfail(body)`, `succeeded(body)`.
-- `result.body`: Either carries a return value (`succeeded`) or an error message.
+- `result`: Defines status of this work result. Possible values `unclaimed`, `tempfailed(body)`, `permfailed(body)`, `succeeded(body)`.
+- `result.body`: Either carries the actual result payload of the task (`succeeded`) or an error message.
 
 ## API
 ### Create task

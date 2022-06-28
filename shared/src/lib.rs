@@ -49,8 +49,8 @@ impl Display for MyUuid {
 #[serde(rename_all = "lowercase")]
 pub enum WorkResult {
     Unclaimed,
-    TempFail(TaskResponse),
-    PermFail(TaskResponse),
+    TempFailed(TaskResponse),
+    PermFailed(TaskResponse),
     Succeeded(TaskResponse),
 }
 
@@ -148,7 +148,7 @@ pub fn generate_example_tasks() -> HashMap<MsgId, MsgTaskRequest> {
         id: MsgId::new(),
         worker_id: someone_elses_id.into(),
         task: task.id,
-        result: crate::WorkResult::PermFail("Unable to complete".to_string()),
+        result: crate::WorkResult::PermFailed("Unable to complete".to_string()),
     };
     tasks.insert(task.id, task);
     let task_in_map = tasks.values_mut().next().unwrap();
@@ -171,11 +171,11 @@ mod tests {
     }
 
     #[test]
-    fn get_failed_responses() { //WorkResult::PermFail == resp.1.result
+    fn get_failed_responses() {
         let tasks = generate_example_tasks();
         let failed: Vec<&MsgTaskResult> = tasks.values().next().unwrap().results
             .iter()
-            .filter(|resp| matches!(resp.1.result, WorkResult::PermFail(_)))
+            .filter(|resp| matches!(resp.1.result, WorkResult::PermFailed(_)))
             .map(|(_, v)| v)
             .collect();
 
