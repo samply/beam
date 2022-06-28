@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, process::Command, thread};
+    use std::{process::Command, thread};
 
-    use assert_cmd::{prelude::*, cargo::cargo_bin};
+    use assert_cmd::{prelude::*};
     use reqwest::StatusCode;
-    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MsgId, MyUuid};
+    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid};
 
 
     #[test]
@@ -78,8 +78,10 @@ mod tests {
                     assert!(resp.unwrap().status() == StatusCode::UNAUTHORIZED);
                 }
             }
+
+            // GET /tasks/.../results (this time, let's wait for a short amount of time using long-polling)
             let resp = 
-                client.get(format!("http://localhost:8080/tasks/{}/results", servergenerated_task_id))
+                client.get(format!("http://localhost:8080/tasks/{}/results?poll_count=2&poll_timeout=10", servergenerated_task_id))
                 .send();
             assert!(resp.is_ok());
             let fetched_results: Vec<MsgTaskResult> = resp.unwrap().json().unwrap();
