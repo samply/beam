@@ -16,6 +16,8 @@ struct State {
     new_result_tx: Arc<RwLock<HashMap<MsgId, Sender<MsgTaskResult>>>>,
 }
 
+const BIND_ADDR: &str = "0.0.0.0:8080";
+
 pub(crate) async fn serve_axum(
     tasks: Arc<RwLock<HashMap<MsgId, MsgTaskRequest>>>,
     new_task_tx: Arc<Sender<MsgTaskRequest>>,
@@ -25,10 +27,21 @@ pub(crate) async fn serve_axum(
         .route("/tasks", get(get_tasks).post(post_task))
         .route("/tasks/:task_id/results", get(get_results_for_task).post(post_result))
         .layer(Extension(state));
-    axum::Server::bind(&"0.0.0.0:8080".parse().unwrap())
+
+    // Graceful shutdown handling
+    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+
+    ctrlc::set_handler(move || tx.blocking_send(()).expect("Could not send shutdown signal on channel."))
+        .expect("Error setting handler for graceful shutdown.");
+
+    println!("Listening for requests on {}", BIND_ADDR);
+    axum::Server::bind(&BIND_ADDR.parse().unwrap())
         .serve(app.into_make_service())
-        .await
-        .unwrap();
+        .with_graceful_shutdown(async {
+            rx.recv().await;
+            println!("Shutting down.");
+        })
+        .await.unwrap();
 }
 
 // GET /tasks/:task_id/results
