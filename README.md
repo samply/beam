@@ -92,7 +92,7 @@ Method: `GET`
 URL: `/tasks`  
 Parameters:
 - `worker_id` (optional): Fetch only tasks directed to this worker.
-- [long polling](#long-polling) is supported.
+- [long polling](#long-polling-api-access) is supported.
 
 Returns an array of tasks, cf. [here](#task)
 ```
@@ -114,7 +114,7 @@ The submitter of the task (see [Create Task](#create-task)) calls this endpoint 
 Method: `GET`  
 URL: `/tasks/<task_id>/results`  
 Parameters:
-- [long polling](#long-polling) is supported.
+- [long polling](#long-polling-api-access) is supported.
 
 Returns an array of results, cf. [here](#result)
 ```
