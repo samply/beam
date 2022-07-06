@@ -42,8 +42,6 @@ B::Error: Into<BoxError>
     type Rejection = (StatusCode, &'static str);
 
     async fn from_request(req: &mut axum::extract::RequestParts<B>) -> Result<Self, Self::Rejection> {
-        let res = req.extract::<Path<Uuid>>().await;
-        println!("Extracting MyUuid yielded: {:#?}", res);
         match req.extract::<Path<Uuid>>().await {
             Ok(value) => Ok(Self(value.0)),
             Err(_) => Err((StatusCode::BAD_REQUEST, "Invalid ID supplied.")),

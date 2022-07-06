@@ -1,5 +1,5 @@
 [workspace]
-members = ["proxy", "central", "shared"]
+members = ["proxy", "central", "shared", "tests"]
 
 [profile.release]
 #opt-level = "z"     # Optimize for size.
