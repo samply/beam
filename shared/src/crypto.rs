@@ -48,7 +48,7 @@ impl CertificateCache {
     }
 
     /// Searches cache for a certificate with the given ClientId. If not found, updates cache from central vault. If then still not found, return None
-    pub async fn get_by_cname(cname: &ClientId) -> Option<X509> {
+    pub async fn get_by_cname(cname: &ClientId) -> Option<X509> { // TODO: What if multiple certs are found?
         debug!("Getting cert with cname {}", cname);
         { // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
             let cache = CERT_CACHE.read().await;

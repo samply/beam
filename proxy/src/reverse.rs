@@ -16,11 +16,11 @@ use tracing::{info, debug, warn, error};
 
 use crate::{auth::AuthenticatedProxyClient, config::Config};
 
-pub(crate) async fn reverse_proxy(
-    config: Config
-) -> anyhow::Result<()> {
+pub(crate) async fn reverse_proxy() -> anyhow::Result<()> {
     let client = Client::builder()
         .build::<_, hyper::Body>(HttpsConnector::new());
+
+    let config = crate::config::CONFIG.clone();
 
     let app = Router::new()
         .route("/*path", any(handler))

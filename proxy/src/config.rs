@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 
-use std::{net::SocketAddr, process::exit, collections::HashMap, fs::read_to_string};
+use std::{net::SocketAddr, process::exit, collections::HashMap, fs::read_to_string, path::{Path, PathBuf}};
 
 use argh::{FromArgs, FromArgValue};
 use axum::http::HeaderValue;
@@ -55,14 +55,14 @@ pub struct CliArgs {
     #[argh(option, default = "String::from(\"samplypki\")")]
     pub pki_realm: String,
     /// samply.pki: Path to file containing PKI secrets (default: /run/secrets/broker.secrets)
-    #[argh(option, default = "String::from(\"/run/secrets/broker.secrets\")")]
-    pub pki_secret_file: String,
+    #[argh(option, default = "Path::new(\"/run/secrets/broker.secrets\").to_owned()")]
+    pub pki_secret_file: PathBuf,
     /// samply.pki: Path to own secret key (default: /run/secrets/privkey.pem)
-    #[argh(option, default = "String::from(\"/run/secrets/privkey.pem\")")]
-    pub privkey_file: String,
+    #[argh(option, default = "Path::new(\"/run/secrets/privkey.pem\").to_owned()")]
+    pub privkey_file: PathBuf,
 }
 
-fn parse_secret_file(filename: &str) -> Result<(String, HashMap<ApiKey,ClientId>),SamplyBrokerError>{
+fn parse_secret_file(filename: &Path) -> Result<(String, HashMap<ApiKey,ClientId>),SamplyBrokerError>{
     let mut map = HashMap::new();
     let contents = read_to_string(filename)?;
     let secret_config = serde_json::from_str::<SecretConfig>(&contents)

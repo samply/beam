@@ -22,6 +22,8 @@ pub enum SamplyBrokerError {
     ReadSecretConfig(String),
     #[error("Internal synchronization error: {0}")]
     InternalSynchronizationError(String),
+    #[error("Error in configuration: {0}")]
+    ConfigurationFailed(String)
 }
 
 impl From<AddrParseError> for SamplyBrokerError {
