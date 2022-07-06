@@ -61,7 +61,7 @@ async fn handler(
     const ERR_INTERNALCRYPTO: (StatusCode, &'static str) = (StatusCode::INTERNAL_SERVER_ERROR, "Cryptography failed; see server logs.");
     const ERR_UPSTREAM: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Unable to parse server's reply.");
     const ERR_VALIDATION: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Unable to verify signature in server reply.");
-    const ERR_UNKNOWN_ENTITY: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Server sent an entity we didn't understand.");
+    // const ERR_UNKNOWN_ENTITY: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Server sent an entity we didn't understand.");
 
     debug!(?req, ?auth_client, "<=");
 

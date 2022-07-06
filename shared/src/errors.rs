@@ -57,7 +57,7 @@ impl From<std::io::Error> for SamplyBrokerError {
 }
 
 impl From<rsa::errors::Error> for SamplyBrokerError {
-    fn from(e: rsa::errors::Error) -> Self {
+    fn from(_: rsa::errors::Error) -> Self {
         Self::SignEncryptError("Verification of signature failed")
     }
 }

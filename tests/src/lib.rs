@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 #[cfg(test)]
 mod tests {
     use std::{process::{Command, Child}, thread, sync::mpsc::{self, Sender}, time::Duration, io::ErrorKind, collections::HashSet};
@@ -55,12 +57,12 @@ mod tests {
 
         fn stop_and_clean(&self) {
             for tx in self.txes.iter() {
-                tx.send(());
+                tx.send(()).unwrap_or(());
             }
             for path in [glob::glob("../pki/*.pem").unwrap(), glob::glob("../pki/*.json").unwrap()].into_iter().flatten() {
                 if let Ok(path) = path {
                     println!("Cleaning up: {}", path.display());
-                    std::fs::remove_file(path);
+                    std::fs::remove_file(path).unwrap_or(());
                 }
             }
         }
@@ -74,19 +76,19 @@ mod tests {
 
     #[test]
     fn all_servers_start_successfully() {
-        let servers = Servers::start().unwrap();
+        let _servers = Servers::start().unwrap();
     }
 
     #[test]
     #[should_panic]
     fn fails_without_apikey() {
-        let servers = Servers::start().unwrap();
+        let _servers = Servers::start().unwrap();
         integration_test(None).unwrap();
     }
 
     #[test]
     fn works_with_apikey() {
-        let servers = Servers::start().unwrap();
+        let _servers = Servers::start().unwrap();
         integration_test(Some("ClientApiKey EssenKey")).unwrap();
     }
 

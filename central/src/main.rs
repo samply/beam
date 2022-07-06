@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 mod serve_axum;
 #[cfg(debug_assertions)]
 mod devhelper;

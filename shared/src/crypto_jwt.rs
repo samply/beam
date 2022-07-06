@@ -8,7 +8,7 @@ use tracing::{debug, error, warn};
 use crate::{ClientId, errors::SamplyBrokerError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody};
 
 const ERR_SIG: (StatusCode, &'static str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
-const ERR_CERT: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
+// const ERR_CERT: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
 const ERR_BODY: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Body is invalid.");
 const ERR_FROM: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "\"from\" field in message does not match your certificate.");
 
@@ -60,11 +60,11 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::ClientPublicPortion, RS
     }
     let public = public.unwrap();
     let pubkey = RS256PublicKey::from_pem(&public.pubkey)
-        .map_err(|e| {
+        .map_err(|_| {
             SamplyBrokerError::SignEncryptError("Unable to initialize public key")
         })?;
     let content = pubkey.verify_token::<Value>(&token, None)
-        .map_err(|e| SamplyBrokerError::ValidationFailed )?;
+        .map_err(|_| SamplyBrokerError::ValidationFailed )?;
     Ok((public, pubkey, content))
 }
 
