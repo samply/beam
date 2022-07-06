@@ -22,13 +22,10 @@ jobs:
     - name: Cargo (build)
       run: cargo build --release
     - name: Cargo (run tests)
-      run: cargo test --release
+      run: cargo test --release -- --test-threads=1
+      # ^-- We're unable to run in parallel as we spawn conflicting server processes on defined ports.
     - name: Upload Artifact (central)
       uses: actions/upload-artifact@v3
       with:
         name: central
         path: target/release/central
-    - name: Cargo (bloat)
-      uses: orf/cargo-bloat-action@v1
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}

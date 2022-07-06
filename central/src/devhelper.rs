@@ -3,7 +3,7 @@ use shared::generate_example_tasks;
 #[cfg(debug_assertions)]
 pub(crate) fn print_example_objects() -> bool {
     if std::env::args().nth(1).unwrap_or_default() == "examples" {
-        let tasks = generate_example_tasks();
+        let tasks = generate_example_tasks(None);
         let mut num_tasks = 0;
         let mut num_results = 0;
         for task in tasks.values() {
