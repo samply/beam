@@ -4,7 +4,7 @@ mod tests {
 
     use assert_cmd::prelude::*;
     use reqwest::{StatusCode, header};
-    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, MsgSigned, Msg};
+    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, Msg};
 
     const PEMFILE: &str = "../pki/test.priv.pem";
     const MYID: &str = "test.broker.samply.de";
@@ -131,7 +131,7 @@ mod tests {
             assert!(resp.is_ok());
             let resp = resp.unwrap();
             assert!(resp.status() == StatusCode::OK);
-            let tasks = resp.json::<Vec<MsgSigned<MsgTaskRequest>>>().unwrap();
+            let tasks = resp.json::<Vec<MsgTaskRequest>>().unwrap();
             assert!(tasks.len() == 1);
 
             // POST /tasks/.../results
@@ -159,7 +159,7 @@ mod tests {
                 client.get(format!("http://localhost:8081/tasks/{}/results?poll_count=2&poll_timeout=2", servergenerated_task_id))
                 .send();
             assert!(resp.is_ok());
-            let fetched_results: Vec<MsgSigned<MsgTaskResult>> = resp.unwrap().json().unwrap();
+            let fetched_results: Vec<MsgTaskResult> = resp.unwrap().json().unwrap();
             assert_eq!(fetched_results.len(), unique_results);
         }
         Ok(())

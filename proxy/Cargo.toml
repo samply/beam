@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 shared = { path = "../shared" }
+async-recursion = "1.0.0"
 
 # Web Server & clean shutdown
 axum = "0.5.9"
