@@ -30,31 +30,31 @@ pub type ApiKey = String;
 #[clap(author, version, about, long_about = None)]
 pub struct CliArgs {
     /// local bind address
-    #[clap(long, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8081").unwrap())]
+    #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8081").unwrap())]
     pub bind_addr: SocketAddr,
     
     /// the broker's base URL, e.g. https://broker.samply.de
-    #[clap(long, value_parser)]
+    #[clap(long, env, value_parser)]
     pub broker_url: Uri,
 
     /// this proxy's client id, e.g. site23.broker.samply.de
-    #[clap(long, value_parser)]
+    #[clap(long, env, value_parser)]
     pub client_id: String,
 
     /// samply.pki: URL to HTTPS endpoint
-    #[clap(long, value_parser)]
+    #[clap(long, env, value_parser)]
     pub pki_address: Uri,
 
     /// samply.pki: Authentication realm
-    #[clap(long, value_parser, default_value = "samplypki")]
+    #[clap(long, env, value_parser, default_value = "samplypki")]
     pub pki_realm: String,
 
     /// samply.pki: File containing the authentication token
-    #[clap(long, value_parser, default_value = "/run/secrets/pki.secret")]
+    #[clap(long, env, value_parser, default_value = "/run/secrets/pki.secret")]
     pub pki_apikey_file: PathBuf,
 
     /// samply.pki: Path to own secret key
-    #[clap(long, value_parser, default_value = "/run/secrets/privkey.pem")]
+    #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
     pub privkey_file: PathBuf,
 }
 
