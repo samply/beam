@@ -60,8 +60,8 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::ClientPublicPortion, RS
     }
     let public = public.unwrap();
     let pubkey = RS256PublicKey::from_pem(&public.pubkey)
-        .map_err(|_| {
-            SamplyBrokerError::SignEncryptError("Unable to initialize public key".into())
+        .map_err(|e| {
+            SamplyBrokerError::SignEncryptError(format!("Unable to initialize public key: {}", e))
         })?;
     let content = pubkey.verify_token::<Value>(&token, None)
         .map_err(|_| SamplyBrokerError::ValidationFailed )?;

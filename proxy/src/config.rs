@@ -1,13 +1,13 @@
+use clap::Parser;
 use lazy_static::lazy_static;
 
-use std::{net::SocketAddr, process::exit, collections::HashMap, fs::read_to_string, path::{Path, PathBuf}};
+use std::{net::SocketAddr, process::exit, collections::HashMap, fs::read_to_string, str::FromStr, path::{Path, PathBuf}};
 
-use argh::{FromArgs, FromArgValue};
 use axum::http::HeaderValue;
 use hyper::Uri;
 use serde::Deserialize;
 use shared::ClientId;
-use tracing::{debug, info};
+use tracing::{info, debug};
 
 use shared::errors::SamplyBrokerError;
 
@@ -26,28 +26,36 @@ pub struct Config {
 pub type ApiKey = String;
 
 /// Settings for Samply.Broker.Proxy
-#[derive(FromArgs,Debug)]
+#[derive(Parser,Debug)]
+#[clap(author, version, about, long_about = None)]
 pub struct CliArgs {
     /// local bind address (default: 0.0.0.0:8081)
-    #[argh(option, default = "SocketAddr::from_arg_value(\"0.0.0.0:8081\").unwrap()")]
+    // #[argh(option, default = "SocketAddr::from_arg_value(\"0.0.0.0:8081\").unwrap()")]
+    #[clap(long, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8081").unwrap())]
     pub bind_addr: SocketAddr,
+    
     /// the broker's base URL, e.g. https://broker.samply.de
-    #[argh(option)]
+    #[clap(long, value_parser)]
     pub broker_url: Uri,
+
     /// this proxy's client id
-    #[argh(option)]
+    #[clap(long, value_parser)]
     pub client_id: String,
+
     /// samply.pki: URL to HTTPS endpoint
-    #[argh(option)]
+    #[clap(long, value_parser)]
     pub pki_address: Uri,
+
     /// samply.pki: Authentication realm (default: samplypki)
-    #[argh(option, default = "String::from(\"samplypki\")")]
+    #[clap(long, value_parser, default_value = "samplypki")]
     pub pki_realm: String,
+
     /// samply.pki: File containing the authentication token (default: /run/secrets/broker.secrets)
-    #[argh(option, default = "Path::new(\"/run/secrets/pki.secret\").to_owned()")]
+    #[clap(long, value_parser, default_value = "/run/secrets/pki.secret")]
     pub pki_apikey_file: PathBuf,
+
     /// samply.pki: Path to own secret key (default: /run/secrets/privkey.pem)
-    #[argh(option, default = "Path::new(\"/run/secrets/privkey.pem\").to_owned()")]
+    #[clap(long, value_parser, default_value = "/run/secrets/privkey.pem")]
     pub privkey_file: PathBuf,
 }
 
@@ -78,7 +86,8 @@ pub(crate) fn get_config() -> Result<Config,SamplyBrokerError> {
         eprintln!("Missing parameters, please run with --help.");
         exit(1);
     }
-    let cli_args = argh::from_env::<CliArgs>();
+    let cli_args = CliArgs::parse();
+    // let cli_args = argh::from_env::<CliArgs>();
     let privkey_pem = read_to_string(cli_args.privkey_file)?;
     let pki_token = read_to_string(cli_args.pki_apikey_file)?;
     let client_id = ClientId::try_from(cli_args.client_id)
