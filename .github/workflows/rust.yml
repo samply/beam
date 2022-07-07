@@ -29,3 +29,8 @@ jobs:
       with:
         name: central
         path: target/release/central
+    - name: Upload Artifact (proxy)
+      uses: actions/upload-artifact@v3
+      with:
+        name: proxy
+        path: target/release/proxy
