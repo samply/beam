@@ -29,8 +29,7 @@ pub type ApiKey = String;
 #[derive(Parser,Debug)]
 #[clap(author, version, about, long_about = None)]
 pub struct CliArgs {
-    /// local bind address (default: 0.0.0.0:8081)
-    // #[argh(option, default = "SocketAddr::from_arg_value(\"0.0.0.0:8081\").unwrap()")]
+    /// local bind address
     #[clap(long, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8081").unwrap())]
     pub bind_addr: SocketAddr,
     
@@ -38,7 +37,7 @@ pub struct CliArgs {
     #[clap(long, value_parser)]
     pub broker_url: Uri,
 
-    /// this proxy's client id
+    /// this proxy's client id, e.g. site23.broker.samply.de
     #[clap(long, value_parser)]
     pub client_id: String,
 
@@ -46,15 +45,15 @@ pub struct CliArgs {
     #[clap(long, value_parser)]
     pub pki_address: Uri,
 
-    /// samply.pki: Authentication realm (default: samplypki)
+    /// samply.pki: Authentication realm
     #[clap(long, value_parser, default_value = "samplypki")]
     pub pki_realm: String,
 
-    /// samply.pki: File containing the authentication token (default: /run/secrets/broker.secrets)
+    /// samply.pki: File containing the authentication token
     #[clap(long, value_parser, default_value = "/run/secrets/pki.secret")]
     pub pki_apikey_file: PathBuf,
 
-    /// samply.pki: Path to own secret key (default: /run/secrets/privkey.pem)
+    /// samply.pki: Path to own secret key
     #[clap(long, value_parser, default_value = "/run/secrets/privkey.pem")]
     pub privkey_file: PathBuf,
 }
@@ -82,12 +81,7 @@ fn parse_apikeys(client_id: &ClientId) -> Result<HashMap<ClientId,ApiKey>,Samply
 }
 
 pub(crate) fn get_config() -> Result<Config,SamplyBrokerError> {
-    if std::env::args().len() <= 1 {
-        eprintln!("Missing parameters, please run with --help.");
-        exit(1);
-    }
     let cli_args = CliArgs::parse();
-    // let cli_args = argh::from_env::<CliArgs>();
     let privkey_pem = read_to_string(cli_args.privkey_file)?;
     let pki_token = read_to_string(cli_args.pki_apikey_file)?;
     let client_id = ClientId::try_from(cli_args.client_id)
