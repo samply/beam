@@ -1,10 +1,12 @@
+#![allow(unused_imports)]
+
 #[cfg(test)]
 mod tests {
     use std::{process::{Command, Child}, thread, sync::mpsc::{self, Sender}, time::Duration, io::ErrorKind, collections::HashSet};
 
     use assert_cmd::prelude::*;
     use reqwest::{StatusCode, header};
-    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, MsgSigned, Msg};
+    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, Msg};
 
     const PEMFILE: &str = "../pki/test.priv.pem";
     const MYID: &str = "test.broker.samply.de";
@@ -55,12 +57,12 @@ mod tests {
 
         fn stop_and_clean(&self) {
             for tx in self.txes.iter() {
-                tx.send(());
+                tx.send(()).unwrap_or(());
             }
             for path in [glob::glob("../pki/*.pem").unwrap(), glob::glob("../pki/*.json").unwrap()].into_iter().flatten() {
                 if let Ok(path) = path {
                     println!("Cleaning up: {}", path.display());
-                    std::fs::remove_file(path);
+                    std::fs::remove_file(path).unwrap_or(());
                 }
             }
         }
@@ -74,19 +76,19 @@ mod tests {
 
     #[test]
     fn all_servers_start_successfully() {
-        let servers = Servers::start().unwrap();
+        let _servers = Servers::start().unwrap();
     }
 
     #[test]
     #[should_panic]
     fn fails_without_apikey() {
-        let servers = Servers::start().unwrap();
+        let _servers = Servers::start().unwrap();
         integration_test(None).unwrap();
     }
 
     #[test]
     fn works_with_apikey() {
-        let servers = Servers::start().unwrap();
+        let _servers = Servers::start().unwrap();
         integration_test(Some("ClientApiKey EssenKey")).unwrap();
     }
 
@@ -131,7 +133,7 @@ mod tests {
             assert!(resp.is_ok());
             let resp = resp.unwrap();
             assert!(resp.status() == StatusCode::OK);
-            let tasks = resp.json::<Vec<MsgSigned<MsgTaskRequest>>>().unwrap();
+            let tasks = resp.json::<Vec<MsgTaskRequest>>().unwrap();
             assert!(tasks.len() == 1);
 
             // POST /tasks/.../results
@@ -159,7 +161,7 @@ mod tests {
                 client.get(format!("http://localhost:8081/tasks/{}/results?poll_count=2&poll_timeout=2", servergenerated_task_id))
                 .send();
             assert!(resp.is_ok());
-            let fetched_results: Vec<MsgSigned<MsgTaskResult>> = resp.unwrap().json().unwrap();
+            let fetched_results: Vec<MsgTaskResult> = resp.unwrap().json().unwrap();
             assert_eq!(fetched_results.len(), unique_results);
         }
         Ok(())

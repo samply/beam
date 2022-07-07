@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 mod auth;
 mod reverse;
 mod config;
