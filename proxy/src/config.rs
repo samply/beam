@@ -24,18 +24,6 @@ pub struct Config {
 
 pub type ApiKey = String;
 
-#[derive(Deserialize)]
-struct SecretConfig {
-    pki_token: String,
-    apikeys: Vec<ApiKeyPair>
-}
-
-#[derive(Deserialize)]
-struct ApiKeyPair {
-    client: ClientId,
-    key: ApiKey
-}
-
 /// Settings for Samply.Broker.Proxy
 #[derive(FromArgs,Debug)]
 pub struct CliArgs {
@@ -54,25 +42,33 @@ pub struct CliArgs {
     /// samply.pki: Authentication realm (default: samplypki)
     #[argh(option, default = "String::from(\"samplypki\")")]
     pub pki_realm: String,
-    /// samply.pki: Path to file containing PKI secrets (default: /run/secrets/broker.secrets)
-    #[argh(option, default = "String::from(\"/run/secrets/broker.secrets\")")]
-    pub pki_secret_file: String,
+    /// samply.pki: File containing the authentication token (default: /run/secrets/broker.secrets)
+    #[argh(option, default = "String::from(\"/run/secrets/pki.secret\")")]
+    pub pki_apikey_file: String,
     /// samply.pki: Path to own secret key (default: /run/secrets/privkey.pem)
     #[argh(option, default = "String::from(\"/run/secrets/privkey.pem\")")]
     pub privkey_file: String,
 }
 
-fn parse_secret_file(filename: &str) -> Result<(String, HashMap<ApiKey,ClientId>),SamplyBrokerError>{
-    let mut map = HashMap::new();
-    let contents = read_to_string(filename)?;
-    let secret_config = serde_json::from_str::<SecretConfig>(&contents)
-        .map_err(|e| SamplyBrokerError::ReadSecretConfig(e.to_string()))?;
-    
-    for apikey in secret_config.apikeys {
-        map.insert(apikey.key, apikey.client);
-    }
+fn parse_apikeys(filename: &str) -> Result<HashMap<ClientId,ApiKey>,SamplyBrokerError>{
+    const prefix: &str = "CLIENTKEY_";
 
-    Ok((secret_config.pki_token, map))
+    std::env::vars()
+        .filter_map(|(k,v)| {
+            match k.strip_prefix(prefix) {
+                Some(stripped) => Some((stripped, v)),
+                None => None,
+            }
+        })
+        .map(|(stripped,v)| {
+            let client_id = ClientId::new(stripped)
+                .map_err(|_| SamplyBrokerError::ReadConfig(format!("Wrong api key definition: Client ID {} is invalid.", stripped)))?;
+            if v.is_empty() {
+                return Err(SamplyBrokerError::ReadConfig(format!("Unable to assign empty API key for client {}", stripped)));
+            }
+            Ok((client_id, v))
+        })
+        .collect()
 }
 
 pub(crate) fn get_config() -> Result<(Config,HashMap<ApiKey,ClientId>),SamplyBrokerError> {
@@ -81,7 +77,7 @@ pub(crate) fn get_config() -> Result<(Config,HashMap<ApiKey,ClientId>),SamplyBro
         exit(1);
     }
     let cli_args = argh::from_env::<CliArgs>();
-    let (pki_token, api_keys) = parse_secret_file(&cli_args.pki_secret_file)?;
+    let (pki_token, api_keys) = parse_apikeys(&cli_args.pki_apikey_file)?;
     let privkey_pem = read_to_string(cli_args.privkey_file)?;
     let client_id = ClientId::try_from(cli_args.client_id)
         .expect("Invalid Client ID supplied.");

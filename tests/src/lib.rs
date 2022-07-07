@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn works_with_apikey() {
         let servers = Servers::start().unwrap();
-        integration_test(Some("ClientApiKey EssenKey")).unwrap();
+        integration_test(Some("ClientApiKey LocalComponent1Secret")).unwrap();
     }
 
     fn integration_test(apikey: Option<&'static str>) -> anyhow::Result<()> { // TODO: Split into several tests (how?)

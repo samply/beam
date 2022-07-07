@@ -18,8 +18,8 @@ pub enum SamplyBrokerError {
     SignEncryptError(&'static str),
     #[error("Communication with Samply.PKI failed")]
     VaultError(String),
-    #[error("Unable to read secret config: {0}. Please check parameters --pki-secrets-file and --privkey_file.")]
-    ReadSecretConfig(String),
+    #[error("Unable to read config: {0}. Please check your environment and parameters.")]
+    ReadConfig(String),
     #[error("Internal synchronization error: {0}")]
     InternalSynchronizationError(String),
 }
@@ -52,7 +52,7 @@ impl From<ErrorStack> for SamplyBrokerError {
 
 impl From<std::io::Error> for SamplyBrokerError {
     fn from(e: std::io::Error) -> Self {
-        Self::ReadSecretConfig(e.to_string())
+        Self::ReadConfig(e.to_string())
     }
 }
 
