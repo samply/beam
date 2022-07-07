@@ -45,7 +45,7 @@ mod tests {
                 if let Some(wait) = wait_pkcs1_key {
                     let started = Instant::now();
                     while let Err(e) = rsa::RsaPrivateKey::read_pkcs1_pem_file(Path::new(wait)) {
-                        if started.elapsed() > Duration::from_secs(5) {
+                        if started.elapsed() > Duration::from_secs(30) {
                             panic!("Giving up after waiting {}s for a private key at {}.", started.elapsed().as_secs(), wait);
                         }
                         match e {
