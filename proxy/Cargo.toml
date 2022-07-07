@@ -6,8 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+shared = { path = "../shared", features = ["config-for-proxy"] }
+
 tokio = { version = "1", features = ["full"] }
-shared = { path = "../shared" }
 async-recursion = "1.0.0"
 
 # Web Server & clean shutdown
@@ -26,9 +27,6 @@ anyhow = "1.0.58"
 # Logging is imported through shared
 tracing = "0.1.35"
 #tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
-
-# Command Line Interface
-clap = { version = "3.2.8", features = ["env", "derive"] }
 
 # Config file parsing
 serde = "1"

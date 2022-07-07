@@ -12,6 +12,8 @@ use tokio::sync::RwLock;
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
     shared::logger::init_logger()?;
+    let a = config::CONFIG_CENTRAL.bind_addr; // Initialize config
+    
     #[cfg(debug_assertions)]
     if devhelper::print_example_objects() == true { return Ok(()); }
 

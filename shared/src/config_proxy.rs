@@ -1,21 +1,21 @@
 use clap::Parser;
-use lazy_static::lazy_static;
 
 use std::{net::SocketAddr, process::exit, collections::HashMap, fs::read_to_string, str::FromStr, path::{Path, PathBuf}};
 
 use axum::http::HeaderValue;
 use hyper::Uri;
 use serde::Deserialize;
-use shared::ClientId;
+use crate::ClientId;
 use tracing::{info, debug};
 
-use shared::errors::SamplyBrokerError;
+use crate::errors::SamplyBrokerError;
 
 #[derive(Clone,Debug)]
 pub struct Config {
     pub broker_uri: Uri,
     pub broker_host_header: HeaderValue,
     pub bind_addr: SocketAddr,
+    pub pki_address: Uri,
     pub pki_token: ApiKey,
     pub pki_realm: String,
     pub privkey_pem: String,
@@ -46,7 +46,7 @@ pub struct CliArgs {
     pub pki_address: Uri,
 
     /// samply.pki: Authentication realm
-    #[clap(long, env, value_parser, default_value = "samplypki")]
+    #[clap(long, env, value_parser, default_value = "samply_pki")]
     pub pki_realm: String,
 
     /// samply.pki: File containing the authentication token
@@ -82,18 +82,18 @@ fn parse_apikeys(client_id: &ClientId) -> Result<HashMap<ClientId,ApiKey>,Samply
 
 pub(crate) fn get_config() -> Result<Config,SamplyBrokerError> {
     let cli_args = CliArgs::parse();
-    let privkey_pem = read_to_string(cli_args.privkey_file)?;
-    let pki_token = read_to_string(cli_args.pki_apikey_file)?;
+    let privkey_pem = read_to_string(cli_args.privkey_file)?.trim().to_string();
+    let pki_token = read_to_string(cli_args.pki_apikey_file)?.trim().to_string();
     let client_id = ClientId::try_from(cli_args.client_id)
         .expect("Invalid Client ID supplied.");
     let api_keys = parse_apikeys(&client_id)?;
     if api_keys.is_empty() {
         return Err(SamplyBrokerError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {}<clientname>=<key>", CLIENT_KEY_PREFIX)));
     }
-    debug!(?api_keys);
     let config = Config {
         broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
         broker_uri: cli_args.broker_url,
+        pki_address: cli_args.pki_address,
         pki_token,
         bind_addr: cli_args.bind_addr,
         pki_realm: cli_args.pki_realm,
@@ -116,12 +116,4 @@ fn uri_to_host_header(uri: &Uri) -> Result<HeaderValue,SamplyBrokerError> {
     let host_header: HeaderValue = HeaderValue::from_str(&host_header)
         .map_err(|_| SamplyBrokerError::WrongBrokerUri("Unable to parse broker URL"))?;
     Ok(host_header)
-}
-
-lazy_static!{
-    pub static ref CONFIG: Config = {
-        let config = get_config()
-            .expect("Unable to read config");
-        config
-    };
 }
