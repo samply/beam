@@ -29,8 +29,13 @@ jobs:
       with:
         name: central
         path: target/release/central
-    - name: Cargo (bloat)
+    - name: Cargo-bloat (central)
       uses: orf/cargo-bloat-action@v1
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
-        bloat_args: --profile bloat
+        bloat_args: --bin central --profile bloat
+    - name: Cargo-bloat (proxy)
+      uses: orf/cargo-bloat-action@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        bloat_args: --bin proxy --profile bloat
