@@ -1,6 +1,11 @@
+#![allow(unused_imports)]
+
 extern crate lazy_static;
 
+use crypto_jwt::extract_jwt;
+use errors::SamplyBrokerError;
 use lazy_static::lazy_static;
+use tracing::debug;
 
 use std::{time::Duration, ops::Deref, fmt::Display};
 
@@ -178,13 +183,35 @@ pub struct MsgSigned<M: Msg> {
     pub sig: String
 }
 
+impl<M: Msg> MsgSigned<M> {
+    pub async fn verify(&self) -> Result<(), SamplyBrokerError> {
+        // Signature valid?
+        let (public, _, content) 
+            = extract_jwt(&self.sig).await?;
+
+        // Message content matches token?
+        let val = serde_json::to_value(&self.msg)
+        .expect("Internal error: Unable to interpret already parsed message to JSON Value.");
+        if content.custom != val {
+            return Err(SamplyBrokerError::ValidationFailed);
+        }
+
+        // From field matches CN in certificate?
+        if public.client != *self.get_from() {
+            return Err(SamplyBrokerError::ValidationFailed);
+        }
+        debug!("Message has been verified succesfully.");
+        Ok(())
+    }
+}
+
 lazy_static!{
     pub static ref EMPTY_VEC_CLIENTID: Vec<ClientId> = {
         Vec::new()
     };
 }
 
-#[derive(Serialize,Deserialize)]
+#[derive(Serialize,Deserialize,Debug)]
 pub struct MsgEmpty {
     pub id: MsgId,
     pub from: ClientId,
@@ -204,7 +231,7 @@ impl Msg for MsgEmpty {
     }
 }
 
-pub trait Msg {
+pub trait Msg: Serialize {
     fn get_id(&self) -> &MsgId;
     fn get_from(&self) -> &ClientId;
     fn get_to(&self) -> &Vec<ClientId>;
@@ -361,7 +388,6 @@ pub fn generate_example_tasks(client1_id: Option<ClientId>) -> HashMap<MsgId, Ms
     let mut tasks: HashMap<MsgId, MsgTaskRequest> = HashMap::new();
     let client1 = client1_id.unwrap_or(ClientId::random());
     let client2 = ClientId::random();
-    let client3 = ClientId::random();
 
     let task_for_clients_1_2 = MsgTaskRequest::new(
         client1.clone(),

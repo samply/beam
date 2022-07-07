@@ -22,6 +22,8 @@ pub enum SamplyBrokerError {
     ReadConfig(String),
     #[error("Internal synchronization error: {0}")]
     InternalSynchronizationError(String),
+    #[error("Error in configuration: {0}")]
+    ConfigurationFailed(String)
 }
 
 impl From<AddrParseError> for SamplyBrokerError {
@@ -57,7 +59,7 @@ impl From<std::io::Error> for SamplyBrokerError {
 }
 
 impl From<rsa::errors::Error> for SamplyBrokerError {
-    fn from(e: rsa::errors::Error) -> Self {
+    fn from(_: rsa::errors::Error) -> Self {
         Self::SignEncryptError("Verification of signature failed")
     }
 }

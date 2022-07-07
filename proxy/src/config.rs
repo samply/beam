@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 
-use std::{net::SocketAddr, process::exit, collections::HashMap, fs::read_to_string};
+use std::{net::SocketAddr, process::exit, collections::HashMap, fs::read_to_string, path::{Path, PathBuf}};
 
 use argh::{FromArgs, FromArgValue};
 use axum::http::HeaderValue;
@@ -19,7 +19,8 @@ pub struct Config {
     pub pki_token: ApiKey,
     pub pki_realm: String,
     pub privkey_pem: String,
-    pub client_id: ClientId
+    pub client_id: ClientId,
+    pub api_keys: HashMap<ClientId,ApiKey>
 }
 
 pub type ApiKey = String;
@@ -43,44 +44,50 @@ pub struct CliArgs {
     #[argh(option, default = "String::from(\"samplypki\")")]
     pub pki_realm: String,
     /// samply.pki: File containing the authentication token (default: /run/secrets/broker.secrets)
-    #[argh(option, default = "String::from(\"/run/secrets/pki.secret\")")]
-    pub pki_apikey_file: String,
+    #[argh(option, default = "Path::new(\"/run/secrets/pki.secret\").to_owned()")]
+    pub pki_apikey_file: PathBuf,
     /// samply.pki: Path to own secret key (default: /run/secrets/privkey.pem)
-    #[argh(option, default = "String::from(\"/run/secrets/privkey.pem\")")]
-    pub privkey_file: String,
+    #[argh(option, default = "Path::new(\"/run/secrets/privkey.pem\").to_owned()")]
+    pub privkey_file: PathBuf,
 }
 
-fn parse_apikeys(filename: &str) -> Result<HashMap<ClientId,ApiKey>,SamplyBrokerError>{
-    const prefix: &str = "CLIENTKEY_";
+pub const CLIENT_KEY_PREFIX: &str = "CLIENTKEY_";
 
+fn parse_apikeys(client_id: &ClientId) -> Result<HashMap<ClientId,ApiKey>,SamplyBrokerError>{
     std::env::vars()
         .filter_map(|(k,v)| {
-            match k.strip_prefix(prefix) {
-                Some(stripped) => Some((stripped, v)),
+            match k.strip_prefix(CLIENT_KEY_PREFIX) {
+                Some(stripped) => Some((stripped.to_owned(), v)),
                 None => None,
             }
         })
         .map(|(stripped,v)| {
-            let client_id = ClientId::new(stripped)
-                .map_err(|_| SamplyBrokerError::ReadConfig(format!("Wrong api key definition: Client ID {} is invalid.", stripped)))?;
+            let client_id = format!("{}.{}", stripped, client_id);
+            let client_id = ClientId::new(&client_id)
+                .map_err(|_| SamplyBrokerError::ReadConfig(format!("Wrong api key definition: Client ID {} is invalid.", client_id)))?;
             if v.is_empty() {
-                return Err(SamplyBrokerError::ReadConfig(format!("Unable to assign empty API key for client {}", stripped)));
+                return Err(SamplyBrokerError::ReadConfig(format!("Unable to assign empty API key for client {}", client_id)));
             }
             Ok((client_id, v))
         })
         .collect()
 }
 
-pub(crate) fn get_config() -> Result<(Config,HashMap<ApiKey,ClientId>),SamplyBrokerError> {
+pub(crate) fn get_config() -> Result<Config,SamplyBrokerError> {
     if std::env::args().len() <= 1 {
         eprintln!("Missing parameters, please run with --help.");
         exit(1);
     }
     let cli_args = argh::from_env::<CliArgs>();
-    let (pki_token, api_keys) = parse_apikeys(&cli_args.pki_apikey_file)?;
     let privkey_pem = read_to_string(cli_args.privkey_file)?;
+    let pki_token = read_to_string(cli_args.pki_apikey_file)?;
     let client_id = ClientId::try_from(cli_args.client_id)
         .expect("Invalid Client ID supplied.");
+    let api_keys = parse_apikeys(&client_id)?;
+    if api_keys.is_empty() {
+        return Err(SamplyBrokerError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {}<clientname>=<key>", CLIENT_KEY_PREFIX)));
+    }
+    debug!(?api_keys);
     let config = Config {
         broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
         broker_uri: cli_args.broker_url,
@@ -89,9 +96,10 @@ pub(crate) fn get_config() -> Result<(Config,HashMap<ApiKey,ClientId>),SamplyBro
         pki_realm: cli_args.pki_realm,
         privkey_pem,
         client_id,
+        api_keys
     };
     info!("Successfully read config and API keys from CLI and secrets file.");
-    Ok((config, api_keys))
+    Ok(config)
 }
 
 fn uri_to_host_header(uri: &Uri) -> Result<HeaderValue,SamplyBrokerError> {
@@ -109,7 +117,7 @@ fn uri_to_host_header(uri: &Uri) -> Result<HeaderValue,SamplyBrokerError> {
 
 lazy_static!{
     pub static ref CONFIG: Config = {
-        let (config, _) = get_config()
+        let config = get_config()
             .expect("Unable to read config");
         config
     };

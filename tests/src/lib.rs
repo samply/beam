@@ -1,13 +1,16 @@
+#![allow(unused_imports)]
+
 #[cfg(test)]
 mod tests {
-    use std::{process::{Command, Child}, thread, sync::mpsc::{self, Sender}, time::Duration, io::ErrorKind, collections::HashSet};
+    use std::{process::{Command, Child}, thread, sync::mpsc::{self, Sender}, time::Duration, io::ErrorKind, collections::{HashSet, HashMap}, iter::Map};
 
     use assert_cmd::prelude::*;
-    use reqwest::{StatusCode, header};
-    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, MsgSigned, Msg};
+    use reqwest::{StatusCode, header::{self, HeaderValue}};
+    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, Msg};
 
     const PEMFILE: &str = "../pki/test.priv.pem";
-    const MYID: &str = "test.broker.samply.de";
+    const MY_PROXY_ID: &str = "test.broker.samply.de";
+    const MY_CLIENT_ID_SHORT: &str = "itsme";
 
     struct Servers {
         txes: Vec<Sender<()>>
@@ -16,15 +19,27 @@ mod tests {
     impl Servers {
         fn start() -> anyhow::Result<Self> {
             let mut txes = Vec::new();
-            for (cmd, args, wait) in [
-                    ("bash", vec!("-c", "../pki/pki devsetup"), None),
-                    ("central", vec![], None),
-                    ("proxy", vec!("--broker-url", "http://localhost:8080", "--client-id", MYID, "--pki-address", "http://localhost:8200", "--pki-secret-file", "broker.secrets.example", "--privkey-file", PEMFILE), Some(PEMFILE))
-                    ] {
+            for (cmd, args, env, wait) in 
+                [
+                    ("bash",
+                        vec!("-c", "../pki/pki devsetup"),
+                        HashMap::new(),
+                        None),
+                    ("central",
+                        vec!(),
+                        HashMap::new(),
+                        None),
+                    ("proxy", 
+                        vec!("--broker-url", "http://localhost:8080", "--client-id", MY_PROXY_ID, "--pki-address", "http://localhost:8200", "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", PEMFILE),
+                        HashMap::from([("CLIENTKEY_".to_string() + MY_CLIENT_ID_SHORT, "MySecret")]),
+                        Some(PEMFILE))
+                ] {
                 let (tx, rx) = mpsc::channel::<()>();
                 txes.push(tx);
                 let mut proc = Command::cargo_bin(cmd)
                     .unwrap_or(Command::new(cmd));
+                let proc = proc.envs(env);
+
                 if let Some(wait) = wait {
                     while let Err(e) = std::fs::File::open(wait) {
                         if e.kind() == ErrorKind::NotFound {
@@ -55,12 +70,12 @@ mod tests {
 
         fn stop_and_clean(&self) {
             for tx in self.txes.iter() {
-                tx.send(());
+                tx.send(()).unwrap_or(());
             }
             for path in [glob::glob("../pki/*.pem").unwrap(), glob::glob("../pki/*.json").unwrap()].into_iter().flatten() {
                 if let Ok(path) = path {
                     println!("Cleaning up: {}", path.display());
-                    std::fs::remove_file(path);
+                    std::fs::remove_file(path).unwrap_or(());
                 }
             }
         }
@@ -74,36 +89,39 @@ mod tests {
 
     #[test]
     fn all_servers_start_successfully() {
-        let servers = Servers::start().unwrap();
+        let _servers = Servers::start().unwrap();
     }
 
     #[test]
     #[should_panic]
     fn fails_without_apikey() {
-        let servers = Servers::start().unwrap();
+        let _servers = Servers::start().unwrap();
         integration_test(None).unwrap();
     }
 
     #[test]
     fn works_with_apikey() {
-        let servers = Servers::start().unwrap();
-        integration_test(Some("ClientApiKey LocalComponent1Secret")).unwrap();
+        let _servers = Servers::start().unwrap();
+        let auth = format!("ClientApiKey {}.{} MySecret", MY_CLIENT_ID_SHORT, MY_PROXY_ID);
+        integration_test(Some(&auth)).unwrap();
     }
 
-    fn integration_test(apikey: Option<&'static str>) -> anyhow::Result<()> { // TODO: Split into several tests (how?)
+    fn integration_test(auth: Option<&str>) -> anyhow::Result<()> { // TODO: Split into several tests (how?)
         let mut headers = header::HeaderMap::new();
-        if let Some(apikey) = apikey {
-            headers.insert(header::PROXY_AUTHORIZATION, header::HeaderValue::from_static(apikey));
+        if let Some(auth) = auth {
+            let mut value = header::HeaderValue::from_str(auth).unwrap();
+            value.set_sensitive(true);
+            headers.insert(header::AUTHORIZATION, value);
         }
         let client = reqwest::blocking::Client::builder()
             .default_headers(headers)
             .build()?;
 
-        let mut examples = generate_example_tasks(Some(ClientId::new(MYID).unwrap()));
+        let mut examples = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
 
         thread::sleep(Duration::from_secs(1));
 
-        let myid = ClientId::new(MYID).unwrap();
+        let myid = ClientId::new(MY_PROXY_ID).unwrap();
 
         for task in examples.values_mut() {
             task.from = myid.clone();
@@ -131,7 +149,7 @@ mod tests {
             assert!(resp.is_ok());
             let resp = resp.unwrap();
             assert!(resp.status() == StatusCode::OK);
-            let tasks = resp.json::<Vec<MsgSigned<MsgTaskRequest>>>().unwrap();
+            let tasks = resp.json::<Vec<MsgTaskRequest>>().unwrap();
             assert!(tasks.len() == 1);
 
             // POST /tasks/.../results
@@ -159,7 +177,7 @@ mod tests {
                 client.get(format!("http://localhost:8081/tasks/{}/results?poll_count=2&poll_timeout=2", servergenerated_task_id))
                 .send();
             assert!(resp.is_ok());
-            let fetched_results: Vec<MsgSigned<MsgTaskResult>> = resp.unwrap().json().unwrap();
+            let fetched_results: Vec<MsgTaskResult> = resp.unwrap().json().unwrap();
             assert_eq!(fetched_results.len(), unique_results);
         }
         Ok(())

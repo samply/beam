@@ -8,7 +8,7 @@ use tracing::{debug, error, warn};
 use crate::{ClientId, errors::SamplyBrokerError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody};
 
 const ERR_SIG: (StatusCode, &'static str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
-const ERR_CERT: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
+// const ERR_CERT: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
 const ERR_BODY: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Body is invalid.");
 const ERR_FROM: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "\"from\" field in message does not match your certificate.");
 
@@ -28,7 +28,7 @@ where
         let body = req.take_body().unwrap();
         let bytes = hyper::body::to_bytes(body).await.map_err(|_| ERR_BODY)?;
         let token_without_extended_signature = std::str::from_utf8(&bytes).map_err(|_| ERR_SIG)?;
-        second_stage(req, Some(token_without_extended_signature)).await
+        verify_with_extended_header(req, Some(token_without_extended_signature)).await
     }
 }
 
@@ -45,37 +45,36 @@ where
     type Rejection = (StatusCode, &'static str);
 
     async fn from_request(req: &mut RequestParts<B>) -> Result<Self,Self::Rejection> {
-        second_stage(req, None).await
+        verify_with_extended_header(req, None).await
     }
 }
 
-async fn second_stage<B,T: Msg + DeserializeOwned>(req: &RequestParts<B>, token_without_extended_signature: Option<&str>) -> Result<MsgSigned<T>,(StatusCode, &'static str)> {
+pub async fn extract_jwt(token: &str) -> Result<(crypto::ClientPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBrokerError> {
+    let metadata = Token::decode_metadata(&token)
+        .map_err(|_| SamplyBrokerError::ValidationFailed)?;
+    let client_id = ClientId::try_from(metadata.key_id().unwrap_or_default())
+        .map_err(|_| SamplyBrokerError::ValidationFailed)?;
+    let public = crypto::get_cert_and_client_by_cname_as_pemstr(&client_id).await;
+    if public.is_none() {
+        return Err(SamplyBrokerError::VaultError("Unable to retrieve matching certificate".into()));
+    }
+    let public = public.unwrap();
+    let pubkey = RS256PublicKey::from_pem(&public.pubkey)
+        .map_err(|_| {
+            SamplyBrokerError::SignEncryptError("Unable to initialize public key")
+        })?;
+    let content = pubkey.verify_token::<Value>(&token, None)
+        .map_err(|_| SamplyBrokerError::ValidationFailed )?;
+    Ok((public, pubkey, content))
+}
+
+async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestParts<B>, token_without_extended_signature: Option<&str>) -> Result<MsgSigned<M>,(StatusCode, &'static str)> {
     let token_with_extended_signature = std::str::from_utf8(req.headers().get(header::AUTHORIZATION).ok_or(ERR_SIG)?.as_bytes()).map_err(|_| ERR_SIG)?;
     let token_with_extended_signature = token_with_extended_signature.trim_start_matches("SamplyJWT ");
     
-    let metadata = Token::decode_metadata(&token_with_extended_signature)
+    let (public, pubkey, mut content_with) 
+        = extract_jwt(token_with_extended_signature).await
         .map_err(|_| ERR_SIG)?;
-    
-    let other_client_id = ClientId::try_from(metadata.key_id().unwrap_or_default())
-        .map_err(|_| ERR_SIG)?;
-    
-    let public = crypto::get_cert_and_client_by_cname_as_pemstr(&other_client_id).await; // an empty key won't get found, resulting in the intended error.
-    if public.is_none() {
-        return Err(ERR_CERT);
-    }
-    let public = public.unwrap();
-
-    let pubkey = RS256PublicKey::from_pem(&public.pubkey)
-        .map_err(|e| {
-            error!("Unable to initialize public key: {}", e);
-            ERR_CERT
-        })?;
-
-    let mut content_with = pubkey.verify_token::<Value>(&token_with_extended_signature, None)
-        .map_err(|e| {
-            warn!("Unable to verify long token {}: {}", token_with_extended_signature, e);
-            ERR_SIG
-        })?;
     
     // Check extra digest
 
@@ -117,7 +116,7 @@ async fn second_stage<B,T: Msg + DeserializeOwned>(req: &RequestParts<B>, token_
             warn!("Long token was verified correctly, but short token's content did not match.");
             return Err(ERR_SIG);
         }
-        let custom_without = serde_json::from_value::<T>(Value::Object(custom_without.clone()))
+        let custom_without = serde_json::from_value::<M>(Value::Object(custom_without.clone()))
             .map_err(|_| ERR_BODY)?;
         (custom_without, token_without_extended_signature)
     } else {
@@ -127,7 +126,7 @@ async fn second_stage<B,T: Msg + DeserializeOwned>(req: &RequestParts<B>, token_
         };
         let serialized = serde_json::to_string(&msg_empty).unwrap();
         (
-             serde_json::from_str::<T>(&serialized).unwrap(),
+             serde_json::from_str::<M>(&serialized).unwrap(),
              ""
         )
     };
