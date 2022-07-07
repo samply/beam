@@ -33,3 +33,5 @@ jobs:
       uses: orf/cargo-bloat-action@v1
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
+        bloat_args: --profile bloat
+        tree_args: --profile bloat
