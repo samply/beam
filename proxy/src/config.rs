@@ -66,7 +66,7 @@ fn parse_secret_file(filename: &str) -> Result<(String, HashMap<ApiKey,ClientId>
     let mut map = HashMap::new();
     let contents = read_to_string(filename)?;
     let secret_config = serde_json::from_str::<SecretConfig>(&contents)
-        .map_err(|e| SamplyBrokerError::ReadSecretConfig(e.to_string()))?;
+        .map_err(|e| SamplyBrokerError::ConfigurationFailed(e.to_string()))?;
     
     for apikey in secret_config.apikeys {
         map.insert(apikey.key, apikey.client);

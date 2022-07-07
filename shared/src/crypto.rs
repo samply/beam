@@ -284,7 +284,7 @@ pub(crate) fn sign(data: &[u8], private_key: &RsaPrivateKey) -> Result<Vec<u8>, 
     let digest = hasher.finalize();
     let mut rng = rand::thread_rng();
     let signature = private_key.sign(PaddingScheme::new_pkcs1v15_sign(Some(rsa::hash::Hash::SHA2_256)), &digest)
-        .or_else(|_| Err(SamplyBrokerError::SignEncryptError("Unable to sign message.")));
+        .or_else(|_| Err(SamplyBrokerError::SignEncryptError("Unable to sign message.".into())));
     if signature.is_err() {return signature;}
     let mut sig = signature.expect("Invalid Signature."); //Should never be invalid, checked in line before
     assert!(sig.len() as u16 == SIGNATURE_LENGTH); 
@@ -319,7 +319,7 @@ pub(crate) async fn encrypt(task: &MsgTaskRequest, fields: &Vec<&str>) -> Result
     //     })
     //     .encrypt(&mut rng, PaddingScheme::new_oaep::<sha2::Sha256>(), symmetric_key)
     //     .or_else(|e| Err(SamplyBrokerError::SignEncryptError(&e.to_string())));
-    Err(SamplyBrokerError::SignEncryptError("Not implemented"))
+    Err(SamplyBrokerError::SignEncryptError("Not implemented".into()))
 }
 
 /// Encryption method without operation
@@ -332,12 +332,12 @@ pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &V
 
     // Body -> JSON
     let body_json = serde_json::from_str(r#"{"to": ["recipeint1", "recipient2"],}"#)
-        .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Error serializing request")))?;
+        .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Error serializing request".into())))?;
     let body = req.body_mut();
 
     // Encrypt Message
     let encrypted_payload = nop_encrypt(body_json, encrypt_fields).await
-        .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Can not encrypt message")))?;
+        .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Cannot encrypt message".into())))?;
 
     //Sign Message
     let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &LOCAL_PRIVATE_KEY)?;
@@ -373,16 +373,16 @@ pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &V
 /// Extracts the pem-encoded public key from a x509 certificate
 fn x509_cert_to_x509_public_key(cert: &X509) -> Result<Vec<u8>, SamplyBrokerError> {
     match cert.public_key() {
-        Ok(key) => key.public_key_to_pem().or_else(|_| Err(SamplyBrokerError::SignEncryptError("Invalid public key in x509 certificate."))),
-        Err(_) => Err(SamplyBrokerError::SignEncryptError("Unable to extract public key from certificate."))
+        Ok(key) => key.public_key_to_pem().or_else(|_| Err(SamplyBrokerError::SignEncryptError("Invalid public key in x509 certificate.".into()))),
+        Err(_) => Err(SamplyBrokerError::SignEncryptError("Unable to extract public key from certificate.".into()))
     }
 }
 
 /// Converts the x509 pem-encoded public key to the rsa public key
 fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, SamplyBrokerError> {
     let rsa_key: Result<RsaPublicKey,SamplyBrokerError> = RsaPublicKey::from_public_key_pem(std::str::from_utf8(cert_key)
-        .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Invalid character in certificate public key")))?)
-        .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Can not extract public rsa key from certificate")));
+        .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Invalid character in certificate public key".into())))?)
+        .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Can not extract public rsa key from certificate".into())));
     rsa_key
 }
 
@@ -398,7 +398,7 @@ fn get_local_private_key(local_key_file: &Path) -> Result<RsaPrivateKey, Box<dyn
 
 pub async fn get_local_private_key_as_pem(path: &Path) -> Result<String, SamplyBrokerError> {
     let key = read_to_string(path).await
-        .map_err(|e| SamplyBrokerError::SignEncryptError("Private key could not be read from disc."))?;
+        .map_err(|e| SamplyBrokerError::SignEncryptError("Private key could not be read from disk.".into()))?;
     Ok(key)
 }
 
