@@ -27,7 +27,7 @@ pub type ApiKey = String;
 
 /// Settings for Samply.Broker.Proxy
 #[derive(Parser,Debug)]
-#[clap(author, version, about, long_about = None)]
+#[clap(author, version, about, long_about = None, arg_required_else_help(true))]
 pub struct CliArgs {
     /// local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8081").unwrap())]

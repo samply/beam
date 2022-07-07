@@ -1,10 +1,6 @@
 use lazy_static::lazy_static;
 
-#[path = "config_central.rs"]
-mod config_central;
-
-#[path = "config_proxy.rs"]
-mod config_proxy;
+use crate::{ config_central, config_proxy };
 
 lazy_static!{
     pub static ref CONFIG_CENTRAL: config_central::Config = {

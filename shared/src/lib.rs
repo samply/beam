@@ -24,13 +24,13 @@ pub mod crypto;
 pub mod crypto_jwt;
 pub mod errors;
 
-#[cfg(feature = "config-for-central")]
+pub mod config;
+mod config_shared;
+// #[cfg(feature = "config-for-central")]
 pub mod config_central;
-
-#[cfg(feature = "config-for-proxy")]
+// #[cfg(feature = "config-for-proxy")]
 pub mod config_proxy;
 
-pub mod config;
 
 #[derive(Serialize,Debug,Clone,Eq,Hash,PartialEq)]
 #[serde(transparent)]

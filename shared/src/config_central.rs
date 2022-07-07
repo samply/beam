@@ -8,7 +8,7 @@ use std::str::FromStr;
 
 /// Settings for Samply.Broker.Central
 #[derive(Parser,Debug)]
-#[clap(author, version, about, long_about = None)]
+#[clap(author, version, about, long_about = None, arg_required_else_help(true))]
 pub struct CliArgs {
     /// local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8080").unwrap())]
@@ -25,19 +25,6 @@ pub struct CliArgs {
     /// samply.pki: File containing the authentication token
     #[clap(long, env, value_parser, default_value = "/run/secrets/pki.secret")]
     pub pki_apikey_file: PathBuf,
-
-    // TODO: The following arguments have been added for compatibility reasons with the proxy config. Find another way to merge configs.
-    /// this broker's base URL, e.g. https://broker.samply.de
-    #[clap(long, env, value_parser)]
-    pub broker_url: Option<Uri>,
-
-    /// (for technical reasons)
-    #[clap(long, env, value_parser)]
-    pub client_id: Option<String>,
-
-    /// (for technical reasons)
-    #[clap(long, env, value_parser)]
-    pub privkey_file: Option<String>,
 }
 
 pub struct Config {

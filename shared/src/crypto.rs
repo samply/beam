@@ -1,25 +1,19 @@
 extern crate lazy_static;
 
+use crate::config_shared::{self, VaultConfig};
 use aes_gcm::aead::generic_array::GenericArray;
 use axum::{Json, http::Request, body::Body};
 use lazy_static::lazy_static;
 
-use tokio::{sync::{RwLock, mpsc, oneshot}, fs::read_to_string};
+use tokio::{sync::{RwLock, mpsc, oneshot}};
 use tracing::{debug, warn, info, error};
-use std::{path::Path, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc};
+use std::{path::Path, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string};
 use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PaddingScheme, pkcs8::{FromPublicKey, FromPrivateKey}};
 use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 use vaultrs::{client::{VaultClient, VaultClientSettingsBuilder},pki};
 
 use crate::{errors::SamplyBrokerError, MsgTaskRequest, ClientId, EncryptedMsgTaskRequest, config};
-
-#[derive(Debug)]
-pub(crate) struct VaultConfig{
-    vault_address: String,
-    vault_token: String,
-    pki_realm: String,
-}
 
 type Serial = String;
 const SIGNATURE_LENGTH: u16 = 256;
@@ -34,13 +28,16 @@ pub(crate) struct CertificateCache{
 
 impl CertificateCache {
     pub fn new(config: VaultConfig, update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBrokerError>>>) -> Result<CertificateCache,SamplyBrokerError> {
+        let pki_token = read_to_string(&config.pki_apikey_file)
+            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Unable to read PKI Apikey: {}", e)))?
+            .trim().to_string();
         Ok(Self{
         serial_to_x509: HashMap::new(),
         cn_to_serial: HashMap::new(),
         vault_client: VaultClient::new(
             VaultClientSettingsBuilder::default()
-                .address(&config.vault_address.to_string())
-                .token(&config.vault_token)
+                .address(&config.pki_address.to_string())
+                .token(&pki_token)
                 .build()?)?,
         pki_realm: config.pki_realm.clone(),
         update_trigger
@@ -159,11 +156,7 @@ impl CertificateCache {
 lazy_static!{
     static ref CERT_CACHE: Arc<RwLock<CertificateCache>> = {
         let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBrokerError>>>(1);
-        let config = VaultConfig {
-            vault_address: config::CONFIG_CENTRAL.pki_address.to_string(),
-            vault_token: config::CONFIG_CENTRAL.pki_token.clone(),
-            pki_realm: config::CONFIG_CENTRAL.pki_realm.clone(),
-        };
+        let config: VaultConfig = config_shared::get_config();
         let cc = Arc::new(RwLock::new(CertificateCache::new(config, tx).unwrap()));
         let cc2 = cc.clone();
         tokio::task::spawn(async move {
@@ -178,8 +171,8 @@ lazy_static!{
         cc
     };
     static ref LOCAL_PRIVATE_KEY: RsaPrivateKey = {
-        let path = Path::new("private_key.pem");
-        get_local_private_key(&path).expect("Can not load private key")
+        let config: VaultConfig = config_shared::get_config();
+        get_local_private_key(&config.privkey_file).expect("Can not load private key")
     };
 }
 
@@ -299,7 +292,7 @@ pub(crate) async fn encrypt(task: &MsgTaskRequest, fields: &Vec<&str>) -> Result
     let mut symmetric_key = [0;256];
     let mut nonce = [0;12];
     openssl::rand::rand_bytes(&mut symmetric_key)?;
-    openssl::rand::rand_bytes(&mut nonce);
+    openssl::rand::rand_bytes(&mut nonce)?;
 
     //let receiver_certs: Vec<Option<X509>> = {
         //let mut a = Vec::new();
@@ -397,7 +390,7 @@ fn get_local_private_key(local_key_file: &Path) -> Result<RsaPrivateKey, Box<dyn
 }
 
 pub async fn get_local_private_key_as_pem(path: &Path) -> Result<String, SamplyBrokerError> {
-    let key = read_to_string(path).await
+    let key = read_to_string(path)
         .map_err(|e| SamplyBrokerError::SignEncryptError("Private key could not be read from disk.".into()))?;
     Ok(key)
 }
@@ -415,19 +408,3 @@ fn x509_date_valid(cert: &X509) -> Result<bool, ErrorStack> {
     let now = SystemTime::now();
     return Ok(expirydate > now && now > startdate);
 }
-
-
-
-//#[cfg(test)]
-//mod tests {
-
-   
-
-    //use super::VaultConfig;
-    //macro_rules! aw {
-        //($e:expr) => {
-            //tokio_test::block_on($e)
-        //};
-      //}
-
-//}
