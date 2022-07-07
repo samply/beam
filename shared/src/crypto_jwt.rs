@@ -61,7 +61,7 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::ClientPublicPortion, RS
     let public = public.unwrap();
     let pubkey = RS256PublicKey::from_pem(&public.pubkey)
         .map_err(|_| {
-            SamplyBrokerError::SignEncryptError("Unable to initialize public key")
+            SamplyBrokerError::SignEncryptError("Unable to initialize public key".into())
         })?;
     let content = pubkey.verify_token::<Value>(&token, None)
         .map_err(|_| SamplyBrokerError::ValidationFailed )?;
@@ -147,14 +147,14 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
 
 pub async fn sign_to_jwt(json: &Value, privkey_pem: &str, my_client_id: &ClientId) -> Result<String,SamplyBrokerError> {
     let key = RS256KeyPair::from_pem(privkey_pem)
-        .map_err(|_| SamplyBrokerError::SignEncryptError("Unable to construct private key"))?
+        .map_err(|_| SamplyBrokerError::SignEncryptError("Unable to construct private key".into()))?
         .with_key_id(&my_client_id.to_string()); // TODO: Use cert's serial (not common name) as key id
     
     let claims = 
         Claims::with_custom_claims::<Value>(json.clone(), Duration::from_hours(1));
 
     let token = key.sign(claims)
-        .map_err(|_| SamplyBrokerError::SignEncryptError("Unable to sign JWT"))?;
+        .map_err(|_| SamplyBrokerError::SignEncryptError("Unable to sign JWT".into()))?;
     
     Ok(token)
 }
@@ -173,7 +173,7 @@ pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap)
             let mut bytes = header.as_bytes().to_vec();
             buf.append(&mut bytes);
         } else {
-            return Err(SamplyBrokerError::SignEncryptError("Required header field not present"));
+            return Err(SamplyBrokerError::SignEncryptError("Required header field not present".into()));
         }
     }
 

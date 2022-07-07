@@ -1,10 +1,9 @@
-use std::{net::AddrParseError};
+use std::net::AddrParseError;
 
 use openssl::error::ErrorStack;
-use thiserror::Error;
 use vaultrs::{client::VaultClientSettingsBuilderError, error::ClientError};
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum SamplyBrokerError {
     #[error("Invalid bind address supplied: {0}")]
     BindAddr(AddrParseError),
@@ -14,16 +13,14 @@ pub enum SamplyBrokerError {
     ValidationFailed,
     #[error("Invalid path supplied")]
     InvalidPath,
-    #[error("Signing / encryption failed")]
-    SignEncryptError(&'static str),
-    #[error("Communication with Samply.PKI failed")]
+    #[error("Signing / encryption failed: {0}")]
+    SignEncryptError(String),
+    #[error("Communication with Samply.PKI failed: {0}")]
     VaultError(String),
     #[error("Unable to read config: {0}. Please check your environment and parameters.")]
-    ReadConfig(String),
+    ConfigurationFailed(String),
     #[error("Internal synchronization error: {0}")]
-    InternalSynchronizationError(String),
-    #[error("Error in configuration: {0}")]
-    ConfigurationFailed(String)
+    InternalSynchronizationError(String)
 }
 
 impl From<AddrParseError> for SamplyBrokerError {
@@ -35,8 +32,8 @@ impl From<AddrParseError> for SamplyBrokerError {
 }
 
 impl From<VaultClientSettingsBuilderError> for SamplyBrokerError {
-    fn from(_: VaultClientSettingsBuilderError) -> Self {
-        Self::VaultError("Unable to build vault client settings.".into())
+    fn from(e: VaultClientSettingsBuilderError) -> Self {
+        Self::VaultError(format!("Unable to build vault client settings: {}", e))
     }
 }
 
@@ -47,19 +44,19 @@ impl From<ClientError> for SamplyBrokerError {
 }
 
 impl From<ErrorStack> for SamplyBrokerError {
-    fn from(_: ErrorStack) -> Self {
-        Self::SignEncryptError("SSL engine failed")
+    fn from(e: ErrorStack) -> Self {
+        Self::SignEncryptError(e.to_string())
     }
 }
 
 impl From<std::io::Error> for SamplyBrokerError {
     fn from(e: std::io::Error) -> Self {
-        Self::ReadConfig(e.to_string())
+        Self::ConfigurationFailed(e.to_string())
     }
 }
 
 impl From<rsa::errors::Error> for SamplyBrokerError {
-    fn from(_: rsa::errors::Error) -> Self {
-        Self::SignEncryptError("Verification of signature failed")
+    fn from(e: rsa::errors::Error) -> Self {
+        Self::SignEncryptError(e.to_string())
     }
 }

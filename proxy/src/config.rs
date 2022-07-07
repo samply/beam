@@ -64,9 +64,9 @@ fn parse_apikeys(client_id: &ClientId) -> Result<HashMap<ClientId,ApiKey>,Samply
         .map(|(stripped,v)| {
             let client_id = format!("{}.{}", stripped, client_id);
             let client_id = ClientId::new(&client_id)
-                .map_err(|_| SamplyBrokerError::ReadConfig(format!("Wrong api key definition: Client ID {} is invalid.", client_id)))?;
+                .map_err(|_| SamplyBrokerError::ConfigurationFailed(format!("Wrong api key definition: Client ID {} is invalid.", client_id)))?;
             if v.is_empty() {
-                return Err(SamplyBrokerError::ReadConfig(format!("Unable to assign empty API key for client {}", client_id)));
+                return Err(SamplyBrokerError::ConfigurationFailed(format!("Unable to assign empty API key for client {}", client_id)));
             }
             Ok((client_id, v))
         })
