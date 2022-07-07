@@ -2,11 +2,13 @@
 
 #[cfg(test)]
 mod tests {
-    use std::{process::{Command, Child}, thread, sync::mpsc::{self, Sender}, time::Duration, io::ErrorKind, collections::{HashSet, HashMap}, iter::Map};
+    use std::{process::{Command, Child}, thread, sync::mpsc::{self, Sender}, time::{Duration, Instant}, io::ErrorKind, collections::{HashSet, HashMap}, iter::Map, path::Path};
 
     use assert_cmd::prelude::*;
     use reqwest::{StatusCode, header::{self, HeaderValue}};
     use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, Msg};
+
+    use rsa::{pkcs8::FromPrivateKey, pkcs1::FromRsaPrivateKey};
 
     const PEMFILE: &str = "../pki/test.priv.pem";
     const MY_PROXY_ID: &str = "test.broker.samply.de";
@@ -19,7 +21,7 @@ mod tests {
     impl Servers {
         fn start() -> anyhow::Result<Self> {
             let mut txes = Vec::new();
-            for (cmd, args, env, wait) in 
+            for (cmd, args, env, wait_pkcs1_key) in 
                 [
                     ("bash",
                         vec!("-c", "../pki/pki devsetup"),
@@ -40,12 +42,17 @@ mod tests {
                     .unwrap_or(Command::new(cmd));
                 let proc = proc.envs(env);
 
-                if let Some(wait) = wait {
-                    while let Err(e) = std::fs::File::open(wait) {
-                        if e.kind() == ErrorKind::NotFound {
-                            thread::sleep(Duration::from_millis(100));
-                        } else {
-                            panic!("Waiting for file {} failed: {}", wait, e);
+                if let Some(wait) = wait_pkcs1_key {
+                    let started = Instant::now();
+                    while let Err(e) = rsa::RsaPrivateKey::read_pkcs1_pem_file(Path::new(wait)) {
+                        if started.elapsed() > Duration::from_secs(5) {
+                            panic!("Giving up after waiting {}s for a private key at {}.", started.elapsed().as_secs(), wait);
+                        }
+                        match e {
+                            // ...
+                            _ => {
+                                thread::sleep(Duration::from_millis(100));
+                            },
                         }
                     }
                     println!("Found file {}", wait);
