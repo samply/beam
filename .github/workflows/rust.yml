@@ -29,7 +29,3 @@ jobs:
       with:
         name: central
         path: target/release/central
-    - name: Cargo (bloat)
-      uses: orf/cargo-bloat-action@v1
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
