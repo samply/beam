@@ -10,12 +10,13 @@ use shared::*;
 use tokio::sync::RwLock;
 
 #[tokio::main]
-pub async fn main() -> anyhow::Result<()> {
-    shared::logger::init_logger()?;
-    let a = config::CONFIG_CENTRAL.bind_addr; // Initialize config
-    
+pub async fn main() -> anyhow::Result<()> {    
     #[cfg(debug_assertions)]
     if devhelper::print_example_objects() == true { return Ok(()); }
+    
+    shared::logger::init_logger()?;
+
+    let a = config::CONFIG_CENTRAL.bind_addr; // Initialize config
 
     let tasks: HashMap<MsgId, MsgSigned<MsgTaskRequest>> = HashMap::new();
     let (new_tasks_tx, _) = tokio::sync::broadcast::channel::<MsgSigned<MsgTaskRequest>>(512);
