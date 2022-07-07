@@ -147,7 +147,7 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
 
 pub async fn sign_to_jwt(json: &Value, privkey_pem: &str, my_client_id: &ClientId) -> Result<String,SamplyBrokerError> {
     let key = RS256KeyPair::from_pem(privkey_pem)
-        .map_err(|_| SamplyBrokerError::SignEncryptError("Unable to construct private key".into()))?
+        .map_err(|e| SamplyBrokerError::SignEncryptError(format!("Unable to construct private key from {}: {}", privkey_pem, e)))?
         .with_key_id(&my_client_id.to_string()); // TODO: Use cert's serial (not common name) as key id
     
     let claims = 

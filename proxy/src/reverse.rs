@@ -11,16 +11,28 @@ use hyper::{Body, StatusCode, header::{self, HeaderName}, Client, client::HttpCo
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
-use shared::{crypto_jwt, errors::SamplyBrokerError, MsgSigned, Msg, MsgTaskRequest, MsgTaskResult, MsgEmpty};
+use shared::{crypto_jwt, errors::SamplyBrokerError, MsgSigned, Msg, MsgTaskRequest, MsgTaskResult, MsgEmpty, config, config_proxy};
 use tracing::{info, debug, warn, error};
 
-use crate::{auth::AuthenticatedProxyClient, config::Config};
+use crate::{auth::AuthenticatedProxyClient};
 
-pub(crate) async fn reverse_proxy(
-    config: Config
-) -> anyhow::Result<()> {
+pub(crate) async fn reverse_proxy() -> anyhow::Result<()> {
     let client = Client::builder()
         .build::<_, hyper::Body>(HttpsConnector::new());
+
+    // Some weird handling in lazy_static makes this necessary.
+    let config = config::CONFIG_PROXY.clone();
+    let config: config_proxy::Config = config_proxy::Config {
+        broker_uri: config.broker_uri,
+        broker_host_header: config.broker_host_header,
+        bind_addr: config.bind_addr,
+        pki_address: config.pki_address,
+        pki_token: config.pki_token,
+        pki_realm: config.pki_realm,
+        privkey_pem: config.privkey_pem,
+        client_id: config.client_id,
+        api_keys: config.api_keys,
+    };
 
     let app = Router::new()
         .route("/*path", any(handler))
@@ -53,7 +65,7 @@ async fn graceful_waiter(mut rx: tokio::sync::mpsc::Receiver<()>) {
 
 async fn handler(
     Extension(client): Extension<Client<HttpsConnector<HttpConnector>>>,
-    Extension(config): Extension<Config>,
+    Extension(config): Extension<config_proxy::Config>,
     AuthenticatedProxyClient(auth_client): AuthenticatedProxyClient,
     mut req: Request<Body>,
 ) -> Result<Response<Body>,(StatusCode, &'static str)> {
@@ -97,7 +109,7 @@ async fn handler(
         }
     };
 
-    let privkey_pem = &crate::config::CONFIG.privkey_pem;
+    let privkey_pem = &config::CONFIG_PROXY.privkey_pem;
     // Sign non-extended JSON
     let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, privkey_pem, &config.client_id).await
         .map_err(|e| {
@@ -131,7 +143,6 @@ async fn handler(
     headers_mut.insert(header::CONTENT_LENGTH, length.into());
     headers_mut.insert(header::CONTENT_TYPE, HeaderValue::from_str("application/jwt").unwrap());
     headers_mut.insert(header::AUTHORIZATION, HeaderValue::from_str(&auth_header).unwrap());
-    headers_mut.remove(header::PROXY_AUTHORIZATION);
 
     info!("=> {:?}", req);
     

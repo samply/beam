@@ -6,7 +6,7 @@ use axum::{
     Extension, Json, Router, extract::{Query, Path}, response::IntoResponse
 };
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, ClientId, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_CLIENTID};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, ClientId, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_CLIENTID, config};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace};
 
@@ -16,8 +16,6 @@ struct State {
     new_task_tx: Arc<Sender<MsgSigned<MsgTaskRequest>>>,
     new_result_tx: Arc<RwLock<HashMap<MsgId, Sender<MsgSigned<MsgTaskResult>>>>>,
 }
-
-const BIND_ADDR: &str = "0.0.0.0:8080";
 
 pub(crate) async fn serve_axum(
     tasks: Arc<RwLock<HashMap<MsgId, MsgSigned<MsgTaskRequest>>>>,
@@ -35,8 +33,8 @@ pub(crate) async fn serve_axum(
     ctrlc::set_handler(move || tx.blocking_send(()).expect("Could not send shutdown signal on channel."))
         .expect("Error setting handler for graceful shutdown.");
 
-    info!("Listening for requests on {}", BIND_ADDR);
-    axum::Server::bind(&BIND_ADDR.parse().unwrap())
+    info!("Listening for requests on {}", config::CONFIG_CENTRAL.bind_addr);
+    axum::Server::bind(&config::CONFIG_CENTRAL.bind_addr)
         .serve(app.into_make_service())
         .with_graceful_shutdown(async {
             rx.recv().await;

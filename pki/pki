@@ -80,9 +80,9 @@ function request() {
           --data "$data" \
           --no-progress-meter \
      $VAULT_ADDR/v1/samply_pki/issue/hd-dot-dktk-dot-com | jq > ${application}.json
-     cat ${application}.json | jq -r .data.private_key > ${application}.priv.pem
      cat ${application}.json | jq -r .data.certificate > ${application}.crt.pem
      cat ${application}.json | jq -r .data.ca_chain[] > ${application}.chain.pem
+     cat ${application}.json | jq -r .data.private_key > ${application}.priv.pem
      echo "Success: PEM files stored to ${application}*.pem"
 }
 

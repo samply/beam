@@ -2,14 +2,15 @@
 
 #[cfg(test)]
 mod tests {
-    use std::{process::{Command, Child}, thread, sync::mpsc::{self, Sender}, time::Duration, io::ErrorKind, collections::HashSet};
+    use std::{process::{Command, Child}, thread, sync::mpsc::{self, Sender}, time::Duration, io::ErrorKind, collections::{HashSet, HashMap}, iter::Map};
 
     use assert_cmd::prelude::*;
-    use reqwest::{StatusCode, header};
+    use reqwest::{StatusCode, header::{self, HeaderValue}};
     use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, Msg};
 
     const PEMFILE: &str = "../pki/test.priv.pem";
-    const MYID: &str = "test.broker.samply.de";
+    const MY_PROXY_ID: &str = "test.broker.samply.de";
+    const MY_CLIENT_ID_SHORT: &str = "itsme";
 
     struct Servers {
         txes: Vec<Sender<()>>
@@ -18,15 +19,27 @@ mod tests {
     impl Servers {
         fn start() -> anyhow::Result<Self> {
             let mut txes = Vec::new();
-            for (cmd, args, wait) in [
-                    ("bash", vec!("-c", "../pki/pki devsetup"), None),
-                    ("central", vec![], None),
-                    ("proxy", vec!("--broker-url", "http://localhost:8080", "--client-id", MYID, "--pki-address", "http://localhost:8200", "--pki-secret-file", "broker.secrets.example", "--privkey-file", PEMFILE), Some(PEMFILE))
-                    ] {
+            for (cmd, args, env, wait) in 
+                [
+                    ("bash",
+                        vec!("-c", "../pki/pki devsetup"),
+                        HashMap::new(),
+                        None),
+                    ("central",
+                        vec!("--pki-address", "http://localhost:8200", "--pki-apikey-file", "pki_apikey.secret"),
+                        HashMap::new(),
+                        Some(PEMFILE)),
+                    ("proxy", 
+                        vec!("--broker-url", "http://localhost:8080", "--client-id", MY_PROXY_ID, "--pki-address", "http://localhost:8200", "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", PEMFILE),
+                        HashMap::from([("CLIENTKEY_".to_string() + MY_CLIENT_ID_SHORT, "MySecret")]),
+                        Some(PEMFILE))
+                ] {
                 let (tx, rx) = mpsc::channel::<()>();
                 txes.push(tx);
                 let mut proc = Command::cargo_bin(cmd)
                     .unwrap_or(Command::new(cmd));
+                let proc = proc.envs(env);
+
                 if let Some(wait) = wait {
                     while let Err(e) = std::fs::File::open(wait) {
                         if e.kind() == ErrorKind::NotFound {
@@ -89,23 +102,26 @@ mod tests {
     #[test]
     fn works_with_apikey() {
         let _servers = Servers::start().unwrap();
-        integration_test(Some("ClientApiKey EssenKey")).unwrap();
+        let auth = format!("ClientApiKey {}.{} MySecret", MY_CLIENT_ID_SHORT, MY_PROXY_ID);
+        integration_test(Some(&auth)).unwrap();
     }
 
-    fn integration_test(apikey: Option<&'static str>) -> anyhow::Result<()> { // TODO: Split into several tests (how?)
+    fn integration_test(auth: Option<&str>) -> anyhow::Result<()> { // TODO: Split into several tests (how?)
         let mut headers = header::HeaderMap::new();
-        if let Some(apikey) = apikey {
-            headers.insert(header::PROXY_AUTHORIZATION, header::HeaderValue::from_static(apikey));
+        if let Some(auth) = auth {
+            let mut value = header::HeaderValue::from_str(auth).unwrap();
+            value.set_sensitive(true);
+            headers.insert(header::AUTHORIZATION, value);
         }
         let client = reqwest::blocking::Client::builder()
             .default_headers(headers)
             .build()?;
 
-        let mut examples = generate_example_tasks(Some(ClientId::new(MYID).unwrap()));
+        let mut examples = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
 
         thread::sleep(Duration::from_secs(1));
 
-        let myid = ClientId::new(MYID).unwrap();
+        let myid = ClientId::new(MY_PROXY_ID).unwrap();
 
         for task in examples.values_mut() {
             task.from = myid.clone();

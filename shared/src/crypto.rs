@@ -12,7 +12,7 @@ use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 use vaultrs::{client::{VaultClient, VaultClientSettingsBuilder},pki};
 
-use crate::{errors::SamplyBrokerError, MsgTaskRequest, ClientId, EncryptedMsgTaskRequest};
+use crate::{errors::SamplyBrokerError, MsgTaskRequest, ClientId, EncryptedMsgTaskRequest, config};
 
 #[derive(Debug)]
 pub(crate) struct VaultConfig{
@@ -48,7 +48,7 @@ impl CertificateCache {
     }
 
     /// Searches cache for a certificate with the given ClientId. If not found, updates cache from central vault. If then still not found, return None
-    pub async fn get_by_cname(cname: &ClientId) -> Option<X509> {
+    pub async fn get_by_cname(cname: &ClientId) -> Option<X509> { // TODO: What if multiple certs are found?
         debug!("Getting cert with cname {}", cname);
         { // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
             let cache = CERT_CACHE.read().await;
@@ -159,10 +159,10 @@ impl CertificateCache {
 lazy_static!{
     static ref CERT_CACHE: Arc<RwLock<CertificateCache>> = {
         let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBrokerError>>>(1);
-        let config = VaultConfig { //TODO: This config must be statically created as well, through CLI or env
-            vault_address: String::from("http://127.0.0.1:8200"), // TODO: Fetch from Config
-            vault_token: String::from("root"), // TODO: Fetch from Config
-            pki_realm: String::from("samply_pki"), // TODO: Fetch from Config
+        let config = VaultConfig {
+            vault_address: config::CONFIG_CENTRAL.pki_address.to_string(),
+            vault_token: config::CONFIG_CENTRAL.pki_token.clone(),
+            pki_realm: config::CONFIG_CENTRAL.pki_realm.clone(),
         };
         let cc = Arc::new(RwLock::new(CertificateCache::new(config, tx).unwrap()));
         let cc2 = cc.clone();

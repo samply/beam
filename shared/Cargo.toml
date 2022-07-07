@@ -38,3 +38,11 @@ jwt-simple = "0.11.0"
 # Error handling
 thiserror = "1.0.31"
 anyhow = "1.0.58"
+
+# Command Line Interface
+clap = { version = "3.2.8", features = ["env", "derive"] }
+
+[features]
+default = []
+config-for-proxy = []
+config-for-central = []
