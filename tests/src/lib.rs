@@ -35,8 +35,6 @@ mod tests {
         a.push_str(" MySecret");
         a
     };
-    // #[dynamic]
-    // static SERIAL_TEST: Mutex<()> = Mutex::new(());
 
     #[derive(Debug)]
     struct Servers {
@@ -102,7 +100,7 @@ mod tests {
                 if let Some(wait) = wait_pkcs1_key {
                     let started = Instant::now();
                     while let Err(e) = rsa::RsaPrivateKey::read_pkcs1_pem_file(Path::new(wait)).or(rsa::RsaPrivateKey::read_pkcs8_pem_file(Path::new(wait))) {
-                        if started.elapsed() > Duration::from_secs(5) {
+                        if started.elapsed() > Duration::from_secs(30) {
                             panic!("Giving up after waiting {}s for a private key at {}.", started.elapsed().as_secs(), wait);
                         }
                         match e {
@@ -164,40 +162,23 @@ mod tests {
             tokio::task::yield_now().await;
         }
     }
+
+    #[dynamic]
+    static EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
     
     #[tokio::test]
-    async fn restest() {
+    async fn b_post_task() {
         wait_for_servers().await;
-        let examples = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
-        let auth = AUTH.to_string();
-        for (_ ,task) in examples {
+        for (_ ,task) in EXAMPLES.iter() {
             let req = Request::post("/v1/tasks")
-                .with_header(AUTHORIZATION, &auth)
+                .with_header(AUTHORIZATION, AUTH.as_str())
                 .with_body(task);
             let body = CTX_PROXY.run(req)
                 .await
                 .expect_status_empty_body(StatusCode::CREATED)
                 .await;
-            // assert_body_matches! {
-            //     body,
-            //     ()
-            // }
         }
     }
-
-    // #[test]
-    // #[should_panic]
-    // fn fails_without_apikey() {
-    //     let _servers = Servers::start().unwrap();
-    //     integration_test(None).unwrap();
-    // }
-
-    // #[test]
-    // fn works_with_apikey() {
-    //     let _servers = Servers::start().unwrap();
-    //     let auth = format!("ClientApiKey {}.{} MySecret", MY_CLIENT_ID_SHORT, MY_PROXY_ID);
-    //     integration_test(Some(&auth)).unwrap();
-    // }
 
     fn integration_test(auth: Option<&str>) -> anyhow::Result<()> { // TODO: Split into several tests (how?)
         let mut headers = header::HeaderMap::new();
