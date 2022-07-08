@@ -1,9 +1,9 @@
-use std::time::SystemTime;
+use std::{time::SystemTime, net::{SocketAddr, Ipv4Addr, IpAddr}, str::FromStr};
 
 use axum::{
     extract::{Extension, FromRequest},
     http::{uri::Uri, Request, Response, HeaderValue},
-    routing::any,
+    routing::{any, get},
     Router, body::Bytes
 };
 use httpdate::{fmt_http_date, HttpDate};
@@ -11,7 +11,8 @@ use hyper::{Body, StatusCode, header::{self, HeaderName}, Client, client::HttpCo
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
-use shared::{crypto_jwt, errors::SamplyBrokerError, MsgSigned, Msg, MsgTaskRequest, MsgTaskResult, MsgEmpty, config, config_proxy};
+use shared::{crypto_jwt, errors::SamplyBrokerError, MsgSigned, Msg, MsgTaskRequest, MsgTaskResult, MsgEmpty, config, config_proxy, MsgPing, ClientId};
+use tower::ServiceBuilder;
 use tracing::{info, debug, warn, error};
 
 use crate::{auth::AuthenticatedProxyClient};
@@ -27,17 +28,22 @@ pub(crate) async fn reverse_proxy() -> anyhow::Result<()> {
         broker_host_header: config.broker_host_header,
         bind_addr: config.bind_addr,
         pki_address: config.pki_address,
-        pki_token: config.pki_token,
+        // pki_token: config.pki_token, // moved to shared
         pki_realm: config.pki_realm,
-        privkey_pem: config.privkey_pem,
+        // privkey_pem: config.privkey_pem, // moved to shared
         client_id: config.client_id,
         api_keys: config.api_keys,
     };
 
-    let app = Router::new()
-        .route("/*path", any(handler))
+    let router1 = Router::new()
+        .route("/v1/*path", any(handler))
         .layer(Extension(client))
         .layer(Extension(config.clone()));
+
+    let router2 = Router::new()
+        .route("/health", get(handler_health));
+    
+    let app = router1.merge(router2);
 
     // Graceful shutdown handling
     let (tx, rx) = tokio::sync::mpsc::channel(1);
@@ -63,18 +69,38 @@ async fn graceful_waiter(mut rx: tokio::sync::mpsc::Receiver<()>) {
     info!("Shutting down gracefully.");
 }
 
+const ERR_BODY: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Invalid body");
+const ERR_INTERNALCRYPTO: (StatusCode, &'static str) = (StatusCode::INTERNAL_SERVER_ERROR, "Cryptography failed; see server logs.");
+const ERR_UPSTREAM: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Unable to parse server's reply.");
+const ERR_VALIDATION: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Unable to verify signature in server reply.");
+
+// async fn handler_health(
+//     client: Extension<Client<HttpsConnector<HttpConnector>>>,
+//     config: Extension<config_proxy::Config>,
+//     auth_client: AuthenticatedProxyClient,
+// ) -> Result<Response<Body>,(StatusCode, &'static str)> {
+//     let ping = MsgPing::new(config.client_id.clone(), ClientId::random());
+//     let local = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), config.bind_addr.port());
+//     let req = Request::builder()
+//         .method(Method::GET)
+//         .uri(format!("http://{}/ping", local))
+//         .body(ping)
+//         .map_err(|_| ERR_BODY)?;
+
+//     // let resp = handler(client, config, auth_client, req).await;
+//     todo!()
+// }
+
+async fn handler_health() -> StatusCode {
+    StatusCode::OK
+}
+
 async fn handler(
     Extension(client): Extension<Client<HttpsConnector<HttpConnector>>>,
     Extension(config): Extension<config_proxy::Config>,
     AuthenticatedProxyClient(auth_client): AuthenticatedProxyClient,
     mut req: Request<Body>,
 ) -> Result<Response<Body>,(StatusCode, &'static str)> {
-    const ERR_BODY: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Invalid body");
-    const ERR_INTERNALCRYPTO: (StatusCode, &'static str) = (StatusCode::INTERNAL_SERVER_ERROR, "Cryptography failed; see server logs.");
-    const ERR_UPSTREAM: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Unable to parse server's reply.");
-    const ERR_VALIDATION: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Unable to verify signature in server reply.");
-    // const ERR_UNKNOWN_ENTITY: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Server sent an entity we didn't understand.");
-
     debug!(?req, ?auth_client, "<=");
 
     let path = req.uri().path();
@@ -87,62 +113,13 @@ async fn handler(
     let target_uri = Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
 
-    let body_ref = req.body_mut();
-    let body = body::to_bytes(body_ref).await
-        .map_err(|_| ERR_BODY)?;
-    let body = String::from_utf8(body.to_vec())
-        .map_err(|_| ERR_BODY)?;
+    // let body_ref = req.body_mut();
+    // let body = body::to_bytes(body_ref).await
+    //     .map_err(|_| ERR_BODY)?;
+    // let body = String::from_utf8(body.to_vec())
+    //     .map_err(|_| ERR_BODY)?;
 
-    let mut body = if body.is_empty() {
-        debug!("Body is empty, substituting empty json.");
-        serde_json::from_str::<Value>("{}").unwrap()
-    } else {
-        match serde_json::from_str::<Value>(&body) {
-            Ok(val) => {
-                debug!("Body is valid json");
-                val
-            },
-            Err(e) => {
-                warn!("Received Body is invalid json: {}", e);
-                return Err(ERR_BODY);
-            }
-        }
-    };
-
-    let privkey_pem = &config::CONFIG_PROXY.privkey_pem;
-    // Sign non-extended JSON
-    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, privkey_pem, &config.client_id).await
-        .map_err(|e| {
-            error!("Crypto failed: {}", e);
-            ERR_INTERNALCRYPTO
-        })?;
-
-    // Create and sign extended JSON
-    let headers_mut = req.headers_mut();
-    headers_mut.insert(header::DATE, HeaderValue::from_str(&fmt_http_date(SystemTime::now())).expect("Internal error: Unable to format system time"));
-
-    let digest = crypto_jwt::make_extra_fields_digest(req.method(), req.uri(), req.headers())
-        .map_err(|_| ERR_INTERNALCRYPTO)?;
-
-    body.as_object_mut().unwrap().insert("extra_fields_digest".to_string(), Value::String(digest));
-
-    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&body, privkey_pem, &config.client_id).await
-        .map_err(|e| {
-            error!("Crypto failed: {}", e);
-            ERR_INTERNALCRYPTO
-        })?;
-    
-    let length = token_without_extended_signature.len();
-    *req.body_mut() = token_without_extended_signature.into();
-    let mut auth_header = String::from("SamplyJWT ");
-    auth_header.push_str(&token_with_extended_signature);
-
-    *req.uri_mut() = target_uri;
-    let headers_mut = req.headers_mut();
-    headers_mut.insert(header::HOST, config.broker_host_header);
-    headers_mut.insert(header::CONTENT_LENGTH, length.into());
-    headers_mut.insert(header::CONTENT_TYPE, HeaderValue::from_str("application/jwt").unwrap());
-    headers_mut.insert(header::AUTHORIZATION, HeaderValue::from_str(&auth_header).unwrap());
+    let req = sign_request(req, &config, &target_uri).await?;
 
     info!("=> {:?}", req);
     
@@ -180,6 +157,54 @@ async fn handler(
     let resp = Response::from_parts(parts, body);
 
     Ok(resp)
+}
+
+async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_uri: &Uri) -> Result<Request<Body>, (StatusCode, &'static str)> {
+    let (mut parts, body) = req.into_parts();
+    let body = body::to_bytes(body).await
+        .map_err(|_| ERR_BODY)?;
+    let mut body = if body.is_empty() {
+        debug!("Body is empty, substituting empty json.");
+        serde_json::from_str::<Value>("{}").unwrap()
+    } else {
+        match serde_json::from_slice::<Value>(&body) {
+            Ok(val) => {
+                debug!("Body is valid json");
+                val
+            },
+            Err(e) => {
+                warn!("Received Body is invalid json: {}", e);
+                return Err(ERR_BODY);
+            }
+        }
+    };    
+    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body).await
+        .map_err(|e| {
+            error!("Crypto failed: {}", e);
+            ERR_INTERNALCRYPTO
+        })?;
+    let mut headers_mut = parts.headers;
+    headers_mut.insert(header::DATE, HeaderValue::from_str(&fmt_http_date(SystemTime::now())).expect("Internal error: Unable to format system time"));
+    let digest = crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut)
+        .map_err(|_| ERR_INTERNALCRYPTO)?;
+    body.as_object_mut().unwrap().insert("extra_fields_digest".to_string(), Value::String(digest));
+    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&body).await
+        .map_err(|e| {
+            error!("Crypto failed: {}", e);
+            ERR_INTERNALCRYPTO
+        })?;
+    let length = token_without_extended_signature.len();
+    let body: Body = token_without_extended_signature.into();
+    let mut auth_header = String::from("SamplyJWT ");
+    auth_header.push_str(&token_with_extended_signature);
+    parts.uri = target_uri.clone();
+    headers_mut.insert(header::HOST, config.broker_host_header.clone());
+    headers_mut.insert(header::CONTENT_LENGTH, length.into());
+    headers_mut.insert(header::CONTENT_TYPE, HeaderValue::from_str("application/jwt").unwrap());
+    headers_mut.insert(header::AUTHORIZATION, HeaderValue::from_str(&auth_header).unwrap());
+    parts.headers = headers_mut;
+    let req = Request::from_parts(parts, body);
+    Ok(req)
 }
 
 #[async_recursion::async_recursion]

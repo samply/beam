@@ -79,11 +79,10 @@ function curl_post_out {
     curl_post -s -w %{"$out"} "$@"
 }
 
-function curl_get_noout {
+function curl_post_noout {
     out="$1"
     shift
     curl_post_out "$out" -o /dev/null "$@"
 }
 
-export -f do_curl do_curl_out do_curl_noout do_curl_post put_task put_results
-
+export -f curl_get curl_get_out curl_get_noout curl_post curl_post_out curl_post_noout start stop clean testing fail success

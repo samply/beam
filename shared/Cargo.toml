@@ -42,6 +42,8 @@ anyhow = "1.0.58"
 # Command Line Interface
 clap = { version = "3.2.8", features = ["env", "derive"] }
 
+http = "*"
+
 [features]
 default = []
 config-for-proxy = []

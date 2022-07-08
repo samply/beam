@@ -23,8 +23,9 @@ pub(crate) async fn serve_axum(
 ) -> anyhow::Result<()> {
     let state = State { tasks, new_task_tx, new_result_tx: Arc::new(RwLock::new(HashMap::new())) };
     let app = Router::new()
-        .route("/tasks", get(get_tasks).post(post_task))
-        .route("/tasks/:task_id/results", get(get_results_for_task).post(post_result))
+        .route("/health", get(handler_health))
+        .route("/v1/tasks", get(get_tasks).post(post_task))
+        .route("/v1/tasks/:task_id/results", get(get_results_for_task).post(post_result))
         .layer(Extension(state));
 
     // Graceful shutdown handling
@@ -44,7 +45,12 @@ pub(crate) async fn serve_axum(
     Ok(())
 }
 
-// GET /tasks/:task_id/results
+// GET /health
+async fn handler_health() -> StatusCode {
+    StatusCode::OK
+}
+
+// GET /v1/tasks/:task_id/results
 async fn get_results_for_task(
     block: HowLongToBlock,
     task_id: MsgId,
@@ -132,7 +138,7 @@ struct ToFromParam {
     to: Option<ClientId>,
 }
 
-/// GET /tasks
+/// GET /v1/tasks
 /// Will retrieve tasks that are at least FROM or TO the supplied parameters.
 async fn get_tasks(
     block: HowLongToBlock,
@@ -217,7 +223,7 @@ impl<'a> MsgFilter<'a> {
     }
 }
 
-// POST /tasks
+// POST /v1/tasks
 async fn post_task(
     msg: MsgSigned<MsgTaskRequest>,
     Extension(state): Extension<State>,
@@ -241,11 +247,11 @@ async fn post_task(
     }
     Ok((
         StatusCode::CREATED,
-        [(header::LOCATION, format!("/tasks/{}", msg.msg.id))]
+        [(header::LOCATION, format!("/v1/tasks/{}", msg.msg.id))]
     ))
 }
 
-// POST /tasks/:task_id/results
+// POST /v1/tasks/:task_id/results
 async fn post_result(
     Path(task_id): Path<MsgId>,
     result: MsgSigned<MsgTaskResult>,
@@ -289,6 +295,6 @@ async fn post_result(
     }
     Ok((
         statuscode,
-        [(header::LOCATION, format!("/tasks/{}/results/{}", task_id, worker_id))]
+        [(header::LOCATION, format!("/v1/tasks/{}/results/{}", task_id, worker_id))]
     ))
 }

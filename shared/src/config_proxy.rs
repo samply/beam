@@ -16,9 +16,9 @@ pub struct Config {
     pub broker_host_header: HeaderValue,
     pub bind_addr: SocketAddr,
     pub pki_address: Uri,
-    pub pki_token: ApiKey,
+    // pub pki_token: ApiKey,
     pub pki_realm: String,
-    pub privkey_pem: String,
+    // pub privkey_pem: String,
     pub client_id: ClientId,
     pub api_keys: HashMap<ClientId,ApiKey>
 }
@@ -82,8 +82,8 @@ fn parse_apikeys(client_id: &ClientId) -> Result<HashMap<ClientId,ApiKey>,Samply
 
 pub(crate) fn get_config() -> Result<Config,SamplyBrokerError> {
     let cli_args = CliArgs::parse();
-    let privkey_pem = read_to_string(cli_args.privkey_file)?.trim().to_string();
-    let pki_token = read_to_string(cli_args.pki_apikey_file)?.trim().to_string();
+    // let privkey_pem = read_to_string(cli_args.privkey_file)?.trim().to_string();
+    // let pki_token = read_to_string(cli_args.pki_apikey_file)?.trim().to_string();
     let client_id = ClientId::try_from(cli_args.client_id)
         .expect("Invalid Client ID supplied.");
     let api_keys = parse_apikeys(&client_id)?;
@@ -94,10 +94,10 @@ pub(crate) fn get_config() -> Result<Config,SamplyBrokerError> {
         broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
         broker_uri: cli_args.broker_url,
         pki_address: cli_args.pki_address,
-        pki_token,
+        // pki_token,
         bind_addr: cli_args.bind_addr,
         pki_realm: cli_args.pki_realm,
-        privkey_pem,
+        // privkey_pem,
         client_id,
         api_keys
     };

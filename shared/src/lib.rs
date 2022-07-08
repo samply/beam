@@ -392,6 +392,37 @@ impl MsgTaskRequest {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MsgPing {
+    id: MsgId,
+    from: ClientId,
+    to: Vec<ClientId>,
+    nonce: [u8; 16]
+}
+
+impl MsgPing {
+    pub fn new(from: ClientId, to: ClientId) -> Self {
+        let mut nonce = [0;16];
+        openssl::rand::rand_bytes(&mut nonce)
+            .expect("Critical Error: Failed to generate random byte array.");
+        MsgPing { id: MsgId::new(), from: from, to: vec![to], nonce: nonce }
+    }
+}
+
+impl Msg for MsgPing {
+    fn get_id(&self) -> &MsgId {
+        &self.id
+    }
+
+    fn get_from(&self) -> &ClientId {
+        &self.from
+    }
+
+    fn get_to(&self) -> &Vec<ClientId> {
+        &self.to
+    }
+}
+
 pub fn generate_example_tasks(client1_id: Option<ClientId>) -> HashMap<MsgId, MsgTaskRequest> {
     let mut tasks: HashMap<MsgId, MsgTaskRequest> = HashMap::new();
     let client1 = client1_id.unwrap_or(ClientId::random());

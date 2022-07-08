@@ -20,7 +20,9 @@ pub enum SamplyBrokerError {
     #[error("Unable to read config: {0}. Please check your environment and parameters.")]
     ConfigurationFailed(String),
     #[error("Internal synchronization error: {0}")]
-    InternalSynchronizationError(String)
+    InternalSynchronizationError(String),
+    #[error("Error building HTTP request: {0}")]
+    HttpRequestBuildError(#[from] http::Error)
 }
 
 impl From<AddrParseError> for SamplyBrokerError {

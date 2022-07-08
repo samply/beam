@@ -1,6 +1,6 @@
 extern crate lazy_static;
 
-use crate::config_shared::{self, VaultConfig};
+use crate::config_shared::{self, CONFIG};
 use aes_gcm::aead::generic_array::GenericArray;
 use axum::{Json, http::Request, body::Body};
 use lazy_static::lazy_static;
@@ -27,19 +27,16 @@ pub(crate) struct CertificateCache{
 }
 
 impl CertificateCache {
-    pub fn new(config: VaultConfig, update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBrokerError>>>) -> Result<CertificateCache,SamplyBrokerError> {
-        let pki_token = read_to_string(&config.pki_apikey_file)
-            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Unable to read PKI Apikey: {}", e)))?
-            .trim().to_string();
+    pub fn new(update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBrokerError>>>) -> Result<CertificateCache,SamplyBrokerError> {
         Ok(Self{
         serial_to_x509: HashMap::new(),
         cn_to_serial: HashMap::new(),
         vault_client: VaultClient::new(
             VaultClientSettingsBuilder::default()
-                .address(&config.pki_address.to_string())
-                .token(&pki_token)
+                .address(&CONFIG.pki_address.to_string())
+                .token(&CONFIG.pki_apikey)
                 .build()?)?,
-        pki_realm: config.pki_realm.clone(),
+        pki_realm: CONFIG.pki_realm.clone(),
         update_trigger
     })
     }
@@ -156,8 +153,8 @@ impl CertificateCache {
 lazy_static!{
     static ref CERT_CACHE: Arc<RwLock<CertificateCache>> = {
         let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBrokerError>>>(1);
-        let config: VaultConfig = config_shared::get_config();
-        let cc = Arc::new(RwLock::new(CertificateCache::new(config, tx).unwrap()));
+        let config = &config_shared::CONFIG;
+        let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
         let cc2 = cc.clone();
         tokio::task::spawn(async move {
             while let Some(sender) = rx.recv().await {
@@ -169,10 +166,6 @@ lazy_static!{
             }
         });
         cc
-    };
-    static ref LOCAL_PRIVATE_KEY: RsaPrivateKey = {
-        let config: VaultConfig = config_shared::get_config();
-        get_local_private_key(&config.privkey_file).expect("Can not load private key")
     };
 }
 
@@ -333,7 +326,7 @@ pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &V
         .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Cannot encrypt message".into())))?;
 
     //Sign Message
-    let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &LOCAL_PRIVATE_KEY)?;
+    let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &CONFIG.privkey_rsa)?;
 
     // Place new Body in Request
     let new_body = Body::from(signed_message);
@@ -382,17 +375,6 @@ fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, Sa
 /// Convenience function to extract a rsa public key from a x509 certificate. Calls x509_cert_to_x509_public_key and x509_public_key_to_rsa_pub_key internally.
 fn x509_cert_to_rsa_pub_key(cert: &X509) -> Result<RsaPublicKey, SamplyBrokerError> {
     x509_public_key_to_rsa_pub_key(&x509_cert_to_x509_public_key(cert)?)
-}
-
-/// Loads a pkcs8-pem-encoded private key from a file
-fn get_local_private_key(local_key_file: &Path) -> Result<RsaPrivateKey, Box<dyn Error>> {
-    Ok(RsaPrivateKey::read_pkcs8_pem_file(&local_key_file)?)
-}
-
-pub async fn get_local_private_key_as_pem(path: &Path) -> Result<String, SamplyBrokerError> {
-    let key = read_to_string(path)
-        .map_err(|e| SamplyBrokerError::SignEncryptError("Private key could not be read from disk.".into()))?;
-    Ok(key)
 }
 
 /// Converts the asn.1 time (e.g., from a certificate exiration date) to rust's SystemTime. From https://github.com/sfackler/rust-openssl/issues/1157#issuecomment-1016737160
