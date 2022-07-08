@@ -119,7 +119,7 @@ case "$1" in
      devsetup)
           set -m # job control
           clean
-          (sleep 3
+          (while ! [ "$(curl -s http://localhost:8200/v1/sys/health | jq -r .sealed)" == "false" ]; do sleep 0.1; done
           init
           request client1
           request client2

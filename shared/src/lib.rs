@@ -169,7 +169,7 @@ pub enum WorkResult {
     Succeeded(TaskResponse),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum FailureStrategy {
     Discard,
@@ -185,7 +185,7 @@ pub struct HowLongToBlock {
     pub poll_count: Option<u16>,
 }
 
-#[derive(Clone,Debug,Serialize,Deserialize)]
+#[derive(Clone,Debug,Serialize,Deserialize, PartialEq)]
 pub struct MsgSigned<M: Msg> {
     pub msg: M,
     pub sig: String
@@ -313,7 +313,7 @@ impl Msg for MsgTaskResult {
 //     }
 // }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskRequest {
     pub id: MsgId,
     pub from: ClientId,
@@ -341,7 +341,7 @@ pub struct EncryptedMsgTaskRequest {
     pub results: HashMap<ClientId,MsgTaskResult>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskResult {
     pub id: MsgId,
     pub from: ClientId, // was: worker_id

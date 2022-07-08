@@ -5,6 +5,7 @@ mod tests {
     use std::{process::{Command, Child}, thread, time::{Duration, Instant}, io::ErrorKind, collections::{HashSet, HashMap}, iter::Map, path::Path, mem::take};
 
     use assert_cmd::prelude::*;
+    use regex::Regex;
     use reqwest::{StatusCode, header::{self, HeaderValue, AUTHORIZATION}, Method};
     use restest::{request, Context, Request, assert_body_matches};
     use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, Msg, MsgId};
@@ -164,93 +165,76 @@ mod tests {
     }
 
     #[dynamic]
-    static EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
+    static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
+
+    #[dynamic]
+    static MY_CLIENT_ID: ClientId = ClientId::new(MY_PROXY_ID).unwrap();
+    // #[dynamic]
+    // static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
+
+    #[dynamic]
+    static CLIENT: reqwest::Client = {
+        let mut headers = header::HeaderMap::new();
+        let mut value = header::HeaderValue::from_str(AUTH.as_str()).unwrap();
+        value.set_sensitive(true);
+        headers.insert(header::AUTHORIZATION, value);
+        reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .unwrap()
+    };
     
     #[tokio::test]
-    async fn b_post_task() {
+    async fn b_post_task() -> anyhow::Result<()>{
         wait_for_servers().await;
-        for (_ ,task) in EXAMPLES.iter() {
-            let req = Request::post("/v1/tasks")
-                .with_header(AUTHORIZATION, AUTH.as_str())
-                .with_body(task);
-            let body = CTX_PROXY.run(req)
-                .await
-                .expect_status_empty_body(StatusCode::CREATED)
-                .await;
+        for task in EXAMPLES.fast_write().unwrap().values_mut() {
+            let resp = CLIENT
+                .post("http://localhost:8081/v1/tasks")
+                .json(task)
+                .send().await?;
+            assert_eq!(resp.status(), StatusCode::CREATED);
+            let location = resp.headers().get(header::LOCATION)
+                .expect("Returned Location header is empty")
+                .to_str()?;
+            let location_regex = Regex::new("^.*/(.*)/?$")?;
+            println!("Location: {}", location);
+            let cap = location_regex.captures(location)
+                .expect("Returned Location header does not match format.");
+            let location = &cap[1];
+            task.id = MsgId::try_from(location)?;
         }
+        Ok(())
     }
 
-    fn integration_test(auth: Option<&str>) -> anyhow::Result<()> { // TODO: Split into several tests (how?)
-        let mut headers = header::HeaderMap::new();
-        if let Some(auth) = auth {
-            let mut value = header::HeaderValue::from_str(auth).unwrap();
-            value.set_sensitive(true);
-            headers.insert(header::AUTHORIZATION, value);
+    #[tokio::test]
+    async fn c_post_results() -> anyhow::Result<()> {
+        let mut ex = EXAMPLES.fast_write().unwrap();
+        for task in ex.values_mut() {
+            for (_, mut result) in &mut task.results {
+                result.msg.task = task.id;
+                result.msg.from = MY_CLIENT_ID.clone();
+                let resp = CLIENT
+                    .post(format!("http://localhost:8081/v1/tasks/{}/results", task.id))
+                    .json(&result.msg)
+                    .send().await?;
+                assert!([StatusCode::CREATED, StatusCode::NO_CONTENT].contains(&resp.status()));
+            }
         }
-        let client = reqwest::blocking::Client::builder()
-            .default_headers(headers)
-            .build()?;
+        Ok(())
+    }
 
-        let mut examples = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
-
-        let myid = ClientId::new(MY_PROXY_ID).unwrap();
-
-        for task in examples.values_mut() {
-            task.from = myid.clone();
-            // POST /tasks
+    #[tokio::test]
+    async fn d_get_tasks() -> anyhow::Result<()>{
+        let ex = EXAMPLES.fast_write().unwrap();
+        for task in ex.values() {
             let resp =
-                client.post(format!("http://localhost:8081/v1/tasks"))
-                .json(&task)
-                .send();
-            assert!(resp.is_ok());
-            let resp = resp.unwrap();
-            assert!(resp.status() == StatusCode::CREATED);
-            let location = resp.headers().get(reqwest::header::LOCATION);
-            assert!(location.is_some());
-            let location = location.unwrap().to_str();
-            assert!(location.is_ok());
-            let location = location.unwrap();
-            assert!(location.contains("/v1/tasks/"));
-            let servergenerated_task_id = MyUuid::try_from(location.split("/").last().unwrap())
-                .expect("Did not receive a correct Task ID.");
-
-            // GET /tasks
-            let resp =
-                client.get(format!("http://localhost:8081/v1/tasks?to={}", task.to[0]))
-                .send();
-            assert!(resp.is_ok());
-            let resp = resp.unwrap();
-            assert!(resp.status() == StatusCode::OK);
-            let tasks = resp.json::<Vec<MsgTaskRequest>>().unwrap();
-            assert!(tasks.len() == 1);
-
-            // POST /tasks/.../results
-            let unique_results = { 
-                let mut unique_results = HashSet::new();
-                for result in task.results.values_mut() { // TODO: Remove clone()
-                    result.msg.task = servergenerated_task_id;
-                    result.msg.from = myid.clone();
-                    let resp = 
-                        client.post(format!("http://localhost:8081/v1/tasks/{}/results", servergenerated_task_id))
-                        .json(&result.msg)
-                        .send()?;
-                    if task.to.contains(&result.get_from()) {
-                        debug_assert!(resp.error_for_status().is_ok());
-                        unique_results.insert(result.get_from());
-                    } else {
-                        assert!(resp.error_for_status().is_err());
-                    }
-                }
-                unique_results.len()
-            };
-
-            // GET /tasks/.../results (this time, let's wait for a short amount of time using long-polling)
-            let resp = 
-                client.get(format!("http://localhost:8081/v1/tasks/{}/results?poll_count=2&poll_timeout=2", servergenerated_task_id))
-                .send();
-            assert!(resp.is_ok());
-            let fetched_results: Vec<MsgTaskResult> = resp.unwrap().json().unwrap();
-            assert_eq!(fetched_results.len(), unique_results);
+                CLIENT.get(format!("http://localhost:8081/v1/tasks?from={}", task.from))
+                .send().await?;
+            assert_eq!(resp.status(), StatusCode::OK);
+            let got_tasks = resp.json::<Vec<MsgTaskRequest>>().await.unwrap();
+            // println!("Task: {:?}", task);
+            // println!("Tasks: {:?}", tasks);
+            assert_eq!(got_tasks.len(), ex.len());
         }
         Ok(())
     }
