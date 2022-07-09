@@ -19,8 +19,8 @@ mod tests {
     const MY_CLIENT_ID_SHORT: &str = "itsme";
     const VAULT_BASE: &str = "http://localhost:8200";
     const VAULT_HEALTH: &str = "http://localhost:8200/v1/sys/health";
-    const PROXY_HEALTH: &str = "http://localhost:8081/health";
-    const CENTRAL_HEALTH: &str = "http://localhost:8080/health";
+    const PROXY_HEALTH: &str = "http://localhost:8081/v1/health";
+    const CENTRAL_HEALTH: &str = "http://localhost:8080/v1/health";
     // const CTX_PROXY: Context = Context::new().with_port(8081);
     // const CTX_VAULT: Context = Context::new().with_port(8200);
 

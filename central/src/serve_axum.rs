@@ -23,7 +23,7 @@ pub(crate) async fn serve_axum(
 ) -> anyhow::Result<()> {
     let state = State { tasks, new_task_tx, new_result_tx: Arc::new(RwLock::new(HashMap::new())) };
     let app = Router::new()
-        .route("/health", get(handler_health))
+        .route("/v1/health", get(handler_health))
         .route("/v1/tasks", get(get_tasks).post(post_task))
         .route("/v1/tasks/:task_id/results", get(get_results_for_task).post(post_result))
         .layer(Extension(state));
@@ -45,7 +45,7 @@ pub(crate) async fn serve_axum(
     Ok(())
 }
 
-// GET /health
+// GET /v1/health
 async fn handler_health() -> StatusCode {
     StatusCode::OK
 }
