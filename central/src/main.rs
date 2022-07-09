@@ -14,7 +14,7 @@ use tracing::info;
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {    
     #[cfg(debug_assertions)]
-    if devhelper::print_example_objects() == true { return Ok(()); }
+    if devhelper::print_example_objects() { return Ok(()); }
     
     shared::logger::init_logger()?;
     banner::print_banner();

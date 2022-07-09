@@ -61,10 +61,8 @@ pub const CLIENT_KEY_PREFIX: &str = "CLIENTKEY_";
 fn parse_apikeys(client_id: &ClientId) -> Result<HashMap<ClientId,ApiKey>,SamplyBrokerError>{
     std::env::vars()
         .filter_map(|(k,v)| {
-            match k.strip_prefix(CLIENT_KEY_PREFIX) {
-                Some(stripped) => Some((stripped.to_owned(), v)),
-                None => None,
-            }
+            k.strip_prefix(CLIENT_KEY_PREFIX)
+                .map(|stripped| (stripped.to_owned(), v))
         })
         .map(|(stripped,v)| {
             let client_id = format!("{}.{}", stripped, client_id);

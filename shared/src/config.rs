@@ -8,9 +8,8 @@ pub(crate) trait Config: Sized{
 }
 
 fn load<T: Config>() -> T where {
-    let config = T::load()
-        .unwrap_or_else(|e| panic!("Unable to read config: {}", e));
-    config
+    T::load()
+        .unwrap_or_else(|e| panic!("Unable to read config: {}", e))
 }
 
 #[dynamic(lazy)]

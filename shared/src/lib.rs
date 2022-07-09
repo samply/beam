@@ -38,11 +38,11 @@ pub struct ClientId {
 }
 
 impl ClientId {
-    pub fn new(id: &str) -> Result<Self, ()> {
+    pub fn new(id: &str) -> Result<Self, SamplyBrokerError> {
         if Self::is_valid_id_str(id) {
             Ok(Self { id: id.into() })
         } else {
-            Err(())
+            Err(SamplyBrokerError::InvalidClientIdString(id.into()))
         }
     }
 
@@ -81,21 +81,25 @@ impl Display for ClientId {
     }
 }
 
+impl Default for ClientId {
+    fn default() -> Self {
+        Self::random()
+    }
+}
+
 impl TryFrom<String> for ClientId {
-    type Error = &'static str; // TODO
+    type Error = SamplyBrokerError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         Self::new(&value)
-            .map_err(|_| "Invalid client ID string")
     }
 }
 
 impl TryFrom<&str> for ClientId {
-    type Error = &'static str; // TODO
+    type Error = SamplyBrokerError;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Self::new(&value)
-            .map_err(|_| "Invalid client ID string")
+        Self::new(value)
     }
 }
 
@@ -130,6 +134,11 @@ pub struct MyUuid(Uuid);
 impl MyUuid {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
+    }
+}
+impl Default for MyUuid {
+    fn default() -> Self {
+        Self::new()
     }
 }
 impl Deref for MyUuid {
@@ -200,12 +209,12 @@ impl<M: Msg> MsgSigned<M> {
         let val = serde_json::to_value(&self.msg)
         .expect("Internal error: Unable to interpret already parsed message to JSON Value.");
         if content.custom != val {
-            return Err(SamplyBrokerError::ValidationFailed);
+            return Err(SamplyBrokerError::RequestValidationFailed);
         }
 
         // From field matches CN in certificate?
         if public.client != *self.get_from() {
-            return Err(SamplyBrokerError::ValidationFailed);
+            return Err(SamplyBrokerError::RequestValidationFailed);
         }
         debug!("Message has been verified succesfully.");
         Ok(())
@@ -401,7 +410,7 @@ impl MsgPing {
         let mut nonce = [0;16];
         openssl::rand::rand_bytes(&mut nonce)
             .expect("Critical Error: Failed to generate random byte array.");
-        MsgPing { id: MsgId::new(), from: from, to: vec![to], nonce: nonce }
+        MsgPing { id: MsgId::new(), from, to: vec![to], nonce }
     }
 }
 
@@ -421,7 +430,7 @@ impl Msg for MsgPing {
 
 pub fn generate_example_tasks(client1_id: Option<ClientId>) -> HashMap<MsgId, MsgTaskRequest> {
     let mut tasks: HashMap<MsgId, MsgTaskRequest> = HashMap::new();
-    let client1 = client1_id.unwrap_or(ClientId::random());
+    let client1 = client1_id.unwrap_or_default();
     let client2 = ClientId::random();
 
     let task_for_clients_1_2 = MsgTaskRequest::new(
@@ -447,7 +456,7 @@ pub fn generate_example_tasks(client1_id: Option<ClientId>) -> HashMap<MsgId, Ms
         result: crate::WorkResult::PermFailed("Unable to complete".to_string()),
     };
     tasks.insert(task_for_clients_1_2.id, task_for_clients_1_2);
-    let task_in_map = tasks.values_mut().next().unwrap();
+    let task_in_map = tasks.values_mut().next().unwrap(); // only used in testing
     for result in [response_by_client1, response_by_client2] {
         let result = MsgSigned{
             msg: result,

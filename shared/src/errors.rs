@@ -10,9 +10,11 @@ pub enum SamplyBrokerError {
     #[error("Invalid broker address supplied: {0}")]
     WrongBrokerUri(&'static str),
     #[error("The request could not be validated.")]
-    ValidationFailed,
+    RequestValidationFailed,
     #[error("Invalid path supplied")]
     InvalidPath,
+    #[error("Invalid Client ID: {0}")]
+    InvalidClientIdString(String),
     #[error("Signing / encryption failed: {0}")]
     SignEncryptError(String),
     #[error("Communication with Samply.PKI failed: {0}")]

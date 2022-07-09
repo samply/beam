@@ -7,10 +7,10 @@ use serde_json::Value;
 use tracing::{debug, error, warn};
 use crate::{ClientId, errors::SamplyBrokerError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config};
 
-const ERR_SIG: (StatusCode, &'static str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
-// const ERR_CERT: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
-const ERR_BODY: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Body is invalid.");
-const ERR_FROM: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "\"from\" field in message does not match your certificate.");
+const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
+// const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
+const ERR_BODY: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Body is invalid.");
+const ERR_FROM: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "\"from\" field in message does not match your certificate.");
 
 #[async_trait]
 impl<B: HttpBody + Send + Sync,T> FromRequest<B> for MsgSigned<T>
@@ -25,7 +25,7 @@ where
     type Rejection = (StatusCode, &'static str);
 
     async fn from_request(req: &mut RequestParts<B>) -> Result<Self,Self::Rejection> {
-        let body = req.take_body().unwrap();
+        let body = req.take_body().ok_or(ERR_BODY)?;
         let bytes = hyper::body::to_bytes(body).await.map_err(|_| ERR_BODY)?;
         let token_without_extended_signature = std::str::from_utf8(&bytes).map_err(|_| ERR_SIG)?;
         verify_with_extended_header(req, Some(token_without_extended_signature)).await
@@ -50,10 +50,10 @@ where
 }
 
 pub async fn extract_jwt(token: &str) -> Result<(crypto::ClientPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBrokerError> {
-    let metadata = Token::decode_metadata(&token)
-        .map_err(|_| SamplyBrokerError::ValidationFailed)?;
+    let metadata = Token::decode_metadata(token)
+        .map_err(|_| SamplyBrokerError::RequestValidationFailed)?;
     let client_id = ClientId::try_from(metadata.key_id().unwrap_or_default())
-        .map_err(|_| SamplyBrokerError::ValidationFailed)?;
+        .map_err(|_| SamplyBrokerError::RequestValidationFailed)?;
     let public = crypto::get_cert_and_client_by_cname_as_pemstr(&client_id).await;
     if public.is_none() {
         return Err(SamplyBrokerError::VaultError("Unable to retrieve matching certificate".into()));
@@ -63,8 +63,8 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::ClientPublicPortion, RS
         .map_err(|e| {
             SamplyBrokerError::SignEncryptError(format!("Unable to initialize public key: {}", e))
         })?;
-    let content = pubkey.verify_token::<Value>(&token, None)
-        .map_err(|_| SamplyBrokerError::ValidationFailed )?;
+    let content = pubkey.verify_token::<Value>(token, None)
+        .map_err(|_| SamplyBrokerError::RequestValidationFailed )?;
     Ok((public, pubkey, content))
 }
 
@@ -95,14 +95,14 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
     let digest_actual = make_extra_fields_digest(req.method(), req.uri(), req.headers())
         .map_err(|_| ERR_SIG)?;
     
-    if ! (digest_actual == digest_claimed) {
+    if digest_actual != digest_claimed {
         warn!("Digests did not match: expected {}, received {}", digest_claimed, digest_actual);
         return Err(ERR_SIG);
     }
 
     let (custom_without, sig) = if let Some(token_without_extended_signature) = token_without_extended_signature {
         // Check if short token matches the long token
-        let content_without = pubkey.verify_token::<Value>(&token_without_extended_signature, None)
+        let content_without = pubkey.verify_token::<Value>(token_without_extended_signature, None)
             .map_err(|e| {
                 warn!("Unable to verify short token {}: {}", token_without_extended_signature, e);
                 ERR_SIG
@@ -124,9 +124,9 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
             id: MsgId::new(),
             from: public.client.clone(),
         };
-        let serialized = serde_json::to_string(&msg_empty).unwrap();
+        let serialized = serde_json::to_string(&msg_empty).unwrap(); // known input
         (
-             serde_json::from_str::<M>(&serialized).unwrap(),
+             serde_json::from_str::<M>(&serialized).unwrap(), // known input
              ""
         )
     };
@@ -151,7 +151,7 @@ pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBrokerErr
     let privkey = &config::CONFIG_SHARED.privkey_rs256;
     
     let claims = 
-        Claims::with_custom_claims::<Value>(json.clone(), Duration::from_hours(1));
+        Claims::with_custom_claims::<Value>(json, Duration::from_hours(1));
 
     let token = privkey.sign(claims)
         .map_err(|_| SamplyBrokerError::SignEncryptError("Unable to sign JWT".into()))?;
@@ -180,5 +180,5 @@ pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap)
     let digest = crypto::hash(&buf)?;
     let digest = base64::encode_block(&digest);
 
-    Ok(String::from(digest))
+    Ok(digest)
 }

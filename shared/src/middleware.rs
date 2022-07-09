@@ -9,6 +9,7 @@ pub async fn log(req: Request<Body>, next: Next<Body>) -> Response {
     // span!(Level::INFO, log);
     let mut line = format!("<= {} {}", req.method(), req.uri());
     let resp = next.run(req).await;
+    #[allow(clippy::format_push_string)] // see https://github.com/rust-lang/rust-clippy/issues/9077
     line.push_str(&format!(" || => {}", resp.status()));
     if resp.status().is_success() {
         info!("{}", line);

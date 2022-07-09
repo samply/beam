@@ -22,7 +22,7 @@ pub async fn main() -> anyhow::Result<()> {
 async fn check_clientid() -> Result<(),SamplyBrokerError> {
     let client_id_cli = &config::CONFIG_PROXY.client_id;
     let _public_info = shared::crypto::get_cert_and_client_by_cname_as_pemstr(client_id_cli).await
-        .ok_or(SamplyBrokerError::VaultError(format!("Unable to fetch your certificate from vault. Is your local Client ID really {}?", client_id_cli)))?;
+        .ok_or_else(|| SamplyBrokerError::VaultError(format!("Unable to fetch your certificate from vault. Is your local Client ID really {}?", client_id_cli)))?;
 
     // TODO: Check if certificate CNAME matches client_id_cli
 

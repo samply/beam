@@ -58,7 +58,7 @@ async fn get_results_for_task(
     Extension(state): Extension<State>,
 ) -> Result<(StatusCode, Json<Vec<MsgSigned<MsgTaskResult>>>), (StatusCode, &'static str)> {
     debug!("get_results_for_task called by {}: {:?}, {:?}", msg.get_from(), task_id, block);
-    let filter_for_me = MsgFilter { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::OR };
+    let filter_for_me = MsgFilter { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::Or };
     let (mut results, rx)  = {
         let tasks = state.tasks.read().await;
         let task = match tasks.get(&task_id) {
@@ -68,10 +68,10 @@ async fn get_results_for_task(
         if task.get_from() != msg.get_from() {
             return Err((StatusCode::UNAUTHORIZED, "Not your task."));
         }
-        let results = task.msg.results.values().map(|v| v.clone()).collect();
+        let results = task.msg.results.values().cloned().collect();
         let rx = match would_wait_for_elements(&results, &block) {
             true => Some(state.new_result_tx.read().await.get(&task_id)
-                        .expect(&format!("Internal error: No result_tx found for task {}", task_id))
+                        .unwrap_or_else(|| panic!("Internal error: No result_tx found for task {}", task_id))
                         .subscribe()),
             false => None,
         };
@@ -156,7 +156,7 @@ async fn get_tasks(
         return Err((StatusCode::UNAUTHORIZED, "You can only list messages created by you (from) or directed to you (to)."));
     }
     // Step 1: Get initial vector fill from HashMap + receiver for new elements
-    let filter_from_or_for_me = MsgFilter { from: from.as_ref(), to: to.as_ref(), mode: MsgFilterMode::OR };
+    let filter_from_or_for_me = MsgFilter { from: from.as_ref(), to: to.as_ref(), mode: MsgFilterMode::Or };
     let (mut vec, new_task_rx) = {
         let map = state.tasks.read().await;
         let vec: Vec<MsgSigned<MsgTaskRequest>> = map
@@ -172,7 +172,7 @@ async fn get_tasks(
 }
 
 #[allow(dead_code)]
-enum MsgFilterMode { OR, AND }
+enum MsgFilterMode { Or, And }
 struct MsgFilter<'a> {
     from: Option<&'a ClientId>,
     to: Option<&'a ClientId>,
@@ -182,8 +182,8 @@ struct MsgFilter<'a> {
 impl<'a> MsgFilter<'a> {
     fn filter<M: Msg>(&self, msg: &M) -> bool {
         match self.mode {
-            MsgFilterMode::OR => self.filter_or(msg),
-            MsgFilterMode::AND => self.filter_and(msg)
+            MsgFilterMode::Or => self.filter_or(msg),
+            MsgFilterMode::And => self.filter_and(msg)
         }
     }
 
@@ -290,7 +290,7 @@ async fn post_result(
         state.new_result_tx.read().await;
     let sender = sender
         .get(&task_id)
-        .expect(&format!("Internal error: No result_tx found for task {}", task_id));
+        .unwrap_or_else(|| panic!("Internal error: No result_tx found for task {}", task_id));
     if let Err(e) = sender.send(result) {
         debug!("Unable to send notification: {}. Ignoring since probably noone is currently waiting for tasks.", e);
     }
