@@ -17,7 +17,7 @@ struct State {
     new_result_tx: Arc<RwLock<HashMap<MsgId, Sender<MsgSigned<MsgTaskResult>>>>>,
 }
 
-pub(crate) async fn serve_axum(
+pub(crate) async fn serve(
     tasks: Arc<RwLock<HashMap<MsgId, MsgSigned<MsgTaskRequest>>>>,
     new_task_tx: Arc<Sender<MsgSigned<MsgTaskRequest>>>,
 ) -> anyhow::Result<()> {

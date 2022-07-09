@@ -17,7 +17,7 @@ use tracing::{info, debug, warn, error};
 
 use crate::{auth::AuthenticatedProxyClient};
 
-pub(crate) async fn reverse_proxy() -> anyhow::Result<()> {
+pub(crate) async fn serve() -> anyhow::Result<()> {
     let client = Client::builder()
         .build::<_, hyper::Body>(HttpsConnector::new());
 

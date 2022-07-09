@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 
-mod serve_axum;
+mod serve;
 #[cfg(debug_assertions)]
 mod devhelper;
 mod banner;
@@ -27,7 +27,7 @@ pub async fn main() -> anyhow::Result<()> {
     let tasks = Arc::new(RwLock::new(tasks));
     let new_tasks_tx = Arc::new(new_tasks_tx);
 
-    serve_axum::serve_axum(tasks, new_tasks_tx).await?;
+    serve::serve(tasks, new_tasks_tx).await?;
 
     Ok(())
 }

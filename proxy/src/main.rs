@@ -5,7 +5,7 @@ use shared::errors::SamplyBrokerError;
 use tracing::{warn, info};
 
 mod auth;
-mod reverse;
+mod serve;
 mod banner;
 
 #[tokio::main]
@@ -15,7 +15,7 @@ pub async fn main() -> anyhow::Result<()> {
 
     check_clientid().await?;
 
-    reverse::reverse_proxy().await?;
+    serve::serve().await?;
     Ok(())
 }
 
