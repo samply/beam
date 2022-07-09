@@ -26,14 +26,14 @@ tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 
 # Crypto
 rand = "0.8.5"
-rsa = "*" # see https://github.com/jedisct1/rust-jwt-simple/issues/64
+rsa = "0.6"
 sha2 = "0.10.2"
 openssl = "0.10.40"
 aes-gcm = "0.9.4"
 vaultrs = "0.6.2"
-tokio-test = "0.4.2"
 static_init = "1.0.2"
-jwt-simple = "0.11.0"
+#jwt-simple = "0.11.0"
+jwt-simple = { git = "https://github.com/jedisct1/rust-jwt-simple", rev="b6a2c5be" } # <= Change once version >0.11.0 is out
 
 # Error handling
 thiserror = "1.0.31"
@@ -43,6 +43,9 @@ anyhow = "1.0.58"
 clap = { version = "3.2.8", features = ["env", "derive"] }
 
 http = "*"
+
+[dev-dependencies]
+tokio-test = "0.4.2"
 
 [features]
 default = []

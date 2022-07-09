@@ -35,8 +35,5 @@ tracing = "0.1.35"
 serde = "1"
 serde_json = "1"
 
-# Param parsing
-jwt-simple = "0.11.0"
-
 [build-dependencies]
 build-data = "0"
