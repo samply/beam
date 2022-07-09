@@ -19,7 +19,7 @@ pub async fn main() -> anyhow::Result<()> {
     shared::logger::init_logger()?;
     banner::print_banner();
 
-    let a = config::CONFIG_CENTRAL.bind_addr; // Initialize config
+    let _ = config::CONFIG_CENTRAL.bind_addr; // Initialize config
 
     let tasks: HashMap<MsgId, MsgSigned<MsgTaskRequest>> = HashMap::new();
     let (new_tasks_tx, _) = tokio::sync::broadcast::channel::<MsgSigned<MsgTaskRequest>>(512);

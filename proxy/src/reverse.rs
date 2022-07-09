@@ -84,8 +84,8 @@ async fn handler_health() -> StatusCode {
 async fn handler(
     Extension(client): Extension<Client<HttpsConnector<HttpConnector>>>,
     Extension(config): Extension<config_proxy::Config>,
-    AuthenticatedProxyClient(auth_client): AuthenticatedProxyClient,
-    mut req: Request<Body>,
+    AuthenticatedProxyClient(_): AuthenticatedProxyClient,
+    req: Request<Body>,
 ) -> Result<Response<Body>,(StatusCode, &'static str)> {
     let path = req.uri().path();
     let path_query = req

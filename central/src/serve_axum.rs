@@ -171,6 +171,7 @@ async fn get_tasks(
     Ok((statuscode, Json(vec)))
 }
 
+#[allow(dead_code)]
 enum MsgFilterMode { OR, AND }
 struct MsgFilter<'a> {
     from: Option<&'a ClientId>,

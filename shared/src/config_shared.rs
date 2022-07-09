@@ -36,17 +36,13 @@ struct VaultConfig {
     client_id: Option<String>,
 }
 
+#[allow(dead_code)]
 pub(crate) struct Config {
     pub(crate) pki_address: Uri,
     pub(crate) pki_realm: String,
     pub(crate) pki_apikey: String,
-    // pub(crate) privkey_pem: String,
     pub(crate) privkey_rs256: RS256KeyPair,
     pub(crate) privkey_rsa: RsaPrivateKey
-}
-
-pub(crate) struct Keys {
-    pub(crate) my_rs256: RS256KeyPair,
 }
 
 impl crate::config::Config for Config {
