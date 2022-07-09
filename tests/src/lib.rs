@@ -9,7 +9,6 @@ mod tests {
     use reqwest::{StatusCode, header::{self, HeaderValue, AUTHORIZATION}, Method};
     use restest::{request, Context, Request, assert_body_matches};
     use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, Msg, MsgId};
-    use lazy_static::lazy_static;
     use static_init::dynamic;
 
     use rsa::{pkcs8::FromPrivateKey, pkcs1::FromRsaPrivateKey};
@@ -50,7 +49,7 @@ mod tests {
                     ("bash",
                         vec!("-c", "../pki/pki devsetup"),
                         HashMap::new(),
-                        None,
+                        Some(PEMFILE),
                         Some(VAULT_HEALTH)),
                     ("central",
                         vec!("--pki-address", VAULT_BASE, "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", PEMFILE),
@@ -63,6 +62,7 @@ mod tests {
                         Some(PEMFILE),
                         Some(PROXY_HEALTH))
                 ] {
+                println!("{}: START", cmd);
                 let (tx, rx) = oneshot::channel::<()>();
                 txes.push(tx);
                 let mut proc = Command::cargo_bin(cmd)
@@ -113,6 +113,7 @@ mod tests {
                     }
                     // println!("Found file {}", wait);
                 }
+                println!("{}: STARTED", cmd);
             }
             Ok(Servers { txes })
         }

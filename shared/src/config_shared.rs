@@ -3,8 +3,8 @@ use std::{path::PathBuf, rc::Rc, sync::Arc, fs::read_to_string};
 use hyper::Uri;
 use clap::Parser;
 use jwt_simple::prelude::RS256KeyPair;
-use lazy_static::lazy_static;
 use rsa::{RsaPrivateKey, pkcs8::FromPrivateKey, pkcs1::FromRsaPrivateKey};
+use static_init::dynamic;
 
 /// Settings for Samply.Broker.Shared
 #[derive(Parser,Debug)]
@@ -49,23 +49,27 @@ pub(crate) struct Keys {
     pub(crate) my_rs256: RS256KeyPair,
 }
 
-lazy_static!{
-    pub(crate) static ref CONFIG: Config = {
+impl crate::config::Config for Config {
+    fn load() -> Result<Self,SamplyBrokerError> {
         let vc = VaultConfig::parse();
+
+        // Private key
         let privkey_pem = read_to_string(&vc.privkey_file)
-            .expect("Unable to load private key")
+            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Unable to load private key from disk".into()))?
             .trim().to_string();
         let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
             .or(RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
-            .expect("Unable to interpret private key PEM as PKCS#1 or PKCS#8.");
-        let pki_apikey = read_to_string(vc.pki_apikey_file)
-            .expect("Failed to read PKI token.")
-            .trim().to_string();
+            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Unable to interpret private key PEM as PKCS#1 or PKCS#8.".into()))?;
         let mut privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem)
-            .expect("Failed to read PKI token.");
+            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Unable to interpret private key PEM as PKCS#1 or PKCS#8.".into()))?;
         if let Some(client_id) = vc.client_id {
             privkey_rs256 = privkey_rs256.with_key_id(&client_id);
         }
-        Config { pki_address: vc.pki_address, pki_realm: vc.pki_realm, pki_apikey, privkey_rs256, privkey_rsa }
-    };
+    
+        // API Key
+        let pki_apikey = read_to_string(vc.pki_apikey_file)
+            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Failed to read PKI token.".into()))?
+            .trim().to_string();
+        Ok(Config { pki_address: vc.pki_address, pki_realm: vc.pki_realm, pki_apikey, privkey_rs256, privkey_rsa })
+    }    
 }

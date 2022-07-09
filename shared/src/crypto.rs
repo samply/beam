@@ -1,10 +1,7 @@
-extern crate lazy_static;
-
-use crate::config_shared::{self, CONFIG};
 use aes_gcm::aead::generic_array::GenericArray;
 use axum::{Json, http::Request, body::Body};
-use lazy_static::lazy_static;
 
+use static_init::dynamic;
 use tokio::{sync::{RwLock, mpsc, oneshot}};
 use tracing::{debug, warn, info, error};
 use std::{path::Path, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string};
@@ -33,10 +30,10 @@ impl CertificateCache {
         cn_to_serial: HashMap::new(),
         vault_client: VaultClient::new(
             VaultClientSettingsBuilder::default()
-                .address(&CONFIG.pki_address.to_string())
-                .token(&CONFIG.pki_apikey)
+                .address(&config::CONFIG_SHARED.pki_address.to_string())
+                .token(&config::CONFIG_SHARED.pki_apikey)
                 .build()?)?,
-        pki_realm: CONFIG.pki_realm.clone(),
+        pki_realm: config::CONFIG_SHARED.pki_realm.clone(),
         update_trigger
     })
     }
@@ -150,24 +147,22 @@ impl CertificateCache {
     }
 }
 
-lazy_static!{
-    static ref CERT_CACHE: Arc<RwLock<CertificateCache>> = {
-        let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBrokerError>>>(1);
-        let config = &config_shared::CONFIG;
-        let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
-        let cc2 = cc.clone();
-        tokio::task::spawn(async move {
-            while let Some(sender) = rx.recv().await {
-                let mut locked_cache = cc2.write().await;
-                let result = locked_cache.update_certificates_mut().await;
-                if let Err(_) = sender.send(result) {
-                    warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
-                }
+#[dynamic(lazy)]
+static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
+    let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBrokerError>>>(1);
+    let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
+    let cc2 = cc.clone();
+    tokio::task::spawn(async move {
+        while let Some(sender) = rx.recv().await {
+            let mut locked_cache = cc2.write().await;
+            let result = locked_cache.update_certificates_mut().await;
+            if let Err(_) = sender.send(result) {
+                warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
             }
-        });
-        cc
-    };
-}
+        }
+    });
+    cc
+};
 
 async fn get_cert_by_serial(serial: &str) -> Option<X509>{
     match CertificateCache::get_by_serial(serial).await {
@@ -326,7 +321,7 @@ pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &V
         .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Cannot encrypt message".into())))?;
 
     //Sign Message
-    let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &CONFIG.privkey_rsa)?;
+    let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &config::CONFIG_SHARED.privkey_rsa)?;
 
     // Place new Body in Request
     let new_body = Body::from(signed_message);

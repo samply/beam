@@ -2,6 +2,7 @@ use std::{net::SocketAddr, path::PathBuf, fs::read_to_string};
 
 use axum::http::Uri;
 use clap::Parser;
+use static_init::dynamic;
 use crate::{errors::SamplyBrokerError, ClientId};
 use tracing::info;
 use std::str::FromStr;
@@ -38,17 +39,19 @@ pub struct Config {
     pub pki_token: String,
 }
 
-pub(crate) fn get_config() -> Result<Config,SamplyBrokerError> {
-    let cli_args = CliArgs::parse();
-    let pki_token = read_to_string(&cli_args.pki_apikey_file)
-        .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Unable to read PKI API key at {}: {}", &cli_args.pki_apikey_file.to_string_lossy(), e)))?.trim().to_string();
-
-    info!("Successfully read config and API keys from CLI and secrets files.");
-    let config = Config {
-        bind_addr: cli_args.bind_addr,
-        pki_address: cli_args.pki_address,
-        pki_realm: cli_args.pki_realm,
-        pki_token,
-    };
-    Ok(config)
+impl crate::config::Config for Config {
+    fn load() -> Result<Self,SamplyBrokerError> {
+        let cli_args = CliArgs::parse();
+        let pki_token = read_to_string(&cli_args.pki_apikey_file)
+            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Unable to read PKI API key at {}: {}", &cli_args.pki_apikey_file.to_string_lossy(), e)))?.trim().to_string();
+    
+        info!("Successfully read config and API keys from CLI and secrets files.");
+        let config = Config {
+            bind_addr: cli_args.bind_addr,
+            pki_address: cli_args.pki_address,
+            pki_realm: cli_args.pki_realm,
+            pki_token,
+        };
+        Ok(config)
+    }
 }

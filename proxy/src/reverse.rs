@@ -11,7 +11,7 @@ use hyper::{Body, StatusCode, header::{self, HeaderName}, Client, client::HttpCo
 use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
-use shared::{crypto_jwt, errors::SamplyBrokerError, MsgSigned, Msg, MsgTaskRequest, MsgTaskResult, MsgEmpty, config, config_proxy, MsgPing, ClientId};
+use shared::{crypto_jwt, errors::SamplyBrokerError, MsgSigned, Msg, MsgTaskRequest, MsgTaskResult, MsgEmpty, MsgPing, ClientId, config, config_proxy};
 use tower::ServiceBuilder;
 use tracing::{info, debug, warn, error};
 
@@ -21,19 +21,7 @@ pub(crate) async fn reverse_proxy() -> anyhow::Result<()> {
     let client = Client::builder()
         .build::<_, hyper::Body>(HttpsConnector::new());
 
-    // Some weird handling in lazy_static makes this necessary.
     let config = config::CONFIG_PROXY.clone();
-    let config: config_proxy::Config = config_proxy::Config {
-        broker_uri: config.broker_uri,
-        broker_host_header: config.broker_host_header,
-        bind_addr: config.bind_addr,
-        pki_address: config.pki_address,
-        // pki_token: config.pki_token, // moved to shared
-        pki_realm: config.pki_realm,
-        // privkey_pem: config.privkey_pem, // moved to shared
-        client_id: config.client_id,
-        api_keys: config.api_keys,
-    };
 
     let router1 = Router::new()
         .route("/v1/*path", any(handler))

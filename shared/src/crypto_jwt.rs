@@ -5,8 +5,7 @@ use openssl::base64;
 use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use tracing::{debug, error, warn};
-use crate::{ClientId, errors::SamplyBrokerError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, config_shared};
-use lazy_static::lazy_static;
+use crate::{ClientId, errors::SamplyBrokerError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config};
 
 const ERR_SIG: (StatusCode, &'static str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -149,7 +148,7 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
 pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBrokerError> {
     let json = serde_json::to_value(input)
         .map_err(|e| SamplyBrokerError::SignEncryptError(format!("Serialization failed: {}", e)))?;
-    let privkey = &config_shared::CONFIG.privkey_rs256;
+    let privkey = &config::CONFIG_SHARED.privkey_rs256;
     
     let claims = 
         Claims::with_custom_claims::<Value>(json.clone(), Duration::from_hours(1));

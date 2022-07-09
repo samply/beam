@@ -2,10 +2,8 @@ use std::collections::HashMap;
 
 use axum::{async_trait, extract::{FromRequest, RequestParts}};
 use hyper::{StatusCode, header::{HeaderName, self}};
-use shared::ClientId;
-use lazy_static::lazy_static;
+use shared::{ClientId, config_proxy, config};
 
-use shared::config;
 use tracing::debug;
 
 pub(crate) struct AuthenticatedProxyClient(pub(crate) ClientId);
