@@ -7,8 +7,9 @@ pub fn init_logger() -> Result<(), SetGlobalDefaultError>{
     let subscriber = subscriber
         .with_env_filter("hyper=warn,rustify=warn,vaultrs=warn,info");
 
-    // #[cfg(debug_assertions)]
-    // let subscriber = subscriber.with_max_level(Level::DEBUG);
+    #[cfg(debug_assertions)]
+    let subscriber = subscriber
+        .with_env_filter("hyper=warn,rustify=warn,vaultrs=warn,debug");
 
     let subscriber = subscriber.finish();
     tracing::subscriber::set_global_default(subscriber)?;
