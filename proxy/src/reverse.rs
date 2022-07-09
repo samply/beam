@@ -31,7 +31,8 @@ pub(crate) async fn reverse_proxy() -> anyhow::Result<()> {
     let router2 = Router::new()
         .route("/health", get(handler_health));
     
-    let app = router1.merge(router2);
+    let app = router1.merge(router2)
+        .layer(axum::middleware::from_fn(shared::middleware::log));
 
     // Graceful shutdown handling
     let (tx, rx) = tokio::sync::mpsc::channel(1);
@@ -62,7 +63,7 @@ const ERR_INTERNALCRYPTO: (StatusCode, &'static str) = (StatusCode::INTERNAL_SER
 const ERR_UPSTREAM: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Unable to parse server's reply.");
 const ERR_VALIDATION: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Unable to verify signature in server reply.");
 
-// async fn handler_health(
+async fn handler_health() -> StatusCode {
 //     client: Extension<Client<HttpsConnector<HttpConnector>>>,
 //     config: Extension<config_proxy::Config>,
 //     auth_client: AuthenticatedProxyClient,
@@ -77,9 +78,6 @@ const ERR_VALIDATION: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Un
 
 //     // let resp = handler(client, config, auth_client, req).await;
 //     todo!()
-// }
-
-async fn handler_health() -> StatusCode {
     StatusCode::OK
 }
 
@@ -89,8 +87,6 @@ async fn handler(
     AuthenticatedProxyClient(auth_client): AuthenticatedProxyClient,
     mut req: Request<Body>,
 ) -> Result<Response<Body>,(StatusCode, &'static str)> {
-    debug!(?req, ?auth_client, "<=");
-
     let path = req.uri().path();
     let path_query = req
         .uri()
@@ -108,8 +104,6 @@ async fn handler(
     //     .map_err(|_| ERR_BODY)?;
 
     let req = sign_request(req, &config, &target_uri).await?;
-
-    info!("=> {:?}", req);
     
     let resp = client.request(req).await
         .map_err(|e| {
@@ -124,7 +118,6 @@ async fn handler(
         .map_err(|_| ERR_UPSTREAM)?;
     
     // TODO: Always return application/jwt from server.
-    debug!("Validating response {}", std::str::from_utf8(&bytes).unwrap());
     if bytes.len() > 0 {
         let json = serde_json::from_slice::<Value>(&bytes);
         if json.is_err() {

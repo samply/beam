@@ -2,15 +2,16 @@
 
 use shared::config;
 use shared::errors::SamplyBrokerError;
-use tracing::warn;
+use tracing::{warn, info};
 
 mod auth;
 mod reverse;
-// mod config;
+mod banner;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
     shared::logger::init_logger()?;
+    banner::print_banner();
 
     check_clientid().await?;
 

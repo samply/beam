@@ -29,6 +29,7 @@ pub mod config_central;
 // #[cfg(feature = "config-for-proxy")]
 pub mod config_proxy;
 
+pub mod middleware;
 
 #[derive(Serialize,Debug,Clone,Eq,Hash,PartialEq)]
 #[serde(transparent)]
