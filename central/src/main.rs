@@ -16,6 +16,7 @@ use tracing::info;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {    
+    shared::config::prepare_env();
     #[cfg(debug_assertions)]
     if devhelper::print_example_objects() { return Ok(()); }
     

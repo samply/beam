@@ -14,6 +14,8 @@ use crate::auth::AuthenticatedProxyClient;
 pub(crate) fn router(client: &Client<ProxyConnector<HttpConnector>>) -> Router {
     let config = config::CONFIG_PROXY.clone();
     Router::new()
+        // We need both path variants so the server won't send us into a redirect loop (/tasks, /tasks/, ...)
+        .route("/v1/tasks", any(handler_tasks))
         .route("/v1/tasks/*path", any(handler_tasks))
         .layer(Extension(client.clone()))
         .layer(Extension(config))
@@ -92,7 +94,7 @@ async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_
                 val
             },
             Err(e) => {
-                warn!("Received Body is invalid json: {}", e);
+                warn!("Received Body is invalid json: {}. Body was {}", e, std::str::from_utf8(&body).unwrap_or("(not valid UTF-8)"));
                 return Err(ERR_BODY);
             }
         }
