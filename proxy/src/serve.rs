@@ -1,15 +1,14 @@
 use hyper::Client;
-use hyper_tls::HttpsConnector;
-use shared::config;
+use shared::{config, errors::SamplyBrokerError};
 use tracing::{info, debug, warn, error};
 
 use crate::{serve_health, serve_tasks};
 
 pub(crate) async fn serve() -> anyhow::Result<()> {
-    let client = Client::builder()
-        .build::<_, hyper::Body>(HttpsConnector::new());
-
     let config = config::CONFIG_PROXY.clone();
+    
+    let client = shared::http_proxy::build_hyper_client()
+        .map_err(SamplyBrokerError::HttpProxyProblem)?;
 
     let router_tasks = serve_tasks::router(&client);
 

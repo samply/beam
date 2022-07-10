@@ -3,7 +3,7 @@ use std::time::SystemTime;
 use axum::{Router, Extension, routing::any, response::Response, http::HeaderValue};
 use httpdate::fmt_http_date;
 use hyper::{Client, client::HttpConnector, StatusCode, Request, Body, Uri, body, header};
-use hyper_tls::HttpsConnector;
+use hyper_proxy::ProxyConnector;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use shared::{config, config_proxy, crypto_jwt, MsgTaskRequest, MsgTaskResult, MsgEmpty, Msg, MsgSigned};
@@ -11,7 +11,7 @@ use tracing::{warn, debug, error};
 
 use crate::auth::AuthenticatedProxyClient;
 
-pub(crate) fn router(client: &Client<HttpsConnector<HttpConnector>>) -> Router {
+pub(crate) fn router(client: &Client<ProxyConnector<HttpConnector>>) -> Router {
     let config = config::CONFIG_PROXY.clone();
     Router::new()
         .route("/v1/tasks/*path", any(handler_tasks))
@@ -25,7 +25,7 @@ const ERR_UPSTREAM: (StatusCode, &str) = (StatusCode::BAD_GATEWAY, "Unable to pa
 const ERR_VALIDATION: (StatusCode, &str) = (StatusCode::BAD_GATEWAY, "Unable to verify signature in server reply.");
 
 async fn handler_tasks(
-    Extension(client): Extension<Client<HttpsConnector<HttpConnector>>>,
+    Extension(client): Extension<Client<ProxyConnector<HttpConnector>>>,
     Extension(config): Extension<config_proxy::Config>,
     AuthenticatedProxyClient(_): AuthenticatedProxyClient,
     req: Request<Body>,

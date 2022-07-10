@@ -30,6 +30,7 @@ pub mod config_central;
 pub mod config_proxy;
 
 pub mod middleware;
+pub mod http_proxy;
 
 #[derive(Serialize,Debug,Clone,Eq,Hash,PartialEq)]
 #[serde(transparent)]
