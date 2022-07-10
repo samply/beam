@@ -6,6 +6,8 @@ use tracing::{warn, info};
 
 mod auth;
 mod serve;
+mod serve_health;
+mod serve_tasks;
 mod banner;
 
 #[tokio::main]
