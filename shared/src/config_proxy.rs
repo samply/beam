@@ -27,15 +27,19 @@ pub type ApiKey = String;
 #[derive(Parser,Debug)]
 #[clap(author, version, about, long_about = None, arg_required_else_help(true))]
 pub struct CliArgs {
-    /// local bind address
+    /// Local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8081").unwrap())]
     pub bind_addr: SocketAddr,
+
+    /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
+    #[clap(long, env, value_parser)]
+    pub http_proxy: Option<Uri>,
     
-    /// the broker's base URL, e.g. https://broker.samply.de
+    /// The broker's base URL, e.g. https://broker.samply.de
     #[clap(long, env, value_parser)]
     pub broker_url: Uri,
 
-    /// this proxy's client id, e.g. site23.broker.samply.de
+    /// This proxy's client id, e.g. site23.broker.samply.de
     #[clap(long, env, value_parser)]
     pub client_id: String,
 

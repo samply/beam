@@ -2,14 +2,17 @@
 
 use shared::config;
 use shared::errors::SamplyBrokerError;
-use tracing::{warn, info};
+use tracing::{warn, info, debug};
 
 mod auth;
 mod serve;
+mod serve_health;
+mod serve_tasks;
 mod banner;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
+    shared::config::prepare_env();
     shared::logger::init_logger()?;
     banner::print_banner();
 

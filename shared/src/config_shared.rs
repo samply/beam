@@ -10,6 +10,10 @@ use static_init::dynamic;
 #[derive(Parser,Debug)]
 #[clap(author, version, about, long_about = None)]
 struct VaultConfig {
+    /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
+    #[clap(long, env, value_parser)]
+    pub http_proxy: Option<Uri>,
+
     /// samply.pki: URL to HTTPS endpoint
     #[clap(long, env, value_parser)]
     pki_address: Uri,
@@ -42,7 +46,8 @@ pub(crate) struct Config {
     pub(crate) pki_realm: String,
     pub(crate) pki_apikey: String,
     pub(crate) privkey_rs256: RS256KeyPair,
-    pub(crate) privkey_rsa: RsaPrivateKey
+    pub(crate) privkey_rsa: RsaPrivateKey,
+    pub(crate) http_proxy: Option<Uri>,
 }
 
 impl crate::config::Config for Config {
@@ -66,6 +71,6 @@ impl crate::config::Config for Config {
         let pki_apikey = read_to_string(vc.pki_apikey_file)
             .map_err(|_| SamplyBrokerError::ConfigurationFailed("Failed to read PKI token.".into()))?
             .trim().to_string();
-        Ok(Config { pki_address: vc.pki_address, pki_realm: vc.pki_realm, pki_apikey, privkey_rs256, privkey_rsa })
+        Ok(Config { pki_address: vc.pki_address, pki_realm: vc.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy: vc.http_proxy })
     }    
 }

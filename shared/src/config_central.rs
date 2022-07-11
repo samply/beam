@@ -11,9 +11,13 @@ use std::str::FromStr;
 #[derive(Parser,Debug)]
 #[clap(author, version, about, long_about = None, arg_required_else_help(true))]
 pub struct CliArgs {
-    /// local bind address
+    /// Local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8080").unwrap())]
     pub bind_addr: SocketAddr,
+
+    /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
+    #[clap(long, env, value_parser)]
+    pub http_proxy: Option<Uri>,
 
     /// samply.pki: URL to HTTPS endpoint
     #[clap(long, env, value_parser)]

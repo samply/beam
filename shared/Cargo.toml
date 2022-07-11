@@ -20,6 +20,10 @@ url = "2.2.2"
 axum = "0.5.9"
 hyper = { version = "0.14.19", features = ["full"] }
 
+# HTTP client with proxy support
+#hyper-tls = "0.5.0"
+hyper-proxy = "0.9.1"
+
 # Logging
 tracing = "0.1.35"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
@@ -30,7 +34,7 @@ rsa = "0.6"
 sha2 = "0.10.2"
 openssl = "0.10.40"
 aes-gcm = "0.9.4"
-vaultrs = "0.6.2"
+vaultrs = { git = "https://github.com/lablans/vaultrs", branch = "feature/choose-tls", default-features = false, features = [ "native-tls" ] }
 static_init = "1.0.2"
 #jwt-simple = "0.11.0"
 jwt-simple = { git = "https://github.com/jedisct1/rust-jwt-simple", rev="b6a2c5be" } # <= Change once version >0.11.0 is out

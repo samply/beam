@@ -24,7 +24,9 @@ pub enum SamplyBrokerError {
     #[error("Internal synchronization error: {0}")]
     InternalSynchronizationError(String),
     #[error("Error building HTTP request: {0}")]
-    HttpRequestBuildError(#[from] http::Error)
+    HttpRequestBuildError(#[from] http::Error),
+    #[error("Problem with HTTP proxy: {0}")]
+    HttpProxyProblem(std::io::Error),
 }
 
 impl From<AddrParseError> for SamplyBrokerError {
@@ -50,12 +52,6 @@ impl From<ClientError> for SamplyBrokerError {
 impl From<ErrorStack> for SamplyBrokerError {
     fn from(e: ErrorStack) -> Self {
         Self::SignEncryptError(e.to_string())
-    }
-}
-
-impl From<std::io::Error> for SamplyBrokerError {
-    fn from(e: std::io::Error) -> Self {
-        Self::ConfigurationFailed(e.to_string())
     }
 }
 

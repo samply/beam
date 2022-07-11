@@ -29,3 +29,11 @@ pub(crate) static CONFIG_SHARED: config_shared::Config = {
     debug!("Loading config CONFIG_SHARED");
     load()
 };
+
+pub fn prepare_env() {
+    for var in ["http_proxy"] {
+        for (k,v) in std::env::vars().filter(|(k,_)| k.to_lowercase() == var) {
+            std::env::set_var(k.to_uppercase(), v);
+        }
+    }
+}
