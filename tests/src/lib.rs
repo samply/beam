@@ -11,7 +11,7 @@ mod tests {
     use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, Msg, MsgId};
     use static_init::dynamic;
 
-    use rsa::{pkcs8::FromPrivateKey, pkcs1::FromRsaPrivateKey};
+    use rsa::{pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
     use tokio::{sync::{oneshot, OnceCell, Mutex}, runtime::Handle};
 
     const PEMFILE: &str = "../pki/test.priv.pem";

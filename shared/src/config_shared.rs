@@ -3,7 +3,7 @@ use std::{path::PathBuf, rc::Rc, sync::Arc, fs::read_to_string};
 use hyper::Uri;
 use clap::Parser;
 use jwt_simple::prelude::RS256KeyPair;
-use rsa::{RsaPrivateKey, pkcs8::FromPrivateKey, pkcs1::FromRsaPrivateKey};
+use rsa::{RsaPrivateKey, pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
 use static_init::dynamic;
 
 /// Settings for Samply.Broker.Shared

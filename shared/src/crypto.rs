@@ -5,7 +5,7 @@ use static_init::dynamic;
 use tokio::{sync::{RwLock, mpsc, oneshot}};
 use tracing::{debug, warn, info, error};
 use std::{path::Path, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string};
-use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PaddingScheme, pkcs8::{FromPublicKey, FromPrivateKey}};
+use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PaddingScheme, pkcs1::DecodeRsaPublicKey};
 use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 use vaultrs::{client::{VaultClient, VaultClientSettingsBuilder},pki};
@@ -361,8 +361,10 @@ fn x509_cert_to_x509_public_key(cert: &X509) -> Result<Vec<u8>, SamplyBrokerErro
 
 /// Converts the x509 pem-encoded public key to the rsa public key
 fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, SamplyBrokerError> {
-    let rsa_key: Result<RsaPublicKey,SamplyBrokerError> = RsaPublicKey::from_public_key_pem(std::str::from_utf8(cert_key)
-        .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Invalid character in certificate public key".into())))?)
+    let rsa_key = 
+        RsaPublicKey::from_pkcs1_pem(
+            std::str::from_utf8(cert_key)
+            .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Invalid character in certificate public key".into())))?)
         .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Can not extract public rsa key from certificate".into())));
     rsa_key
 }
