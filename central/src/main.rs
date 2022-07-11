@@ -1,9 +1,12 @@
 #![allow(unused_imports)]
 
-mod serve_axum;
+mod serve;
+mod serve_tasks;
+mod serve_health;
+mod banner;
+
 #[cfg(debug_assertions)]
 mod devhelper;
-mod banner;
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -21,13 +24,7 @@ pub async fn main() -> anyhow::Result<()> {
 
     let _ = config::CONFIG_CENTRAL.bind_addr; // Initialize config
 
-    let tasks: HashMap<MsgId, MsgSigned<MsgTaskRequest>> = HashMap::new();
-    let (new_tasks_tx, _) = tokio::sync::broadcast::channel::<MsgSigned<MsgTaskRequest>>(512);
-
-    let tasks = Arc::new(RwLock::new(tasks));
-    let new_tasks_tx = Arc::new(new_tasks_tx);
-
-    serve_axum::serve_axum(tasks, new_tasks_tx).await?;
+    serve::serve().await?;
 
     Ok(())
 }

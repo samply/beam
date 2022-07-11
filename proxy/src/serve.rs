@@ -17,19 +17,19 @@ use tracing::{info, debug, warn, error};
 
 use crate::{auth::AuthenticatedProxyClient};
 
-pub(crate) async fn reverse_proxy() -> anyhow::Result<()> {
+pub(crate) async fn serve() -> anyhow::Result<()> {
     let client = Client::builder()
         .build::<_, hyper::Body>(HttpsConnector::new());
 
     let config = config::CONFIG_PROXY.clone();
 
     let router1 = Router::new()
-        .route("/v1/*path", any(handler))
+        .route("/v1/tasks/*path", any(handler_tasks))
         .layer(Extension(client))
         .layer(Extension(config.clone()));
 
     let router2 = Router::new()
-        .route("/health", get(handler_health));
+        .route("/v1/health", get(handler_health));
     
     let app = router1.merge(router2)
         .layer(axum::middleware::from_fn(shared::middleware::log));
@@ -80,7 +80,7 @@ async fn handler_health() -> StatusCode {
     StatusCode::OK
 }
 
-async fn handler(
+async fn handler_tasks(
     Extension(client): Extension<Client<HttpsConnector<HttpConnector>>>,
     Extension(config): Extension<config_proxy::Config>,
     AuthenticatedProxyClient(_): AuthenticatedProxyClient,
@@ -95,12 +95,6 @@ async fn handler(
 
     let target_uri = Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
-
-    // let body_ref = req.body_mut();
-    // let body = body::to_bytes(body_ref).await
-    //     .map_err(|_| ERR_BODY)?;
-    // let body = String::from_utf8(body.to_vec())
-    //     .map_err(|_| ERR_BODY)?;
 
     let req = sign_request(req, &config, &target_uri).await?;
     
@@ -139,6 +133,7 @@ async fn handler(
     Ok(resp)
 }
 
+// TODO: This could be a middleware
 async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_uri: &Uri) -> Result<Request<Body>, (StatusCode, &'static str)> {
     let (mut parts, body) = req.into_parts();
     let body = body::to_bytes(body).await

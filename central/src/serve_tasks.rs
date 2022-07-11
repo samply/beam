@@ -17,37 +17,22 @@ struct State {
     new_result_tx: Arc<RwLock<HashMap<MsgId, Sender<MsgSigned<MsgTaskResult>>>>>,
 }
 
-pub(crate) async fn serve_axum(
-    tasks: Arc<RwLock<HashMap<MsgId, MsgSigned<MsgTaskRequest>>>>,
-    new_task_tx: Arc<Sender<MsgSigned<MsgTaskRequest>>>,
-) -> anyhow::Result<()> {
-    let state = State { tasks, new_task_tx, new_result_tx: Arc::new(RwLock::new(HashMap::new())) };
-    let app = Router::new()
-        .route("/health", get(handler_health))
+pub(crate) fn router() -> Router {
+    Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
         .route("/v1/tasks/:task_id/results", get(get_results_for_task).post(post_result))
-        .layer(Extension(state));
-
-    // Graceful shutdown handling
-    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-
-    ctrlc::set_handler(move || tx.blocking_send(()).expect("Could not send shutdown signal on channel."))
-        .expect("Error setting handler for graceful shutdown.");
-
-    info!("Listening for requests on {}", config::CONFIG_CENTRAL.bind_addr);
-    axum::Server::bind(&config::CONFIG_CENTRAL.bind_addr)
-        .serve(app.into_make_service())
-        .with_graceful_shutdown(async {
-            rx.recv().await;
-            info!("Shutting down.");
-        })
-        .await?;
-    Ok(())
+        .layer(Extension(State::default()))
 }
 
-// GET /health
-async fn handler_health() -> StatusCode {
-    StatusCode::OK
+impl Default for State {
+    fn default() -> Self {
+        let tasks: HashMap<MsgId, MsgSigned<MsgTaskRequest>> = HashMap::new();
+        let (new_task_tx, _) = tokio::sync::broadcast::channel::<MsgSigned<MsgTaskRequest>>(512);
+    
+        let tasks = Arc::new(RwLock::new(tasks));
+        let new_task_tx = Arc::new(new_task_tx);
+        State { tasks, new_task_tx, new_result_tx: Arc::new(RwLock::new(HashMap::new())) }
+    }
 }
 
 // GET /v1/tasks/:task_id/results
