@@ -28,3 +28,6 @@ anyhow = "*"
 # Logging is imported through shared
 tracing = "0.1.35"
 #tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
+
+[build-dependencies]
+build-data = "0"

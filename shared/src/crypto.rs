@@ -58,7 +58,7 @@ impl CertificateCache {
         match cache.cn_to_serial.get(cname){
             Some(serial) => cache.serial_to_x509.get(serial).cloned(),
             None => {
-                warn!("Unable to find cert {} even after update: {:?} {:?}", cname, cache.cn_to_serial, cache.serial_to_x509);
+                warn!("Unable to find cert {} even after update.", cname);
                 None
             }
         }
@@ -82,7 +82,7 @@ impl CertificateCache {
 
     /// Manually update cache from fetching all certs from the central vault
     async fn update_certificates() -> Result<(),SamplyBrokerError> {
-        info!("Triggering certificate update ...");
+        debug!("Triggering certificate update ...");
         let (tx, rx) = oneshot::channel::<Result<(),SamplyBrokerError>>();
         CERT_CACHE.read().await.update_trigger.send(tx).await
             .expect("Internal Error: Certificate Store Updater is not listening for requests.");

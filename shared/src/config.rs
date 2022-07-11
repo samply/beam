@@ -1,4 +1,5 @@
 use static_init::dynamic;
+use tracing::debug;
 
 use crate::{config_proxy, config_central, config_shared, errors::SamplyBrokerError};
 
@@ -14,18 +15,18 @@ fn load<T: Config>() -> T where {
 
 #[dynamic(lazy)]
 pub static CONFIG_PROXY: config_proxy::Config = {
-    eprintln!("CONFIG_PROXY");
+    debug!("Loading config CONFIG_PROXY");
     load()
 };
 
 #[dynamic(lazy)]
 pub static CONFIG_CENTRAL: config_central::Config = {
-    eprintln!("CONFIG_CENTRAL");
+    debug!("Loading config CONFIG_CENTRAL");
     load()
 };
 
 #[dynamic(lazy)]
 pub(crate) static CONFIG_SHARED: config_shared::Config = {
-    eprintln!("CONFIG_SHARED");
+    debug!("Loading config CONFIG_SHARED");
     load()
 };

@@ -3,11 +3,13 @@
 mod serve_axum;
 #[cfg(debug_assertions)]
 mod devhelper;
+mod banner;
 
 use std::{collections::HashMap, sync::Arc};
 
 use shared::*;
 use tokio::sync::RwLock;
+use tracing::info;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {    
@@ -15,6 +17,7 @@ pub async fn main() -> anyhow::Result<()> {
     if devhelper::print_example_objects() == true { return Ok(()); }
     
     shared::logger::init_logger()?;
+    banner::print_banner();
 
     let a = config::CONFIG_CENTRAL.bind_addr; // Initialize config
 
