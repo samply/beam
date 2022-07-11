@@ -5,7 +5,7 @@ use openssl::base64;
 use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use tracing::{debug, error, warn};
-use crate::{ClientId, errors::SamplyBrokerError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config};
+use crate::{BeamId, errors::SamplyBrokerError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -52,7 +52,7 @@ where
 pub async fn extract_jwt(token: &str) -> Result<(crypto::ClientPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBrokerError> {
     let metadata = Token::decode_metadata(token)
         .map_err(|_| SamplyBrokerError::RequestValidationFailed)?;
-    let client_id = ClientId::try_from(metadata.key_id().unwrap_or_default())
+    let client_id = BeamId::try_from(metadata.key_id().unwrap_or_default())
         .map_err(|_| SamplyBrokerError::RequestValidationFailed)?;
     let public = crypto::get_cert_and_client_by_cname_as_pemstr(&client_id).await;
     if public.is_none() {

@@ -33,7 +33,7 @@ struct VaultConfig {
     // TODO: The following arguments have been added for compatibility reasons with the proxy config. Find another way to merge configs.
     /// (included for technical reasons)
     #[clap(long, env, value_parser)]
-    broker_url: Option<Uri>,
+    broker_url: Uri,
 
     /// (included for technical reasons)
     #[clap(long, env, value_parser)]
@@ -48,6 +48,8 @@ pub(crate) struct Config {
     pub(crate) privkey_rs256: RS256KeyPair,
     pub(crate) privkey_rsa: RsaPrivateKey,
     pub(crate) http_proxy: Option<Uri>,
+    // pub(crate) broker_url: Uri,
+    pub(crate) broker_domain: String,
 }
 
 impl crate::config::Config for Config {
@@ -71,6 +73,12 @@ impl crate::config::Config for Config {
         let pki_apikey = read_to_string(vc.pki_apikey_file)
             .map_err(|_| SamplyBrokerError::ConfigurationFailed("Failed to read PKI token.".into()))?
             .trim().to_string();
-        Ok(Config { pki_address: vc.pki_address, pki_realm: vc.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy: vc.http_proxy })
+
+        let broker_domain = vc.broker_url.host();
+        if false {
+            todo!() // TODO Tobias: Check if matches certificate, and fail
+        }
+        let broker_domain = broker_domain.unwrap();
+        Ok(Config { pki_address: vc.pki_address, pki_realm: vc.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy: vc.http_proxy, broker_domain })
     }    
 }

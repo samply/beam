@@ -31,104 +31,8 @@ pub mod config_proxy;
 
 pub mod middleware;
 pub mod http_proxy;
-
-#[derive(Serialize,Debug,Clone,Eq,Hash,PartialEq)]
-#[serde(transparent)]
-pub struct ClientId {
-    id: String,
-}
-
-impl ClientId {
-    pub fn new(id: &str) -> Result<Self, SamplyBrokerError> {
-        if Self::is_valid_id_str(id) {
-            Ok(Self { id: id.into() })
-        } else {
-            Err(SamplyBrokerError::InvalidClientIdString(id.into()))
-        }
-    }
-
-    pub fn random() -> Self {
-        const LENGTH: u8 = 8;
-        const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-        const SUFFIX: &str = ".randomclientid";
-        let mut rng = rand::thread_rng();
-        let mut random_id: String = (0..=LENGTH)
-            .map(|_| {
-                let idx = rng.gen_range(0..CHARSET.len());
-                CHARSET[idx] as char
-            })
-            .collect();
-        random_id.push_str(SUFFIX);
-        ClientId::new(&random_id)
-            .expect("Internal Error: ClientId::random() generated invalid client id. This should not happen")
-    }
-
-    fn is_valid_id_str(id: &str) -> bool {
-        if ! id.contains('.') {
-            return false;
-        }
-        for char in id.chars() {
-            if !(char.is_alphanumeric() || char == '.' || char == '-'){
-                return false;
-            }
-        }
-        true
-    }
-}
-
-impl Display for ClientId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.id)
-    }
-}
-
-impl Default for ClientId {
-    fn default() -> Self {
-        Self::random()
-    }
-}
-
-impl TryFrom<String> for ClientId {
-    type Error = SamplyBrokerError;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::new(&value)
-    }
-}
-
-impl TryFrom<&str> for ClientId {
-    type Error = SamplyBrokerError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        Self::new(value)
-    }
-}
-
-impl<'de> Deserialize<'de> for ClientId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de> {
-        deserializer.deserialize_str(ClientIdVisitor)
-    }
-}
-
-struct ClientIdVisitor;
-
-impl<'de> Visitor<'de> for ClientIdVisitor {
-    type Value = ClientId;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(formatter, "string of lower-case letters and/or numbers and at least one '.' separator")
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        ClientId::new(v)
-            .map_err(|_| serde::de::Error::custom("Invalid client ID string"))
-    }
-}
+// pub mod beam_id;
+pub mod beam_id2;
 
 #[derive(Debug,Serialize,Deserialize,Clone,Copy,PartialEq,Eq,Hash)]
 pub struct MyUuid(Uuid);
@@ -223,12 +127,12 @@ impl<M: Msg> MsgSigned<M> {
 }
 
 #[dynamic]
-pub static EMPTY_VEC_CLIENTID: Vec<ClientId> = Vec::new();
+pub static EMPTY_VEC_CLIENTID: Vec<BeamId> = Vec::new();
 
 #[derive(Serialize,Deserialize,Debug)]
 pub struct MsgEmpty {
     pub id: MsgId,
-    pub from: ClientId,
+    pub from: BeamId,
 }
 
 impl Msg for MsgEmpty {
@@ -236,19 +140,19 @@ impl Msg for MsgEmpty {
         &self.id
     }
 
-    fn get_from(&self) -> &ClientId {
+    fn get_from(&self) -> &BeamId {
         &self.from
     }
 
-    fn get_to(&self) -> &Vec<ClientId> {
+    fn get_to(&self) -> &Vec<BeamId> {
         &EMPTY_VEC_CLIENTID
     }
 }
 
 pub trait Msg: Serialize {
     fn get_id(&self) -> &MsgId;
-    fn get_from(&self) -> &ClientId;
-    fn get_to(&self) -> &Vec<ClientId>;
+    fn get_from(&self) -> &BeamId;
+    fn get_to(&self) -> &Vec<BeamId>;
 }
 
 pub trait MsgWithBody : Msg{
@@ -270,11 +174,11 @@ impl<M: Msg> Msg for MsgSigned<M> {
         self.msg.get_id()
     }
 
-    fn get_from(&self) -> &ClientId {
+    fn get_from(&self) -> &BeamId {
         self.msg.get_from()
     }
 
-    fn get_to(&self) -> &Vec<ClientId> {
+    fn get_to(&self) -> &Vec<BeamId> {
         self.msg.get_to()
     }
 }
@@ -284,11 +188,11 @@ impl Msg for MsgTaskRequest {
         &self.id
     }
 
-    fn get_from(&self) -> &ClientId {
+    fn get_from(&self) -> &BeamId {
         &self.from
     }
 
-    fn get_to(&self) -> &Vec<ClientId> {
+    fn get_to(&self) -> &Vec<BeamId> {
         &self.to
     }
 }
@@ -298,11 +202,11 @@ impl Msg for MsgTaskResult {
         &self.id
     }
 
-    fn get_from(&self) -> &ClientId {
+    fn get_from(&self) -> &BeamId {
         &self.from
     }
 
-    fn get_to(&self) -> &Vec<ClientId> {
+    fn get_to(&self) -> &Vec<BeamId> {
         &self.to
     }
 }
@@ -322,20 +226,20 @@ impl Msg for MsgTaskResult {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskRequest {
     pub id: MsgId,
-    pub from: ClientId,
-    pub to: Vec<ClientId>,
+    pub from: BeamId,
+    pub to: Vec<BeamId>,
     pub task_type: MsgType,
     pub body: String,
     // pub expire: SystemTime,
     pub failure_strategy: FailureStrategy,
     #[serde(skip)]
-    pub results: HashMap<ClientId,MsgSigned<MsgTaskResult>>,
+    pub results: HashMap<BeamId,MsgSigned<MsgTaskResult>>,
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EncryptedMsgTaskRequest {
     pub id: MsgId,
-    pub from: ClientId,
-    pub to: Vec<ClientId>,
+    pub from: BeamId,
+    pub to: Vec<BeamId>,
     //auth
     pub task_type: Option<MsgType>,
     pub body: Option<String>,
@@ -344,14 +248,14 @@ pub struct EncryptedMsgTaskRequest {
     pub encrypted: String,
     pub encryption_keys: Vec<Option<String>>,
     #[serde(skip)]
-    pub results: HashMap<ClientId,MsgTaskResult>,
+    pub results: HashMap<BeamId,MsgTaskResult>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskResult {
     pub id: MsgId,
-    pub from: ClientId, // was: worker_id
-    pub to: Vec<ClientId>,
+    pub from: BeamId, // was: worker_id
+    pub to: Vec<BeamId>,
     pub task: MsgId,
     pub result: WorkResult,
 }
@@ -380,8 +284,8 @@ impl<M> HasWaitId<MsgId> for MsgSigned<M> where M: HasWaitId<MsgId> + Msg {
 
 impl MsgTaskRequest {
     fn new(
-        from: ClientId,
-        to: Vec<ClientId>,
+        from: BeamId,
+        to: Vec<BeamId>,
         task_type: MsgType,
         body: String,
         failure_strategy: FailureStrategy,
@@ -401,13 +305,13 @@ impl MsgTaskRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MsgPing {
     id: MsgId,
-    from: ClientId,
-    to: Vec<ClientId>,
+    from: BeamId,
+    to: Vec<BeamId>,
     nonce: [u8; 16]
 }
 
 impl MsgPing {
-    pub fn new(from: ClientId, to: ClientId) -> Self {
+    pub fn new(from: BeamId, to: BeamId) -> Self {
         let mut nonce = [0;16];
         openssl::rand::rand_bytes(&mut nonce)
             .expect("Critical Error: Failed to generate random byte array.");
@@ -420,19 +324,19 @@ impl Msg for MsgPing {
         &self.id
     }
 
-    fn get_from(&self) -> &ClientId {
+    fn get_from(&self) -> &BeamId {
         &self.from
     }
 
-    fn get_to(&self) -> &Vec<ClientId> {
+    fn get_to(&self) -> &Vec<BeamId> {
         &self.to
     }
 }
 
-pub fn generate_example_tasks(client1_id: Option<ClientId>) -> HashMap<MsgId, MsgTaskRequest> {
+pub fn generate_example_tasks(client1_id: Option<BeamId>) -> HashMap<MsgId, MsgTaskRequest> {
     let mut tasks: HashMap<MsgId, MsgTaskRequest> = HashMap::new();
     let client1 = client1_id.unwrap_or_default();
-    let client2 = ClientId::random();
+    let client2 = BeamId::random();
 
     let task_for_clients_1_2 = MsgTaskRequest::new(
         client1.clone(),

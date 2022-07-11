@@ -2,11 +2,11 @@ use shared::generate_example_tasks;
 
 #[cfg(debug_assertions)]
 pub(crate) fn print_example_objects() -> bool {
-    use shared::ClientId;
+    use shared::BeamId;
 
     if std::env::args().nth(1).unwrap_or_default() == "examples" {
         let client_id = match std::env::args().nth(2) {
-            Some(id) => ClientId::new(&id).ok(),
+            Some(id) => BeamId::new(&id).ok(),
             None => todo!(),
         };
         let tasks = generate_example_tasks(client_id);

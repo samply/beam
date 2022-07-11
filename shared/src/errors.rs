@@ -27,6 +27,8 @@ pub enum SamplyBrokerError {
     HttpRequestBuildError(#[from] http::Error),
     #[error("Problem with HTTP proxy: {0}")]
     HttpProxyProblem(std::io::Error),
+    #[error("Invalid Beam ID: {0}")]
+    InvalidBeamId(String)
 }
 
 impl From<AddrParseError> for SamplyBrokerError {

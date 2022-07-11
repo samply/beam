@@ -2,11 +2,11 @@ use std::collections::HashMap;
 
 use axum::{async_trait, extract::{FromRequest, RequestParts}};
 use hyper::{StatusCode, header::{HeaderName, self}};
-use shared::{ClientId, config_proxy, config};
+use shared::{BeamId, config_proxy, config};
 
 use tracing::debug;
 
-pub(crate) struct AuthenticatedProxyClient(pub(crate) ClientId);
+pub(crate) struct AuthenticatedProxyClient(pub(crate) BeamId);
 
 #[async_trait]
 impl<B: Send + Sync> FromRequest<B> for AuthenticatedProxyClient {
@@ -23,7 +23,7 @@ impl<B: Send + Sync> FromRequest<B> for AuthenticatedProxyClient {
                 return Err(UNAUTH_ERR);
             }
             let client_id = auth.next().unwrap_or("");
-            let client_id = ClientId::new(client_id).map_err(|_| UNAUTH_ERR)?;
+            let client_id = BeamId::new(client_id).map_err(|_| UNAUTH_ERR)?;
             let api_key_actual = 
                 config::CONFIG_PROXY.api_keys.get(&client_id)
                 .ok_or(UNAUTH_ERR)?;

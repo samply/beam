@@ -8,7 +8,7 @@ mod tests {
     use regex::Regex;
     use reqwest::{StatusCode, header::{self, HeaderValue, AUTHORIZATION}, Method};
     use restest::{request, Context, Request, assert_body_matches};
-    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, Msg, MsgId};
+    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, BeamId, Msg, MsgId, config_proxy};
     use static_init::dynamic;
 
     use rsa::{pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
@@ -58,7 +58,7 @@ mod tests {
                         Some(CENTRAL_HEALTH)),
                     ("proxy", 
                         vec!("--broker-url", "http://localhost:8080", "--client-id", MY_PROXY_ID, "--pki-address", "http://localhost:8200", "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", PEMFILE),
-                        HashMap::from([("CLIENTKEY_".to_string() + MY_CLIENT_ID_SHORT, "MySecret")]),
+                        HashMap::from([(config_proxy::APPKEY_PREFIX.to_string() + MY_CLIENT_ID_SHORT, "MySecret")]),
                         Some(PEMFILE),
                         Some(PROXY_HEALTH))
                 ] {
@@ -166,10 +166,10 @@ mod tests {
     }
 
     #[dynamic]
-    static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
+    static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(BeamId::new(MY_PROXY_ID).unwrap()));
 
     #[dynamic]
-    static MY_CLIENT_ID: ClientId = ClientId::new(MY_PROXY_ID).unwrap();
+    static MY_CLIENT_ID: BeamId = BeamId::new(MY_PROXY_ID).unwrap();
     // #[dynamic]
     // static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
 
