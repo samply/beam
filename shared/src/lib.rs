@@ -32,7 +32,6 @@ pub mod config_proxy;
 
 pub mod middleware;
 pub mod http_proxy;
-// pub mod beam_id;
 pub mod beam_id2;
 
 #[cfg(debug_assertions)]

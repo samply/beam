@@ -42,9 +42,8 @@ async fn handler_tasks(
 
     let target_uri = Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
-    
     let req = sign_request(req, &config, &target_uri, &sender).await?;
-    
+
     let resp = client.request(req).await
         .map_err(|e| {
             warn!("Request to broker failed: {}", e.to_string());
