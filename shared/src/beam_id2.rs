@@ -1,18 +1,31 @@
-use std::{ops::Deref, fmt::Display};
+use std::{ops::Deref, fmt::Display, hash::Hash};
+
+use serde::{Serialize, Deserialize};
 
 use crate::{errors::SamplyBrokerError, config};
 
 #[derive(PartialEq)]
 pub enum BeamIdType {
     AppId,
-    NodeId,
+    ProxyId,
     BrokerId
 }
 
-pub trait BeamIdTrait: Display + Sized{
+impl Display for BeamIdType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            BeamIdType::AppId => "AppId",
+            BeamIdType::ProxyId => "ProxyId",
+            BeamIdType::BrokerId => "BrokerId",
+        };
+        f.write_str(str)
+    }
+}
+
+pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
     fn str_has_type(value: &str) -> Result<BeamIdType,SamplyBrokerError> {
-        let domain = config::CONFIG_SHARED.broker_domain;
-        let split = value.split('.').rev();
+        let domain = &config::CONFIG_SHARED.broker_domain;
+        let mut split = value.split('.').rev();
         // Broker
         let part = split.next();
         if part.is_none() || part.unwrap() != domain {
@@ -25,7 +38,7 @@ pub trait BeamIdTrait: Display + Sized{
         check_valid_id_part(part.unwrap())?;
         let part = split.next();
         if part.is_none() {
-            return Ok(BeamIdType::NodeId);
+            return Ok(BeamIdType::ProxyId);
         }
         check_valid_id_part(part.unwrap())?;
         if let Some(s) = split.next() {
@@ -34,11 +47,13 @@ pub trait BeamIdTrait: Display + Sized{
         Ok(BeamIdType::AppId)
     }
     fn has_type(&self) -> BeamIdType { // This is for &self, so we can assume the existing ID is correct
-        Self::str_has_type(&self.value())
-            .expect("Internal error: has_type() on an existing ID has returned an error")
+        Self::str_has_type(&self.value()).unwrap()
     }
-    fn value(&self) -> String;
+    fn value(&self) -> &String;
     fn new(id: &str) -> Result<Self,SamplyBrokerError>;
+    fn can_be_signed_by<B: BeamId>(&self, other_id: &B) -> bool {
+        return self.value().ends_with(other_id.value());
+    }
 }
 
 fn check_valid_id_part(id: &str) -> Result<(),SamplyBrokerError> {
@@ -49,14 +64,6 @@ fn check_valid_id_part(id: &str) -> Result<(),SamplyBrokerError> {
     }
     Ok(())
 }
-
-// impl Deref for dyn BeamId {
-//     type Target = String;
-
-//     fn deref(&self) -> &Self::Target {
-//         &self.value()
-//     }
-// }
 
 impl Display for AppId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -76,50 +83,124 @@ impl Display for BrokerId {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct AppId(String);
-impl BeamIdTrait for AppId {
-    fn value(&self) -> String {
-        self.0
+impl BeamId for AppId {
+    fn value(&self) -> &String {
+        &self.0
     }
+
     fn new(id: &str) -> Result<Self,SamplyBrokerError> {
-        if Self::str_has_type(id)? != BeamIdType::AppId {
-            return Err(SamplyBrokerError::InvalidBeamId(format!("{id} is not a valid AppID")));
+        let given_type = Self::str_has_type(id)?;
+        if given_type != BeamIdType::AppId {
+            return Err(SamplyBrokerError::InvalidBeamId(format!("{id} is a {given_type}, not an AppId.")));
         }
-        Ok(AppId(id.to_string()))
+        Ok(Self(id.to_string()))
     }
 }
 
-pub struct BeamId(dyn BeamIdTrait);
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct ProxyId(String);
-impl BeamIdTrait for ProxyId {
-    fn value(&self) -> String {
-        self.0
+impl BeamId for ProxyId {
+    fn value(&self) -> &String {
+        &self.0
     }
 
-    fn new(id: &str) -> Result<ProxyId, SamplyBrokerError> {
-        Ok(ProxyId(String::from(id)))
+    fn new(id: &str) -> Result<Self,SamplyBrokerError> {
+        let given_type = Self::str_has_type(id)?;
+        if given_type != BeamIdType::ProxyId {
+            return Err(SamplyBrokerError::InvalidBeamId(format!("{id} is a {given_type}, not a ProxyId.")));
+        }
+        Ok(Self(id.to_string()))
     }
 }
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct BrokerId(String);
-impl BeamIdTrait for BrokerId {
-    fn value(&self) -> String {
-        self.0
+impl BeamId for BrokerId {
+    fn value(&self) -> &String {
+        &self.0
     }
-    fn new(id: &str) -> Result<BrokerId, SamplyBrokerError> {
-        Ok(BrokerId(String::from(id)))
+
+    fn new(id: &str) -> Result<Self,SamplyBrokerError> {
+        let given_type = Self::str_has_type(id)?;
+        if given_type != BeamIdType::BrokerId {
+            return Err(SamplyBrokerError::InvalidBeamId(format!("{id} is a {given_type}, not a BrokerId.")));
+        }
+        Ok(Self(id.to_string()))
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum AnyBeamId {
+    AppId(AppId),
+    ProxyId(ProxyId),
+    BrokerId(BrokerId),
+}
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+impl Display for AnyBeamId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.value())
+    }
+}
 
-//     #[test]
-//     fn broker_id() {
-//         let value = "broker23.beam.samply.de";
-//         let res = BrokerId::try_from(value);
-//         assert!(res.is_ok());
-//         assert_eq!(res.unwrap(), value);
-//     }
-// }
+impl BeamId for AnyBeamId {
+    fn value(&self) -> &String {
+        match self {
+            AnyBeamId::AppId(e) => e.value(),
+            AnyBeamId::ProxyId(e) => e.value(),
+            AnyBeamId::BrokerId(e) => e.value(),
+        }
+    }
+
+    fn new(id: &str) -> Result<Self,SamplyBrokerError> {
+        let res = match AppId::str_has_type(id)? { // TODO: Better use trait
+            BeamIdType::AppId => Self::AppId(AppId::new(id)?),
+            BeamIdType::ProxyId => Self::ProxyId(ProxyId::new(id)?),
+            BeamIdType::BrokerId => Self::BrokerId(BrokerId::new(id)?),
+        };
+        Ok(res)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub enum AppOrProxyId {
+    AppId(AppId),
+    ProxyId(ProxyId),
+}
+
+impl Display for AppOrProxyId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.value())
+    }
+}
+
+impl BeamId for AppOrProxyId {
+    fn value(&self) -> &String {
+        match self {
+            AppOrProxyId::AppId(e) => e.value(),
+            AppOrProxyId::ProxyId(e) => e.value(),
+        }
+    }
+
+    fn new(id: &str) -> Result<Self,SamplyBrokerError> {
+        let res = match AppId::str_has_type(id)? { // TODO: Better use trait
+            BeamIdType::AppId => Self::AppId(AppId::new(id)?),
+            BeamIdType::ProxyId => Self::ProxyId(ProxyId::new(id)?),
+            BeamIdType::BrokerId => { return Err(SamplyBrokerError::InvalidBeamId("An AppOrProxyId cannot carry a BrokerId.".into())); },
+        };
+        Ok(res)
+    }
+}
+
+impl From<ProxyId> for AppOrProxyId {
+    fn from(id: ProxyId) -> Self {
+        AppOrProxyId::ProxyId(id)
+    }
+}
+
+impl From<AppId> for AppOrProxyId {
+    fn from(id: AppId) -> Self {
+        AppOrProxyId::AppId(id)
+    }
+}

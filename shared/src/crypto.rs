@@ -10,14 +10,14 @@ use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 use vaultrs::{client::{VaultClient, VaultClientSettingsBuilder},pki};
 
-use crate::{errors::SamplyBrokerError, MsgTaskRequest, BeamIdTrait, EncryptedMsgTaskRequest, config};
+use crate::{errors::SamplyBrokerError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id2::{ProxyId, BeamId}};
 
 type Serial = String;
 const SIGNATURE_LENGTH: u16 = 256;
 
 pub(crate) struct CertificateCache{
     serial_to_x509: HashMap<Serial, X509>,
-    cn_to_serial: HashMap<BeamIdTrait, Serial>,
+    cn_to_serial: HashMap<ProxyId, Serial>,
     vault_client: VaultClient,
     pki_realm: String,
     update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBrokerError>>>,
@@ -39,7 +39,7 @@ impl CertificateCache {
     }
 
     /// Searches cache for a certificate with the given ClientId. If not found, updates cache from central vault. If then still not found, return None
-    pub async fn get_by_cname(cname: &BeamIdTrait) -> Option<X509> { // TODO: What if multiple certs are found?
+    pub async fn get_by_cname(cname: &ProxyId) -> Option<X509> { // TODO: What if multiple certs are found?
         debug!("Getting cert with cname {}", cname);
         { // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
             let cache = CERT_CACHE.read().await;
@@ -108,14 +108,14 @@ impl CertificateCache {
         for serial in new_certificate_serials {
             let certificate = pki::cert::read(&self.vault_client, &self.pki_realm, serial).await?;
             let opensslcert = X509::from_pem(certificate.certificate.as_bytes())?;
-            let commonnames: Vec<BeamIdTrait> = 
+            let commonnames: Vec<ProxyId> = 
                 opensslcert.subject_name()
                 .entries()
                 .map(|x| x.data().as_utf8().unwrap()) // TODO: Remove unwrap, e.g. by supplying empty _or-string
                 .collect::<Vec<OpensslString>>()
                 .iter()
                 .map(|x| {
-                    BeamIdTrait::try_from(x.to_string())
+                    ProxyId::new(&x.to_string())
                         .expect(&format!("Internal error: Vault returned certificate with invalid common name: {}", x))
                 })
                 .collect();
@@ -132,7 +132,7 @@ impl CertificateCache {
     }
 
     /// Returns all ClientIds and associated certificates currently in cache
-    pub async fn get_all_cnames_and_certs() -> Vec<(BeamIdTrait,X509)> {
+    pub async fn get_all_cnames_and_certs() -> Vec<(ProxyId,X509)> {
         let cache = &CERT_CACHE.read().await.serial_to_x509;
         let alias = &CERT_CACHE.read().await.cn_to_serial;
         let mut result = Vec::new();
@@ -171,7 +171,7 @@ async fn get_cert_by_serial(serial: &str) -> Option<X509>{
     }
 }
 
-async fn get_cert_by_cname(cname: &BeamIdTrait) -> Option<X509>{
+async fn get_cert_by_cname(cname: &ProxyId) -> Option<X509>{
     match CertificateCache::get_by_cname(cname).await {
         Some(x) => Some(x.clone()),
         None => None
@@ -179,13 +179,13 @@ async fn get_cert_by_cname(cname: &BeamIdTrait) -> Option<X509>{
 }
 
 #[derive(Debug)]
-pub struct ClientPublicPortion {
-    pub client: BeamIdTrait,
+pub struct ProxyPublicPortion {
+    pub beam_id: ProxyId,
     pub cert: String,
     pub pubkey: String,
 }
 
-pub async fn get_cert_and_client_by_cname_as_pemstr(cname: &BeamIdTrait) -> Option<ClientPublicPortion> {
+pub async fn get_cert_and_client_by_cname_as_pemstr(cname: &ProxyId) -> Option<ProxyPublicPortion> {
     let cert: Option<X509> = get_cert_by_cname(cname).await;
     extract_x509(cert)
 }
@@ -195,7 +195,7 @@ pub async fn get_cert_and_client_by_cname_as_pemstr(cname: &BeamIdTrait) -> Opti
 //     extract_cert_and_client(cert)
 // }
 
-fn extract_x509(cert: Option<X509>) -> Option<ClientPublicPortion> {
+fn extract_x509(cert: Option<X509>) -> Option<ProxyPublicPortion> {
     if cert.is_none() {
         return None;
     }
@@ -228,7 +228,7 @@ fn extract_x509(cert: Option<X509>) -> Option<ClientPublicPortion> {
     let verified_sender = match verified_sender {
         None => { return None; },
         Some(x) => {
-            match BeamIdTrait::try_from(x) {
+            match ProxyId::new(&x) {
                 Ok(x) => x,
                 Err(_) => { return None; }
             }
@@ -243,8 +243,8 @@ fn extract_x509(cert: Option<X509>) -> Option<ClientPublicPortion> {
     if cert.is_err() {
         return None;
     }
-    Some(ClientPublicPortion {
-        client: verified_sender,
+    Some(ProxyPublicPortion {
+        beam_id: verified_sender,
         cert: cert.unwrap().into(),
         pubkey,
     })

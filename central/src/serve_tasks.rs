@@ -6,7 +6,7 @@ use axum::{
     Extension, Json, Router, extract::{Query, Path}, response::IntoResponse
 };
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, BeamId, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_CLIENTID, config};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, BeamId, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id2::AppOrProxyId};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace};
 
@@ -159,8 +159,8 @@ async fn get_tasks(
 #[allow(dead_code)]
 enum MsgFilterMode { Or, And }
 struct MsgFilter<'a> {
-    from: Option<&'a BeamId>,
-    to: Option<&'a BeamId>,
+    from: Option<&'a AppOrProxyId>,
+    to: Option<&'a AppOrProxyId>,
     mode: MsgFilterMode
 }
 

@@ -69,12 +69,12 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBroke
         })
         .map(|(stripped,v)| {
             let app_id = format!("{}.{}", stripped, proxy_id);
-            let client_id = BeamIdTrait::new(&app_id)
-                .map_err(|_| SamplyBrokerError::ConfigurationFailed(format!("Wrong api key definition: Client ID {} is invalid.", app_id)))?;
+            let app_id = AppId::new(&app_id)
+                .map_err(|_| SamplyBrokerError::ConfigurationFailed(format!("Faulty API key definition: Resulting App ID  {} is invalid.", app_id)))?;
             if v.is_empty() {
-                return Err(SamplyBrokerError::ConfigurationFailed(format!("Unable to assign empty API key for client {}", client_id)));
+                return Err(SamplyBrokerError::ConfigurationFailed(format!("Unable to assign empty API key for client {}", app_id)));
             }
-            Ok((client_id, v))
+            Ok((app_id, v))
         })
         .collect()
 }
@@ -82,9 +82,9 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBroke
 impl crate::config::Config for Config {
     fn load() -> Result<Config,SamplyBrokerError> {
         let cli_args = CliArgs::parse();
-        let beam_id = BeamIdTrait::try_from(cli_args.beam_id)
-            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Invalid Client ID supplied.".into()))?;
-        let api_keys = parse_apikeys(&beam_id)?;
+        let proxy_id = ProxyId::new(&cli_args.beam_id)
+            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Invalid Beam ID \"{}\" supplied: {}", cli_args.beam_id, e)))?;
+        let api_keys = parse_apikeys(&proxy_id)?;
         if api_keys.is_empty() {
             return Err(SamplyBrokerError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {}<clientname>=<key>", APPKEY_PREFIX)));
         }
@@ -94,7 +94,7 @@ impl crate::config::Config for Config {
             pki_address: cli_args.pki_address,
             bind_addr: cli_args.bind_addr,
             pki_realm: cli_args.pki_realm,
-            beam_id,
+            beam_id: proxy_id,
             api_keys
         };
         info!("Successfully read config and API keys from CLI and secrets file.");

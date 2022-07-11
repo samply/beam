@@ -8,15 +8,16 @@ mod tests {
     use regex::Regex;
     use reqwest::{StatusCode, header::{self, HeaderValue, AUTHORIZATION}, Method};
     use restest::{request, Context, Request, assert_body_matches};
-    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, BeamId, Msg, MsgId, config_proxy};
+    use shared::{MsgTaskRequest, MsgTaskResult, MyUuid, Msg, MsgId, config_proxy, beam_id2::{AppId, BeamId, BrokerId, ProxyId}, examples::generate_example_tasks};
     use static_init::dynamic;
 
     use rsa::{pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
     use tokio::{sync::{oneshot, OnceCell, Mutex}, runtime::Handle};
 
     const PEMFILE: &str = "../pki/test.priv.pem";
-    const MY_PROXY_ID: &str = "test.broker.samply.de";
-    const MY_CLIENT_ID_SHORT: &str = "itsme";
+    const MY_BROKER_ID: &str = "broker.samply.de";
+    const MY_PROXY_ID: &str = "proxy23.broker.samply.de";
+    const MY_APP_ID_SHORT: &str = "app42";
     const VAULT_BASE: &str = "http://localhost:8200";
     const VAULT_HEALTH: &str = "http://localhost:8200/v1/sys/health";
     const PROXY_HEALTH: &str = "http://localhost:8081/v1/health";
@@ -29,7 +30,7 @@ mod tests {
     #[dynamic]
     static AUTH: String = {
         let mut a = String::from("ClientApiKey ");
-        a.push_str(MY_CLIENT_ID_SHORT);
+        a.push_str(MY_APP_ID_SHORT);
         a.push_str(".");
         a.push_str(MY_PROXY_ID);
         a.push_str(" MySecret");
@@ -58,7 +59,7 @@ mod tests {
                         Some(CENTRAL_HEALTH)),
                     ("proxy", 
                         vec!("--broker-url", "http://localhost:8080", "--client-id", MY_PROXY_ID, "--pki-address", "http://localhost:8200", "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", PEMFILE),
-                        HashMap::from([(config_proxy::APPKEY_PREFIX.to_string() + MY_CLIENT_ID_SHORT, "MySecret")]),
+                        HashMap::from([(config_proxy::APPKEY_PREFIX.to_string() + MY_APP_ID_SHORT, "MySecret")]),
                         Some(PEMFILE),
                         Some(PROXY_HEALTH))
                 ] {
@@ -166,10 +167,10 @@ mod tests {
     }
 
     #[dynamic]
-    static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(BeamId::new(MY_PROXY_ID).unwrap()));
+    static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(BrokerId::new(MY_BROKER_ID).unwrap()), Some(ProxyId::new(MY_PROXY_ID).unwrap()));
 
     #[dynamic]
-    static MY_CLIENT_ID: BeamId = BeamId::new(MY_PROXY_ID).unwrap();
+    static MY_APP_ID: AppId = AppId::new(&format!("{MY_APP_ID_SHORT}.{MY_PROXY_ID}")).unwrap();
     // #[dynamic]
     // static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
 
@@ -213,7 +214,7 @@ mod tests {
         for task in ex.values_mut() {
             for (_, mut result) in &mut task.results {
                 result.msg.task = task.id;
-                result.msg.from = MY_CLIENT_ID.clone();
+                result.msg.from = MY_APP_ID.clone().into();
                 let resp = CLIENT
                     .post(format!("http://localhost:8081/v1/tasks/{}/results", task.id))
                     .json(&result.msg)
