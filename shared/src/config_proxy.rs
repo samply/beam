@@ -16,9 +16,7 @@ pub struct Config {
     pub broker_host_header: HeaderValue,
     pub bind_addr: SocketAddr,
     pub pki_address: Uri,
-    // pub pki_token: ApiKey,
     pub pki_realm: String,
-    // pub privkey_pem: String,
     pub client_id: ClientId,
     pub api_keys: HashMap<ClientId,ApiKey>
 }
@@ -63,10 +61,8 @@ pub const CLIENT_KEY_PREFIX: &str = "CLIENTKEY_";
 fn parse_apikeys(client_id: &ClientId) -> Result<HashMap<ClientId,ApiKey>,SamplyBrokerError>{
     std::env::vars()
         .filter_map(|(k,v)| {
-            match k.strip_prefix(CLIENT_KEY_PREFIX) {
-                Some(stripped) => Some((stripped.to_owned(), v)),
-                None => None,
-            }
+            k.strip_prefix(CLIENT_KEY_PREFIX)
+                .map(|stripped| (stripped.to_owned(), v))
         })
         .map(|(stripped,v)| {
             let client_id = format!("{}.{}", stripped, client_id);
@@ -84,7 +80,7 @@ impl crate::config::Config for Config {
     fn load() -> Result<Config,SamplyBrokerError> {
         let cli_args = CliArgs::parse();
         let client_id = ClientId::try_from(cli_args.client_id)
-            .map_err(|e| SamplyBrokerError::ConfigurationFailed("Invalid Client ID supplied.".into()))?;
+            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Invalid Client ID supplied.".into()))?;
         let api_keys = parse_apikeys(&client_id)?;
         if api_keys.is_empty() {
             return Err(SamplyBrokerError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {}<clientname>=<key>", CLIENT_KEY_PREFIX)));

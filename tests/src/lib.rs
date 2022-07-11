@@ -21,8 +21,8 @@ mod tests {
     const VAULT_HEALTH: &str = "http://localhost:8200/v1/sys/health";
     const PROXY_HEALTH: &str = "http://localhost:8081/health";
     const CENTRAL_HEALTH: &str = "http://localhost:8080/health";
-    const CTX_PROXY: Context = Context::new().with_port(8081);
-    const CTX_VAULT: Context = Context::new().with_port(8200);
+    // const CTX_PROXY: Context = Context::new().with_port(8081);
+    // const CTX_VAULT: Context = Context::new().with_port(8200);
 
     #[dynamic(drop)]
     static mut SERVERS: Servers = Servers::start().unwrap();
@@ -44,7 +44,7 @@ mod tests {
     impl Servers {
         fn start() -> anyhow::Result<Self> {
             let mut txes = Vec::new();
-            for (cmd, args, env, wait_pkcs1_key, wait_health) in 
+            for (cmd, args, env, wait_pkcs1_key, _wait_health) in 
                 [
                     ("bash",
                         vec!("-c", "../pki/pki devsetup"),

@@ -37,9 +37,9 @@ pub(crate) async fn reverse_proxy() -> anyhow::Result<()> {
     // Graceful shutdown handling
     let (tx, rx) = tokio::sync::mpsc::channel(1);
     ctrlc::set_handler(move || {
-            if let Err(_) = tx.blocking_send(()) {
-                warn!("Unable to send signal for clean shutdown... ignoring.");
-            }
+        if tx.blocking_send(()).is_err() {
+            warn!("Unable to send signal for clean shutdown... ignoring.");
+        }
         })
         .expect("Error setting handler for graceful shutdown.");
 
@@ -47,8 +47,7 @@ pub(crate) async fn reverse_proxy() -> anyhow::Result<()> {
     axum::Server::bind(&config.bind_addr)
         .serve(app.into_make_service())
         .with_graceful_shutdown(graceful_waiter(rx))
-        .await
-        .unwrap();
+        .await?;
 
     Ok(())
 }
@@ -58,10 +57,10 @@ async fn graceful_waiter(mut rx: tokio::sync::mpsc::Receiver<()>) {
     info!("Shutting down gracefully.");
 }
 
-const ERR_BODY: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Invalid body");
-const ERR_INTERNALCRYPTO: (StatusCode, &'static str) = (StatusCode::INTERNAL_SERVER_ERROR, "Cryptography failed; see server logs.");
-const ERR_UPSTREAM: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Unable to parse server's reply.");
-const ERR_VALIDATION: (StatusCode, &'static str) = (StatusCode::BAD_GATEWAY, "Unable to verify signature in server reply.");
+const ERR_BODY: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Invalid body");
+const ERR_INTERNALCRYPTO: (StatusCode, &str) = (StatusCode::INTERNAL_SERVER_ERROR, "Cryptography failed; see server logs.");
+const ERR_UPSTREAM: (StatusCode, &str) = (StatusCode::BAD_GATEWAY, "Unable to parse server's reply.");
+const ERR_VALIDATION: (StatusCode, &str) = (StatusCode::BAD_GATEWAY, "Unable to verify signature in server reply.");
 
 async fn handler_health() -> StatusCode {
 //     client: Extension<Client<HttpsConnector<HttpConnector>>>,
@@ -84,8 +83,8 @@ async fn handler_health() -> StatusCode {
 async fn handler(
     Extension(client): Extension<Client<HttpsConnector<HttpConnector>>>,
     Extension(config): Extension<config_proxy::Config>,
-    AuthenticatedProxyClient(auth_client): AuthenticatedProxyClient,
-    mut req: Request<Body>,
+    AuthenticatedProxyClient(_): AuthenticatedProxyClient,
+    req: Request<Body>,
 ) -> Result<Response<Body>,(StatusCode, &'static str)> {
     let path = req.uri().path();
     let path_query = req
@@ -118,17 +117,17 @@ async fn handler(
         .map_err(|_| ERR_UPSTREAM)?;
     
     // TODO: Always return application/jwt from server.
-    if bytes.len() > 0 {
+    if ! bytes.is_empty() {
         let json = serde_json::from_slice::<Value>(&bytes);
         if json.is_err() {
-            warn!("Answer is no valid JSON; returning as-is to client: {}", std::str::from_utf8(&bytes).unwrap_or_default());
+            warn!("Answer is no valid JSON; returning as-is to client: \"{}\"", std::str::from_utf8(&bytes).unwrap_or_default());
         } else {
             let mut json = json.unwrap();
             if ! validate_and_remove_signatures(&mut json).await {
                 return Err(ERR_VALIDATION);
             }
             bytes = serde_json::to_vec(&json).unwrap().into();
-            debug!("Validated and stripped signature: {}", std::str::from_utf8(&bytes).unwrap());
+            debug!("Validated and stripped signature: \"{}\"", std::str::from_utf8(&bytes).unwrap_or("Unable to parse string as UTF-8"));
         }
     }
     
@@ -146,7 +145,7 @@ async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_
         .map_err(|_| ERR_BODY)?;
     let mut body = if body.is_empty() {
         debug!("Body is empty, substituting empty json.");
-        serde_json::from_str::<Value>("{}").unwrap()
+        serde_json::from_str::<Value>("{}").unwrap() // static input
     } else {
         match serde_json::from_slice::<Value>(&body) {
             Ok(val) => {
@@ -168,7 +167,9 @@ async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_
     headers_mut.insert(header::DATE, HeaderValue::from_str(&fmt_http_date(SystemTime::now())).expect("Internal error: Unable to format system time"));
     let digest = crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut)
         .map_err(|_| ERR_INTERNALCRYPTO)?;
-    body.as_object_mut().unwrap().insert("extra_fields_digest".to_string(), Value::String(digest));
+    body.as_object_mut()
+        .ok_or(ERR_BODY)?
+        .insert("extra_fields_digest".to_string(), Value::String(digest));
     let token_with_extended_signature = crypto_jwt::sign_to_jwt(&body).await
         .map_err(|e| {
             error!("Crypto failed: {}", e);
@@ -181,8 +182,9 @@ async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_
     parts.uri = target_uri.clone();
     headers_mut.insert(header::HOST, config.broker_host_header.clone());
     headers_mut.insert(header::CONTENT_LENGTH, length.into());
-    headers_mut.insert(header::CONTENT_TYPE, HeaderValue::from_str("application/jwt").unwrap());
-    headers_mut.insert(header::AUTHORIZATION, HeaderValue::from_str(&auth_header).unwrap());
+    headers_mut.insert(header::CONTENT_TYPE, HeaderValue::from_str("application/jwt").unwrap()); // static input
+    headers_mut.insert(header::AUTHORIZATION, HeaderValue::from_str(&auth_header)
+        .map_err(|_| ERR_INTERNALCRYPTO)?);
     parts.headers = headers_mut;
     let req = Request::from_parts(parts, body);
     Ok(req)
@@ -196,20 +198,17 @@ async fn validate_and_remove_signatures(json: &mut Value) -> bool {
                 return false;
             }
         }
-    } else {
-        if json.is_object() {
-            if  ! (validate_helper_value::<MsgTaskRequest>(&json).await
-                || validate_helper_value::<MsgTaskResult>(&json).await
-                || validate_helper_value::<MsgEmpty>(&json).await) {
-                return false;
-            }
-            debug!("C");
-            let msg = json.as_object().unwrap().get("msg")
-                .expect("Internal error: We just validated that this is a valid MsgSigned.")
-                .to_owned();
-            *json = msg;
-            return true;
+    } else if json.is_object() {
+        if  ! (validate_helper_value::<MsgTaskRequest>(json).await
+            || validate_helper_value::<MsgTaskResult>(json).await
+            || validate_helper_value::<MsgEmpty>(json).await) {
+            return false;
         }
+        let msg = json.as_object().unwrap().get("msg")
+            .expect("Internal error: We just validated that this is a valid MsgSigned.")
+            .to_owned();
+        *json = msg;
+        return true;
     }
     true
 }
@@ -218,12 +217,8 @@ async fn validate_helper_value<M: Msg + DeserializeOwned + std::fmt::Debug> (val
     let value = value.clone();
     match serde_json::from_value::<MsgSigned<M>>(value) {
         Ok(msg) => {
-            println!("Verifying reply {:?}", msg);
-            if msg.verify().await.is_err() {
-                false
-            } else {
-                true
-            }
+            debug!("Verifying reply {:?}", msg);
+            msg.verify().await.is_ok()
         },
         Err(_) => true, // Not of this type -> considered "valid"
     }

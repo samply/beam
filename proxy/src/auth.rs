@@ -14,7 +14,7 @@ impl<B: Send + Sync> FromRequest<B> for AuthenticatedProxyClient {
 
     async fn from_request(req: &mut RequestParts<B>) -> Result<Self,Self::Rejection> {
         const SCHEME: &str = "ClientApiKey";
-        const UNAUTH_ERR: (StatusCode,[(HeaderName, &'static str);1]) = (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, SCHEME)]);
+        const UNAUTH_ERR: (StatusCode,[(HeaderName, &str);1]) = (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, SCHEME)]);
         if let Some(auth) = req.headers().get(header::AUTHORIZATION) {
             let auth = auth.to_str()
                 .map_err(|_| UNAUTH_ERR)?;

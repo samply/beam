@@ -36,17 +36,13 @@ struct VaultConfig {
     client_id: Option<String>,
 }
 
+#[allow(dead_code)]
 pub(crate) struct Config {
     pub(crate) pki_address: Uri,
     pub(crate) pki_realm: String,
     pub(crate) pki_apikey: String,
-    // pub(crate) privkey_pem: String,
     pub(crate) privkey_rs256: RS256KeyPair,
     pub(crate) privkey_rsa: RsaPrivateKey
-}
-
-pub(crate) struct Keys {
-    pub(crate) my_rs256: RS256KeyPair,
 }
 
 impl crate::config::Config for Config {
@@ -58,7 +54,7 @@ impl crate::config::Config for Config {
             .map_err(|_| SamplyBrokerError::ConfigurationFailed("Unable to load private key from disk".into()))?
             .trim().to_string();
         let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
-            .or(RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
+            .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
             .map_err(|_| SamplyBrokerError::ConfigurationFailed("Unable to interpret private key PEM as PKCS#1 or PKCS#8.".into()))?;
         let mut privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem)
             .map_err(|_| SamplyBrokerError::ConfigurationFailed("Unable to interpret private key PEM as PKCS#1 or PKCS#8.".into()))?;

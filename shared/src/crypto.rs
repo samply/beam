@@ -263,15 +263,12 @@ pub(crate) fn sign(data: &[u8], private_key: &RsaPrivateKey) -> Result<Vec<u8>, 
     let mut hasher = Sha256::new();
     hasher.update(&data);
     let digest = hasher.finalize();
-    let mut rng = rand::thread_rng();
-    let signature = private_key.sign(PaddingScheme::new_pkcs1v15_sign(Some(rsa::hash::Hash::SHA2_256)), &digest)
-        .or_else(|_| Err(SamplyBrokerError::SignEncryptError("Unable to sign message.".into())));
-    if signature.is_err() {return signature;}
-    let mut sig = signature.expect("Invalid Signature."); //Should never be invalid, checked in line before
+    let mut sig = private_key.sign(PaddingScheme::new_pkcs1v15_sign(Some(rsa::hash::Hash::SHA2_256)), &digest)
+        .map_err(|_| SamplyBrokerError::SignEncryptError("Unable to sign message.".into()))?;
     assert!(sig.len() as u16 == SIGNATURE_LENGTH); 
     let mut payload: Vec<u8> = data.to_vec();
     sig.append(&mut payload);
-    return Ok(sig);
+    Ok(sig)
 }
 
 /// Encrypt the given fields in the json object
