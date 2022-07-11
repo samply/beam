@@ -1,10 +1,8 @@
 #![allow(unused_imports)]
 
-extern crate lazy_static;
-
 use crypto_jwt::extract_jwt;
 use errors::SamplyBrokerError;
-use lazy_static::lazy_static;
+use static_init::dynamic;
 use tracing::debug;
 
 use std::{time::Duration, ops::Deref, fmt::Display};
@@ -25,7 +23,7 @@ pub mod crypto_jwt;
 pub mod errors;
 
 pub mod config;
-mod config_shared;
+pub mod config_shared;
 // #[cfg(feature = "config-for-central")]
 pub mod config_central;
 // #[cfg(feature = "config-for-proxy")]
@@ -169,7 +167,7 @@ pub enum WorkResult {
     Succeeded(TaskResponse),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum FailureStrategy {
     Discard,
@@ -185,7 +183,7 @@ pub struct HowLongToBlock {
     pub poll_count: Option<u16>,
 }
 
-#[derive(Clone,Debug,Serialize,Deserialize)]
+#[derive(Clone,Debug,Serialize,Deserialize, PartialEq)]
 pub struct MsgSigned<M: Msg> {
     pub msg: M,
     pub sig: String
@@ -213,11 +211,8 @@ impl<M: Msg> MsgSigned<M> {
     }
 }
 
-lazy_static!{
-    pub static ref EMPTY_VEC_CLIENTID: Vec<ClientId> = {
-        Vec::new()
-    };
-}
+#[dynamic]
+pub static EMPTY_VEC_CLIENTID: Vec<ClientId> = Vec::new();
 
 #[derive(Serialize,Deserialize,Debug)]
 pub struct MsgEmpty {
@@ -313,7 +308,7 @@ impl Msg for MsgTaskResult {
 //     }
 // }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskRequest {
     pub id: MsgId,
     pub from: ClientId,
@@ -341,7 +336,7 @@ pub struct EncryptedMsgTaskRequest {
     pub results: HashMap<ClientId,MsgTaskResult>,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskResult {
     pub id: MsgId,
     pub from: ClientId, // was: worker_id
@@ -392,6 +387,37 @@ impl MsgTaskRequest {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MsgPing {
+    id: MsgId,
+    from: ClientId,
+    to: Vec<ClientId>,
+    nonce: [u8; 16]
+}
+
+impl MsgPing {
+    pub fn new(from: ClientId, to: ClientId) -> Self {
+        let mut nonce = [0;16];
+        openssl::rand::rand_bytes(&mut nonce)
+            .expect("Critical Error: Failed to generate random byte array.");
+        MsgPing { id: MsgId::new(), from: from, to: vec![to], nonce: nonce }
+    }
+}
+
+impl Msg for MsgPing {
+    fn get_id(&self) -> &MsgId {
+        &self.id
+    }
+
+    fn get_from(&self) -> &ClientId {
+        &self.from
+    }
+
+    fn get_to(&self) -> &Vec<ClientId> {
+        &self.to
+    }
+}
+
 pub fn generate_example_tasks(client1_id: Option<ClientId>) -> HashMap<MsgId, MsgTaskRequest> {
     let mut tasks: HashMap<MsgId, MsgTaskRequest> = HashMap::new();
     let client1 = client1_id.unwrap_or(ClientId::random());
@@ -429,39 +455,6 @@ pub fn generate_example_tasks(client1_id: Option<ClientId>) -> HashMap<MsgId, Ms
         task_in_map.results.insert(result.msg.from.clone(), result);
     }
     tasks
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{generate_example_tasks, MsgTaskResult, WorkResult};
-
-    #[test]
-    fn check_map() {
-        let tasks = generate_example_tasks(None);
-        assert!(tasks.len() == 1);
-        let the_task = tasks.values().next().unwrap();
-        assert!(the_task.results.len() == 2);
-    }
-
-    #[test]
-    fn get_failed_responses() {
-        let tasks = generate_example_tasks(None);
-        let failed: Vec<&MsgTaskResult> = tasks.values().next().unwrap().results
-            .iter()
-            .filter(|resp| matches!(resp.1.msg.result, WorkResult::PermFailed(_)))
-            .map(|(_, v)| &v.msg)
-            .collect();
-
-        assert!(failed.len() == 1);
-    }
-
-    #[test]
-    fn serialize_stuff() {
-        let tasks = generate_example_tasks(None);
-        let serialized = serde_json::to_string(&tasks);
-        assert!(serialized.is_ok());
-        // println!("Tasks and results: {}", serialized.unwrap());
-    }
 }
 
 pub fn try_read<T>(map: &HashMap<String, String>, key: &str) -> Option<T>

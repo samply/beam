@@ -1,27 +1,30 @@
-use crate::SamplyBrokerError;
-use std::path::PathBuf;
+use crate::{SamplyBrokerError, crypto};
+use std::{path::PathBuf, rc::Rc, sync::Arc, fs::read_to_string};
 use hyper::Uri;
 use clap::Parser;
+use jwt_simple::prelude::RS256KeyPair;
+use rsa::{RsaPrivateKey, pkcs8::FromPrivateKey, pkcs1::FromRsaPrivateKey};
+use static_init::dynamic;
 
 /// Settings for Samply.Broker.Shared
 #[derive(Parser,Debug)]
 #[clap(author, version, about, long_about = None)]
-pub(crate) struct VaultConfig {
+struct VaultConfig {
     /// samply.pki: URL to HTTPS endpoint
     #[clap(long, env, value_parser)]
-    pub pki_address: Uri,
+    pki_address: Uri,
 
     /// samply.pki: Authentication realm
     #[clap(long, env, value_parser, default_value = "samply_pki")]
-    pub pki_realm: String,
+    pki_realm: String,
 
     /// samply.pki: File containing the authentication token
     #[clap(long, env, value_parser, default_value = "/run/secrets/pki.secret")]
-    pub pki_apikey_file: PathBuf,
+    pki_apikey_file: PathBuf,
 
     /// samply.pki: Path to own secret key
     #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
-    pub privkey_file: PathBuf,
+    privkey_file: PathBuf,
 
     // TODO: The following arguments have been added for compatibility reasons with the proxy config. Find another way to merge configs.
     /// (included for technical reasons)
@@ -33,7 +36,40 @@ pub(crate) struct VaultConfig {
     client_id: Option<String>,
 }
 
-pub(crate) fn get_config() -> VaultConfig {
-    let cli_args = VaultConfig::parse();
-    cli_args
+pub(crate) struct Config {
+    pub(crate) pki_address: Uri,
+    pub(crate) pki_realm: String,
+    pub(crate) pki_apikey: String,
+    // pub(crate) privkey_pem: String,
+    pub(crate) privkey_rs256: RS256KeyPair,
+    pub(crate) privkey_rsa: RsaPrivateKey
+}
+
+pub(crate) struct Keys {
+    pub(crate) my_rs256: RS256KeyPair,
+}
+
+impl crate::config::Config for Config {
+    fn load() -> Result<Self,SamplyBrokerError> {
+        let vc = VaultConfig::parse();
+
+        // Private key
+        let privkey_pem = read_to_string(&vc.privkey_file)
+            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Unable to load private key from disk".into()))?
+            .trim().to_string();
+        let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
+            .or(RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
+            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Unable to interpret private key PEM as PKCS#1 or PKCS#8.".into()))?;
+        let mut privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem)
+            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Unable to interpret private key PEM as PKCS#1 or PKCS#8.".into()))?;
+        if let Some(client_id) = vc.client_id {
+            privkey_rs256 = privkey_rs256.with_key_id(&client_id);
+        }
+    
+        // API Key
+        let pki_apikey = read_to_string(vc.pki_apikey_file)
+            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Failed to read PKI token.".into()))?
+            .trim().to_string();
+        Ok(Config { pki_address: vc.pki_address, pki_realm: vc.pki_realm, pki_apikey, privkey_rs256, privkey_rsa })
+    }    
 }

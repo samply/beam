@@ -1,18 +1,31 @@
-use lazy_static::lazy_static;
+use static_init::dynamic;
 
-use crate::{ config_central, config_proxy };
+use crate::{config_proxy, config_central, config_shared, errors::SamplyBrokerError};
 
-lazy_static!{
-    pub static ref CONFIG_CENTRAL: config_central::Config = {
-        eprintln!("CONFIG_CENTRAL");
-        let config = config_central::get_config()
-            .expect("Unable to read config");
-        config
-    };
-    pub static ref CONFIG_PROXY: config_proxy::Config = {
-        eprintln!("CONFIG_PROXY");
-        let config = config_proxy::get_config()
-            .expect("Unable to read config");
-        config
-    };
+pub(crate) trait Config: Sized{
+    fn load() -> Result<Self,SamplyBrokerError>;
 }
+
+fn load<T: Config>() -> T where {
+    let config = T::load()
+        .unwrap_or_else(|e| panic!("Unable to read config: {}", e));
+    config
+}
+
+#[dynamic(lazy)]
+pub static CONFIG_PROXY: config_proxy::Config = {
+    eprintln!("CONFIG_PROXY");
+    load()
+};
+
+#[dynamic(lazy)]
+pub static CONFIG_CENTRAL: config_central::Config = {
+    eprintln!("CONFIG_CENTRAL");
+    load()
+};
+
+#[dynamic(lazy)]
+pub(crate) static CONFIG_SHARED: config_shared::Config = {
+    eprintln!("CONFIG_SHARED");
+    load()
+};

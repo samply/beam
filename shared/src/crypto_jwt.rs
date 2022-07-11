@@ -5,7 +5,7 @@ use openssl::base64;
 use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use tracing::{debug, error, warn};
-use crate::{ClientId, errors::SamplyBrokerError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody};
+use crate::{ClientId, errors::SamplyBrokerError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config};
 
 const ERR_SIG: (StatusCode, &'static str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &'static str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -145,15 +145,15 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
     Ok(msg_signed)
 }
 
-pub async fn sign_to_jwt(json: &Value, privkey_pem: &str, my_client_id: &ClientId) -> Result<String,SamplyBrokerError> {
-    let key = RS256KeyPair::from_pem(privkey_pem)
-        .map_err(|e| SamplyBrokerError::SignEncryptError(format!("Unable to construct private key from {}: {}", privkey_pem, e)))?
-        .with_key_id(&my_client_id.to_string()); // TODO: Use cert's serial (not common name) as key id
+pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBrokerError> {
+    let json = serde_json::to_value(input)
+        .map_err(|e| SamplyBrokerError::SignEncryptError(format!("Serialization failed: {}", e)))?;
+    let privkey = &config::CONFIG_SHARED.privkey_rs256;
     
     let claims = 
         Claims::with_custom_claims::<Value>(json.clone(), Duration::from_hours(1));
 
-    let token = key.sign(claims)
+    let token = privkey.sign(claims)
         .map_err(|_| SamplyBrokerError::SignEncryptError("Unable to sign JWT".into()))?;
     
     Ok(token)

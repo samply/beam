@@ -11,10 +11,13 @@ shared = { path = "../shared", features = ["config-for-proxy"] }
 tokio = { version = "1", features = ["full"] }
 async-recursion = "1.0.0"
 
+static_init = "1.0.2"
+
 # Web Server & clean shutdown
 axum = "0.5.9"
 hyper = { version = "0.14.19", features = ["full"] }
 ctrlc = { version = "3.2.2", features = ["termination"] }
+tower = { version = "0.4.13", features = ["full"] }
 
 # for HTTP client
 hyper-tls = "0.5.0"
@@ -31,8 +34,6 @@ tracing = "0.1.35"
 # Config file parsing
 serde = "1"
 serde_json = "1"
-
-lazy_static = "1.4.0"
 
 # Param parsing
 jwt-simple = "0.11.0"

@@ -1,10 +1,7 @@
-extern crate lazy_static;
-
-use crate::config_shared::{self, VaultConfig};
 use aes_gcm::aead::generic_array::GenericArray;
 use axum::{Json, http::Request, body::Body};
-use lazy_static::lazy_static;
 
+use static_init::dynamic;
 use tokio::{sync::{RwLock, mpsc, oneshot}};
 use tracing::{debug, warn, info, error};
 use std::{path::Path, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string};
@@ -27,19 +24,16 @@ pub(crate) struct CertificateCache{
 }
 
 impl CertificateCache {
-    pub fn new(config: VaultConfig, update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBrokerError>>>) -> Result<CertificateCache,SamplyBrokerError> {
-        let pki_token = read_to_string(&config.pki_apikey_file)
-            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Unable to read PKI Apikey: {}", e)))?
-            .trim().to_string();
+    pub fn new(update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBrokerError>>>) -> Result<CertificateCache,SamplyBrokerError> {
         Ok(Self{
         serial_to_x509: HashMap::new(),
         cn_to_serial: HashMap::new(),
         vault_client: VaultClient::new(
             VaultClientSettingsBuilder::default()
-                .address(&config.pki_address.to_string())
-                .token(&pki_token)
+                .address(&config::CONFIG_SHARED.pki_address.to_string())
+                .token(&config::CONFIG_SHARED.pki_apikey)
                 .build()?)?,
-        pki_realm: config.pki_realm.clone(),
+        pki_realm: config::CONFIG_SHARED.pki_realm.clone(),
         update_trigger
     })
     }
@@ -153,28 +147,22 @@ impl CertificateCache {
     }
 }
 
-lazy_static!{
-    static ref CERT_CACHE: Arc<RwLock<CertificateCache>> = {
-        let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBrokerError>>>(1);
-        let config: VaultConfig = config_shared::get_config();
-        let cc = Arc::new(RwLock::new(CertificateCache::new(config, tx).unwrap()));
-        let cc2 = cc.clone();
-        tokio::task::spawn(async move {
-            while let Some(sender) = rx.recv().await {
-                let mut locked_cache = cc2.write().await;
-                let result = locked_cache.update_certificates_mut().await;
-                if let Err(_) = sender.send(result) {
-                    warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
-                }
+#[dynamic(lazy)]
+static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
+    let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBrokerError>>>(1);
+    let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
+    let cc2 = cc.clone();
+    tokio::task::spawn(async move {
+        while let Some(sender) = rx.recv().await {
+            let mut locked_cache = cc2.write().await;
+            let result = locked_cache.update_certificates_mut().await;
+            if let Err(_) = sender.send(result) {
+                warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
             }
-        });
-        cc
-    };
-    static ref LOCAL_PRIVATE_KEY: RsaPrivateKey = {
-        let config: VaultConfig = config_shared::get_config();
-        get_local_private_key(&config.privkey_file).expect("Can not load private key")
-    };
-}
+        }
+    });
+    cc
+};
 
 async fn get_cert_by_serial(serial: &str) -> Option<X509>{
     match CertificateCache::get_by_serial(serial).await {
@@ -333,7 +321,7 @@ pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &V
         .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Cannot encrypt message".into())))?;
 
     //Sign Message
-    let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &LOCAL_PRIVATE_KEY)?;
+    let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &config::CONFIG_SHARED.privkey_rsa)?;
 
     // Place new Body in Request
     let new_body = Body::from(signed_message);
@@ -382,17 +370,6 @@ fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, Sa
 /// Convenience function to extract a rsa public key from a x509 certificate. Calls x509_cert_to_x509_public_key and x509_public_key_to_rsa_pub_key internally.
 fn x509_cert_to_rsa_pub_key(cert: &X509) -> Result<RsaPublicKey, SamplyBrokerError> {
     x509_public_key_to_rsa_pub_key(&x509_cert_to_x509_public_key(cert)?)
-}
-
-/// Loads a pkcs8-pem-encoded private key from a file
-fn get_local_private_key(local_key_file: &Path) -> Result<RsaPrivateKey, Box<dyn Error>> {
-    Ok(RsaPrivateKey::read_pkcs8_pem_file(&local_key_file)?)
-}
-
-pub async fn get_local_private_key_as_pem(path: &Path) -> Result<String, SamplyBrokerError> {
-    let key = read_to_string(path)
-        .map_err(|e| SamplyBrokerError::SignEncryptError("Private key could not be read from disk.".into()))?;
-    Ok(key)
 }
 
 /// Converts the asn.1 time (e.g., from a certificate exiration date) to rust's SystemTime. From https://github.com/sfackler/rust-openssl/issues/1157#issuecomment-1016737160
