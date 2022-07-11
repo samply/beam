@@ -53,7 +53,7 @@ function success {
 }
 
 function curl_get {
-    curl -H "content-type: application/json" -H "Authorization: ClientApiKey test.$CLIENT_ID MySecret" $@
+    curl -H "content-type: application/json" -H "Authorization: ApiKey test.$CLIENT_ID MySecret" $@
 }
 
 function curl_get_out {

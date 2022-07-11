@@ -47,7 +47,7 @@ pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
         Ok(BeamIdType::AppId)
     }
     fn has_type(&self) -> BeamIdType { // This is for &self, so we can assume the existing ID is correct
-        Self::str_has_type(&self.value()).unwrap()
+        Self::str_has_type(self.value()).unwrap()
     }
     fn value(&self) -> &String;
     fn new(id: &str) -> Result<Self,SamplyBrokerError>;
@@ -67,19 +67,19 @@ fn check_valid_id_part(id: &str) -> Result<(),SamplyBrokerError> {
 
 impl Display for AppId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.value())
+        f.write_str(self.value())
     }
 }
 
 impl Display for ProxyId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.value())
+        f.write_str(self.value())
     }
 }
 
 impl Display for BrokerId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.value())
+        f.write_str(self.value())
     }
 }
 
@@ -140,7 +140,7 @@ pub enum AnyBeamId {
 
 impl Display for AnyBeamId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.value())
+        f.write_str(self.value())
     }
 }
 
@@ -171,7 +171,7 @@ pub enum AppOrProxyId {
 
 impl Display for AppOrProxyId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.value())
+        f.write_str(self.value())
     }
 }
 

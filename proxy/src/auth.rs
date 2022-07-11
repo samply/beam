@@ -2,18 +2,18 @@ use std::collections::HashMap;
 
 use axum::{async_trait, extract::{FromRequest, RequestParts}};
 use hyper::{StatusCode, header::{HeaderName, self}};
-use shared::{BeamId, config_proxy, config};
+use shared::{config_proxy, config, beam_id2::{AppId, BeamId}};
 
 use tracing::debug;
 
-pub(crate) struct AuthenticatedProxyClient(pub(crate) BeamId);
+pub(crate) struct AuthenticatedApp(pub(crate) AppId);
 
 #[async_trait]
-impl<B: Send + Sync> FromRequest<B> for AuthenticatedProxyClient {
+impl<B: Send + Sync> FromRequest<B> for AuthenticatedApp {
     type Rejection = (StatusCode, [(HeaderName, &'static str);1]);
 
     async fn from_request(req: &mut RequestParts<B>) -> Result<Self,Self::Rejection> {
-        const SCHEME: &str = "ClientApiKey";
+        const SCHEME: &str = "ApiKey";
         const UNAUTH_ERR: (StatusCode,[(HeaderName, &str);1]) = (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, SCHEME)]);
         if let Some(auth) = req.headers().get(header::AUTHORIZATION) {
             let auth = auth.to_str()
@@ -23,7 +23,7 @@ impl<B: Send + Sync> FromRequest<B> for AuthenticatedProxyClient {
                 return Err(UNAUTH_ERR);
             }
             let client_id = auth.next().unwrap_or("");
-            let client_id = BeamId::new(client_id).map_err(|_| UNAUTH_ERR)?;
+            let client_id = AppId::new(client_id).map_err(|_| UNAUTH_ERR)?;
             let api_key_actual = 
                 config::CONFIG_PROXY.api_keys.get(&client_id)
                 .ok_or(UNAUTH_ERR)?;

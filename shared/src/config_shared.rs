@@ -38,6 +38,10 @@ struct VaultConfig {
     /// (included for technical reasons)
     #[clap(long, env, value_parser)]
     client_id: Option<String>,
+
+    /// (included for technical reasons)
+    #[clap(action)]
+    examples: Option<String>,
 }
 
 #[allow(dead_code)]

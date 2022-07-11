@@ -6,7 +6,7 @@ use axum::{
     Extension, Json, Router, extract::{Query, Path}, response::IntoResponse
 };
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, BeamId, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id2::AppOrProxyId};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id2::AppOrProxyId};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace};
 
@@ -119,8 +119,8 @@ where M: Clone + HasWaitId<K>, K: PartialEq
 
 #[derive(Deserialize)]
 struct ToFromParam {
-    from: Option<BeamId>,
-    to: Option<BeamId>,
+    from: Option<AppOrProxyId>,
+    to: Option<AppOrProxyId>,
 }
 
 /// GET /v1/tasks

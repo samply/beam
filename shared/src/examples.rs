@@ -4,17 +4,43 @@ use rand::Rng;
 
 use crate::{beam_id2::{BeamId, AppId, BrokerId, ProxyId}, MsgId, MsgTaskRequest, config, MsgTaskResult, MsgSigned, FailureStrategy};
 
-pub fn generate_example_tasks(broker_id: Option<BrokerId>, proxy_id: Option<ProxyId>) -> HashMap<MsgId, MsgTaskRequest> {
+#[cfg(debug_assertions)]
+pub fn print_example_objects() -> bool {
+    if std::env::args().nth(1).unwrap_or_default() == "examples" {
+        let broker_id = match std::env::args().nth(2) {
+            Some(id) => BrokerId::new(&id).ok(),
+            None => None,
+        };
+        let proxy_id = match std::env::args().nth(3) {
+            Some(id) => ProxyId::new(&id).ok(),
+            None => None,
+        };
+        let tasks = generate_example_tasks(broker_id, proxy_id);
+        let mut num_results = 0;
+        for (num_tasks, task) in tasks.values().enumerate() {
+            println!("export TASK{}='{}'", num_tasks, serde_json::to_string(task).unwrap().replace('\'', "\'"));
+            for result in task.results.values() {
+                println!("export RESULT{}='{}'", num_results, serde_json::to_string(result).unwrap().replace('\'', "\'"));
+                num_results += 1;
+            }
+        }
+        true
+    } else {
+        false
+    }
+}
+
+pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) -> HashMap<MsgId, MsgTaskRequest> {
     let mut tasks: HashMap<MsgId, MsgTaskRequest> = HashMap::new();
-    let broker = broker_id.unwrap_or_else(|| BrokerId::new(&random_str()).unwrap());
+    let broker = broker.unwrap_or_else(|| BrokerId::new(&config::CONFIG_SHARED.broker_domain).unwrap());
     let proxy = {
-        if let Some(id) = proxy_id {
+        if let Some(id) = proxy {
             if ! id.can_be_signed_by(&broker) {
                 panic!("Submitted proxy_id ({id}) cannot be signed by submitted broker_id ({broker})");
             }
             id
         } else {
-            ProxyId::random(&broker)
+            ProxyId::new(&format!("proxy{}.{}", random_number(), broker)).unwrap()
         }
     };
     let app1 = AppId::new(&format!("app1.{proxy}")).unwrap();
@@ -37,8 +63,8 @@ pub fn generate_example_tasks(broker_id: Option<BrokerId>, proxy_id: Option<Prox
     };
     let response_by_app2 = MsgTaskResult {
         id: MsgId::new(),
-        from: app2.clone().into(),
-        to: vec![app1.clone().into()],
+        from: app2.into(),
+        to: vec![app1.into()],
         task: task_for_apps_1_2.id,
         result: crate::WorkResult::PermFailed("Unable to complete".to_string()),
     };
@@ -79,7 +105,6 @@ impl ProxyId {
 fn random_str() -> String {
     const LENGTH: u8 = 8;
     const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-    const SUFFIX: &str = ".randomclientid";
     let mut rng = rand::thread_rng();
     let random_str: String = (0..=LENGTH)
         .map(|_| {
@@ -88,4 +113,9 @@ fn random_str() -> String {
         })
         .collect();
     random_str
+}
+
+fn random_number() -> u8 {
+    let mut rng = rand::thread_rng();
+    rng.gen_range(u8::MIN..u8::MAX)
 }

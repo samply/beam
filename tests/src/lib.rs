@@ -29,9 +29,9 @@ mod tests {
     static mut SERVERS: Servers = Servers::start().unwrap();
     #[dynamic]
     static AUTH: String = {
-        let mut a = String::from("ClientApiKey ");
+        let mut a = String::from("ApiKey ");
         a.push_str(MY_APP_ID_SHORT);
-        a.push_str(".");
+        a.push('.');
         a.push_str(MY_PROXY_ID);
         a.push_str(" MySecret");
         a

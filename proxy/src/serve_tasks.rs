@@ -9,7 +9,7 @@ use serde_json::Value;
 use shared::{config, config_proxy, crypto_jwt, MsgTaskRequest, MsgTaskResult, MsgEmpty, Msg, MsgSigned};
 use tracing::{warn, debug, error};
 
-use crate::auth::AuthenticatedProxyClient;
+use crate::auth::AuthenticatedApp;
 
 pub(crate) fn router(client: &Client<ProxyConnector<HttpConnector>>) -> Router {
     let config = config::CONFIG_PROXY.clone();
@@ -29,7 +29,7 @@ const ERR_VALIDATION: (StatusCode, &str) = (StatusCode::BAD_GATEWAY, "Unable to 
 async fn handler_tasks(
     Extension(client): Extension<Client<ProxyConnector<HttpConnector>>>,
     Extension(config): Extension<config_proxy::Config>,
-    AuthenticatedProxyClient(_): AuthenticatedProxyClient,
+    AuthenticatedApp(_): AuthenticatedApp,
     req: Request<Body>,
 ) -> Result<Response<Body>,(StatusCode, &'static str)> {
     let path = req.uri().path();
