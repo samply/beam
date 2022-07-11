@@ -20,7 +20,7 @@ pub fn print_example_objects() -> bool {
         for (num_tasks, task) in tasks.values().enumerate() {
             println!("export TASK{}='{}'", num_tasks, serde_json::to_string(task).unwrap().replace('\'', "\'"));
             for result in task.results.values() {
-                println!("export RESULT{}='{}'", num_results, serde_json::to_string(result).unwrap().replace('\'', "\'"));
+                println!("export RESULT{}='{}'", num_results, serde_json::to_string(&result.msg).unwrap().replace('\'', "\'"));
                 num_results += 1;
             }
         }

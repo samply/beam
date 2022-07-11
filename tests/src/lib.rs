@@ -6,7 +6,7 @@ mod tests {
 
     use assert_cmd::prelude::*;
     use regex::Regex;
-    use reqwest::{StatusCode, header::{self, HeaderValue, AUTHORIZATION}, Method};
+    use reqwest::{StatusCode, header::{self, HeaderValue, AUTHORIZATION}, Method, Url};
     use restest::{request, Context, Request, assert_body_matches};
     use shared::{MsgTaskRequest, MsgTaskResult, MyUuid, Msg, MsgId, config_proxy, beam_id2::{AppId, BeamId, BrokerId, ProxyId}, examples::generate_example_tasks};
     use static_init::dynamic;
@@ -14,10 +14,10 @@ mod tests {
     use rsa::{pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
     use tokio::{sync::{oneshot, OnceCell, Mutex}, runtime::Handle};
 
-    const PEMFILE: &str = "../pki/test.priv.pem";
-    const MY_BROKER_ID: &str = "broker.samply.de";
-    const MY_PROXY_ID: &str = "proxy23.broker.samply.de";
-    const MY_APP_ID_SHORT: &str = "app42";
+    const BROKER_URL: &str = "http://localhost:8080";
+    const PROXY_URL: &str = "http://localhost:8081";
+    const PROXY_ID_SHORT: &str = "proxy23";
+    const APP_ID_SHORT: &str = "app42";
     const VAULT_BASE: &str = "http://localhost:8200";
     const VAULT_HEALTH: &str = "http://localhost:8200/v1/sys/health";
     const PROXY_HEALTH: &str = "http://localhost:8081/v1/health";
@@ -25,14 +25,24 @@ mod tests {
     // const CTX_PROXY: Context = Context::new().with_port(8081);
     // const CTX_VAULT: Context = Context::new().with_port(8200);
 
+    #[dynamic]
+    static BROKER_ID: String = Url::try_from(BROKER_URL).unwrap().host_str().unwrap().to_string();
+    #[dynamic]
+    static PROXY_ID: String = format!("{PROXY_ID_SHORT}.{}", BROKER_ID.as_str());
+    #[dynamic(lazy)]
+    static APP_ID: AppId = AppId::new(&format!("{}.{}", APP_ID_SHORT, PROXY_ID.as_str())).unwrap();
+
+    #[dynamic(lazy)]
+    static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(BrokerId::new(&BROKER_ID).unwrap()), Some(ProxyId::new(PROXY_ID.as_str()).unwrap()));
+
     #[dynamic(drop)]
     static mut SERVERS: Servers = Servers::start().unwrap();
     #[dynamic]
     static AUTH: String = {
         let mut a = String::from("ApiKey ");
-        a.push_str(MY_APP_ID_SHORT);
+        a.push_str(APP_ID_SHORT);
         a.push('.');
-        a.push_str(MY_PROXY_ID);
+        a.push_str(PROXY_ID.as_str());
         a.push_str(" MySecret");
         a
     };
@@ -45,25 +55,26 @@ mod tests {
     impl Servers {
         fn start() -> anyhow::Result<Self> {
             let mut txes = Vec::new();
+            let pem_file = &format!("../pki/{}.priv.pem", PROXY_ID_SHORT);
             for (cmd, args, env, wait_pkcs1_key, _wait_health) in 
                 [
                     ("bash",
                         vec!("-c", "../pki/pki devsetup"),
                         HashMap::new(),
-                        Some(PEMFILE),
+                        Some(pem_file),
                         Some(VAULT_HEALTH)),
                     ("central",
-                        vec!("--pki-address", VAULT_BASE, "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", PEMFILE),
+                        vec!("--broker-url", BROKER_URL, "--pki-address", VAULT_BASE, "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", pem_file),
                         HashMap::new(),
-                        Some(PEMFILE),
+                        Some(pem_file),
                         Some(CENTRAL_HEALTH)),
                     ("proxy", 
-                        vec!("--broker-url", "http://localhost:8080", "--client-id", MY_PROXY_ID, "--pki-address", "http://localhost:8200", "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", PEMFILE),
-                        HashMap::from([(config_proxy::APPKEY_PREFIX.to_string() + MY_APP_ID_SHORT, "MySecret")]),
-                        Some(PEMFILE),
+                        vec!("--broker-url", BROKER_URL, "--proxy-id", PROXY_ID.as_str(), "--pki-address", VAULT_BASE, "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", pem_file),
+                        HashMap::from([(config_proxy::APPKEY_PREFIX.to_string() + APP_ID_SHORT, "MySecret")]),
+                        Some(pem_file),
                         Some(PROXY_HEALTH))
                 ] {
-                println!("{}: START", cmd);
+                println!("{}: START with args: {:?}", cmd, args);
                 let (tx, rx) = oneshot::channel::<()>();
                 txes.push(tx);
                 let mut proc = Command::cargo_bin(cmd)
@@ -167,14 +178,6 @@ mod tests {
     }
 
     #[dynamic]
-    static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(BrokerId::new(MY_BROKER_ID).unwrap()), Some(ProxyId::new(MY_PROXY_ID).unwrap()));
-
-    #[dynamic]
-    static MY_APP_ID: AppId = AppId::new(&format!("{MY_APP_ID_SHORT}.{MY_PROXY_ID}")).unwrap();
-    // #[dynamic]
-    // static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
-
-    #[dynamic]
     static CLIENT: reqwest::Client = {
         let mut headers = header::HeaderMap::new();
         let mut value = header::HeaderValue::from_str(AUTH.as_str()).unwrap();
@@ -214,7 +217,7 @@ mod tests {
         for task in ex.values_mut() {
             for (_, mut result) in &mut task.results {
                 result.msg.task = task.id;
-                result.msg.from = MY_APP_ID.clone().into();
+                result.msg.from = APP_ID.clone().into();
                 let resp = CLIENT
                     .post(format!("http://localhost:8081/v1/tasks/{}/results", task.id))
                     .json(&result.msg)
@@ -230,7 +233,7 @@ mod tests {
         let ex = EXAMPLES.fast_write().unwrap();
         for task in ex.values() {
             let resp =
-                CLIENT.get(format!("http://localhost:8081/v1/tasks?from={}", task.from))
+                CLIENT.get(format!("{}/v1/tasks?from={}", PROXY_URL, task.from))
                 .send().await?;
             assert_eq!(resp.status(), StatusCode::OK);
             let got_tasks = resp.json::<Vec<MsgTaskRequest>>().await.unwrap();

@@ -38,6 +38,10 @@ struct CliArgs {
     /// samply.pki: Path to own secret key
     #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
     privkey_file: PathBuf,
+
+    /// (included for technical reasons)
+    #[clap(long)]
+    test_threads: Option<String>
 }
 
 pub struct Config {

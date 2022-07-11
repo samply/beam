@@ -16,7 +16,7 @@ pub struct Config {
     pub bind_addr: SocketAddr,
     pub pki_address: Uri,
     pub pki_realm: String,
-    pub beam_id: ProxyId,
+    pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId,ApiKey>
 }
 
@@ -40,7 +40,7 @@ pub struct CliArgs {
 
     /// This proxy's beam id, e.g. site23.broker.samply.de
     #[clap(long, env, value_parser)]
-    pub beam_id: String,
+    pub proxy_id: String,
 
     /// samply.pki: URL to HTTPS endpoint
     #[clap(long, env, value_parser)]
@@ -57,6 +57,10 @@ pub struct CliArgs {
     /// samply.pki: Path to own secret key
     #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
     pub privkey_file: PathBuf,
+
+    /// (included for technical reasons)
+    #[clap(long)]
+    test_threads: Option<String>
 }
 
 pub const APPKEY_PREFIX: &str = "APPKEY_";
@@ -82,8 +86,8 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBroke
 impl crate::config::Config for Config {
     fn load() -> Result<Config,SamplyBrokerError> {
         let cli_args = CliArgs::parse();
-        let proxy_id = ProxyId::new(&cli_args.beam_id)
-            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Invalid Beam ID \"{}\" supplied: {}", cli_args.beam_id, e)))?;
+        let proxy_id = ProxyId::new(&cli_args.proxy_id)
+            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Invalid Beam ID \"{}\" supplied: {}", cli_args.proxy_id, e)))?;
         let api_keys = parse_apikeys(&proxy_id)?;
         if api_keys.is_empty() {
             return Err(SamplyBrokerError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {}<clientname>=<key>", APPKEY_PREFIX)));
@@ -94,7 +98,7 @@ impl crate::config::Config for Config {
             pki_address: cli_args.pki_address,
             bind_addr: cli_args.bind_addr,
             pki_realm: cli_args.pki_realm,
-            beam_id: proxy_id,
+            proxy_id,
             api_keys
         };
         info!("Successfully read config and API keys from CLI and secrets file.");

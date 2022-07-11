@@ -205,6 +205,30 @@ impl From<AppId> for AppOrProxyId {
     }
 }
 
+impl From<&AppId> for AppOrProxyId {
+    fn from(id: &AppId) -> Self {
+        AppOrProxyId::AppId(id.clone())
+    }
+}
+
+impl PartialEq<AppId> for AppOrProxyId {
+    fn eq(&self, other: &AppId) -> bool {
+        match self {
+            Self::AppId(id) => id == other,
+            Self::ProxyId(_) => false,
+        }
+    }
+}
+
+impl PartialEq<ProxyId> for AppOrProxyId {
+    fn eq(&self, other: &ProxyId) -> bool {
+        match self {
+            Self::ProxyId(id) => id == other,
+            Self::AppId(_) => false,
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for AppOrProxyId {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

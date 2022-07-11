@@ -120,9 +120,12 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
             .map_err(|_| ERR_BODY)?;
         (custom_without, token_without_extended_signature)
     } else {
+        // TODO: We need to fetch the message from the custom_with
+        let msg = serde_json::from_value::<M>(content_with.custom)
+            .map_err(|_| ERR_SIG)?;
         let msg_empty = MsgEmpty {
-            id: MsgId::new(),
-            from: proxy_public_info.beam_id.clone().into(),
+            id: *msg.get_id(),
+            from: msg.get_from().clone(),
         };
         let serialized = serde_json::to_string(&msg_empty).unwrap(); // known input
         (

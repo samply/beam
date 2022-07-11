@@ -9,7 +9,10 @@ pub(crate) trait Config: Sized{
 
 fn load<T: Config>() -> T where {
     T::load()
-        .unwrap_or_else(|e| panic!("Unable to read config: {}", e))
+        .unwrap_or_else(|e| {
+            eprintln!("Unable to start as there was an error reading the config:\n{}\n\nTerminating -- please double-check your startup parameters with --help and refer to the documentation.", e);
+            std::process::exit(1);
+        })
 }
 
 #[dynamic(lazy)]

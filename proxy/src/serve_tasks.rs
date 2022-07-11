@@ -6,7 +6,7 @@ use hyper::{Client, client::HttpConnector, StatusCode, Request, Body, Uri, body,
 use hyper_proxy::ProxyConnector;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use shared::{config, config_proxy, crypto_jwt, MsgTaskRequest, MsgTaskResult, MsgEmpty, Msg, MsgSigned};
+use shared::{config, config_proxy, crypto_jwt, MsgTaskRequest, MsgTaskResult, MsgEmpty, Msg, MsgSigned, beam_id2::AppId, MsgId};
 use tracing::{warn, debug, error};
 
 use crate::auth::AuthenticatedApp;
@@ -25,11 +25,12 @@ const ERR_BODY: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Invalid body");
 const ERR_INTERNALCRYPTO: (StatusCode, &str) = (StatusCode::INTERNAL_SERVER_ERROR, "Cryptography failed; see server logs.");
 const ERR_UPSTREAM: (StatusCode, &str) = (StatusCode::BAD_GATEWAY, "Unable to parse server's reply.");
 const ERR_VALIDATION: (StatusCode, &str) = (StatusCode::BAD_GATEWAY, "Unable to verify signature in server reply.");
+const ERR_FAKED_FROM: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "You are not authorized to send on behalf of this app.");
 
 async fn handler_tasks(
     Extension(client): Extension<Client<ProxyConnector<HttpConnector>>>,
     Extension(config): Extension<config_proxy::Config>,
-    AuthenticatedApp(_): AuthenticatedApp,
+    AuthenticatedApp(sender): AuthenticatedApp,
     req: Request<Body>,
 ) -> Result<Response<Body>,(StatusCode, &'static str)> {
     let path = req.uri().path();
@@ -41,8 +42,8 @@ async fn handler_tasks(
 
     let target_uri = Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
         .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
-
-    let req = sign_request(req, &config, &target_uri).await?;
+    
+    let req = sign_request(req, &config, &target_uri, &sender).await?;
     
     let resp = client.request(req).await
         .map_err(|e| {
@@ -70,7 +71,7 @@ async fn handler_tasks(
             debug!("Validated and stripped signature: \"{}\"", std::str::from_utf8(&bytes).unwrap_or("Unable to parse string as UTF-8"));
         }
     }
-    
+
     let len = bytes.len();
     let body = Body::from(bytes);
     parts.headers.insert(header::CONTENT_LENGTH, len.into());
@@ -80,13 +81,18 @@ async fn handler_tasks(
 }
 
 // TODO: This could be a middleware
-async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_uri: &Uri) -> Result<Request<Body>, (StatusCode, &'static str)> {
+async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_uri: &Uri, sender: &AppId) -> Result<Request<Body>, (StatusCode, &'static str)> {
     let (mut parts, body) = req.into_parts();
     let body = body::to_bytes(body).await
         .map_err(|_| ERR_BODY)?;
+
     let mut body = if body.is_empty() {
-        debug!("Body is empty, substituting empty json.");
-        serde_json::from_str::<Value>("{}").unwrap() // static input
+        debug!("Body is empty, substituting MsgEmpty.");
+        let empty = MsgEmpty {
+            id: MsgId::new(),
+            from: sender.into(),
+        };
+        serde_json::to_value(empty).unwrap()
     } else {
         match serde_json::from_slice::<Value>(&body) {
             Ok(val) => {
@@ -98,7 +104,13 @@ async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_
                 return Err(ERR_BODY);
             }
         }
-    };    
+    };
+    // Sanity/security checks: From address sane?
+    let msg = serde_json::from_value::<MsgEmpty>(body.clone())
+        .map_err(|_| ERR_BODY)?;
+    if msg.get_from() != sender {
+        return Err(ERR_FAKED_FROM);
+    }
     let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body).await
         .map_err(|e| {
             error!("Crypto failed: {}", e);

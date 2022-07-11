@@ -136,6 +136,9 @@ async fn get_tasks(
     if from.is_none() && to.is_none() {
         return Err((StatusCode::BAD_REQUEST, "Please supply either \"from\" or \"to\" query parameter."));
     }
+    debug!(?from);
+    debug!(?to);
+    debug!(?msg);
     if (from.is_some() && *from.as_ref().unwrap() != msg.msg.from) 
     || (to.is_some() && *to.as_ref().unwrap() != msg.msg.from) { // Rewrite in Rust 1.64: https://github.com/rust-lang/rust/pull/94927
         return Err((StatusCode::UNAUTHORIZED, "You can only list messages created by you (from) or directed to you (to)."));

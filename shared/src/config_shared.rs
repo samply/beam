@@ -37,11 +37,15 @@ struct VaultConfig {
 
     /// (included for technical reasons)
     #[clap(long, env, value_parser)]
-    client_id: Option<String>,
+    proxy_id: Option<String>,
 
     /// (included for technical reasons)
     #[clap(action)]
     examples: Option<String>,
+
+    /// (included for technical reasons)
+    #[clap(long)]
+    test_threads: Option<String>
 }
 
 #[allow(dead_code)]
@@ -62,15 +66,15 @@ impl crate::config::Config for Config {
 
         // Private key
         let privkey_pem = read_to_string(&vc.privkey_file)
-            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Unable to load private key from disk".into()))?
+            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Unable to load private key from file {}: {}", vc.privkey_file.to_string_lossy(), e)))?
             .trim().to_string();
         let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
             .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
-            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Unable to interpret private key PEM as PKCS#1 or PKCS#8.".into()))?;
+            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
         let mut privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem)
-            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Unable to interpret private key PEM as PKCS#1 or PKCS#8.".into()))?;
-        if let Some(client_id) = vc.client_id {
-            privkey_rs256 = privkey_rs256.with_key_id(&client_id);
+            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
+        if let Some(proxy_id) = vc.proxy_id {
+            privkey_rs256 = privkey_rs256.with_key_id(&proxy_id);
         }
     
         // API Key
