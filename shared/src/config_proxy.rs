@@ -69,7 +69,7 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBroke
         })
         .map(|(stripped,v)| {
             let app_id = format!("{}.{}", stripped, proxy_id);
-            let client_id = BeamId::new(&app_id)
+            let client_id = BeamIdTrait::new(&app_id)
                 .map_err(|_| SamplyBrokerError::ConfigurationFailed(format!("Wrong api key definition: Client ID {} is invalid.", app_id)))?;
             if v.is_empty() {
                 return Err(SamplyBrokerError::ConfigurationFailed(format!("Unable to assign empty API key for client {}", client_id)));
@@ -82,7 +82,7 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBroke
 impl crate::config::Config for Config {
     fn load() -> Result<Config,SamplyBrokerError> {
         let cli_args = CliArgs::parse();
-        let beam_id = BeamId::try_from(cli_args.beam_id)
+        let beam_id = BeamIdTrait::try_from(cli_args.beam_id)
             .map_err(|_| SamplyBrokerError::ConfigurationFailed("Invalid Client ID supplied.".into()))?;
         let api_keys = parse_apikeys(&beam_id)?;
         if api_keys.is_empty() {

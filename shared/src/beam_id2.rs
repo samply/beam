@@ -9,7 +9,7 @@ pub enum BeamIdType {
     BrokerId
 }
 
-pub trait BeamId: Display + Sized{
+pub trait BeamIdTrait: Display + Sized{
     fn str_has_type(value: &str) -> Result<BeamIdType,SamplyBrokerError> {
         let domain = config::CONFIG_SHARED.broker_domain;
         let split = value.split('.').rev();
@@ -77,7 +77,7 @@ impl Display for BrokerId {
 }
 
 pub struct AppId(String);
-impl BeamId for AppId {
+impl BeamIdTrait for AppId {
     fn value(&self) -> String {
         self.0
     }
@@ -88,16 +88,25 @@ impl BeamId for AppId {
         Ok(AppId(id.to_string()))
     }
 }
+
+pub struct BeamId(dyn BeamIdTrait);
 pub struct ProxyId(String);
-impl BeamId for ProxyId {
+impl BeamIdTrait for ProxyId {
     fn value(&self) -> String {
         self.0
     }
+
+    fn new(id: &str) -> Result<ProxyId, SamplyBrokerError> {
+        Ok(ProxyId(String::from(id)))
+    }
 }
 pub struct BrokerId(String);
-impl BeamId for BrokerId {
+impl BeamIdTrait for BrokerId {
     fn value(&self) -> String {
         self.0
+    }
+    fn new(id: &str) -> Result<BrokerId, SamplyBrokerError> {
+        Ok(BrokerId(String::from(id)))
     }
 }
 

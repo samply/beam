@@ -79,6 +79,6 @@ impl crate::config::Config for Config {
             todo!() // TODO Tobias: Check if matches certificate, and fail
         }
         let broker_domain = broker_domain.unwrap();
-        Ok(Config { pki_address: vc.pki_address, pki_realm: vc.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy: vc.http_proxy, broker_domain })
+        Ok(Config { pki_address: vc.pki_address, pki_realm: vc.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy: vc.http_proxy, String::from(broker_domain) })
     }    
 }

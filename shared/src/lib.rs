@@ -1,5 +1,6 @@
 #![allow(unused_imports)]
 
+use beam_id2::{BeamId, BeamIdTrait};
 use crypto_jwt::extract_jwt;
 use errors::SamplyBrokerError;
 use static_init::dynamic;
@@ -152,7 +153,7 @@ impl Msg for MsgEmpty {
 pub trait Msg: Serialize {
     fn get_id(&self) -> &MsgId;
     fn get_from(&self) -> &BeamId;
-    fn get_to(&self) -> &Vec<BeamId>;
+    fn get_to(&self) -> &Vec<dyn BeamIdTrait>;
 }
 
 pub trait MsgWithBody : Msg{
@@ -233,7 +234,7 @@ pub struct MsgTaskRequest {
     // pub expire: SystemTime,
     pub failure_strategy: FailureStrategy,
     #[serde(skip)]
-    pub results: HashMap<BeamId,MsgSigned<MsgTaskResult>>,
+    pub results: HashMap<BeamIdTrait,MsgSigned<MsgTaskResult>>,
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EncryptedMsgTaskRequest {
@@ -333,10 +334,10 @@ impl Msg for MsgPing {
     }
 }
 
-pub fn generate_example_tasks(client1_id: Option<BeamId>) -> HashMap<MsgId, MsgTaskRequest> {
+pub fn generate_example_tasks(client1_id: Option<BeamIdTrait>) -> HashMap<MsgId, MsgTaskRequest> {
     let mut tasks: HashMap<MsgId, MsgTaskRequest> = HashMap::new();
     let client1 = client1_id.unwrap_or_default();
-    let client2 = BeamId::random();
+    let client2 = BeamIdTrait::random();
 
     let task_for_clients_1_2 = MsgTaskRequest::new(
         client1.clone(),
