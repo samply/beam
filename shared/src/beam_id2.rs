@@ -1,6 +1,6 @@
 use std::{ops::Deref, fmt::Display, hash::Hash};
 
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize, de::Visitor};
 
 use crate::{errors::SamplyBrokerError, config};
 
@@ -163,7 +163,7 @@ impl BeamId for AnyBeamId {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AppOrProxyId {
     AppId(AppId),
     ProxyId(ProxyId),
@@ -202,5 +202,46 @@ impl From<ProxyId> for AppOrProxyId {
 impl From<AppId> for AppOrProxyId {
     fn from(id: AppId) -> Self {
         AppOrProxyId::AppId(id)
+    }
+}
+
+impl<'de> Deserialize<'de> for AppOrProxyId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de> {
+        deserializer.deserialize_str(AppOrProxyIdVisitor)
+    }
+}
+
+impl Serialize for AppOrProxyId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+        serializer.serialize_str(self.value())
+    }
+}
+
+struct AppOrProxyIdVisitor;
+
+impl<'de> Visitor<'de> for AppOrProxyIdVisitor {
+    type Value = AppOrProxyId;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(formatter, "AppId = <app_id>.<proxy_id>.<broker_id> or ProxyId = <proxy_id>.<broker_id>")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        let t = AppId::str_has_type(v)
+            .map_err(|_| serde::de::Error::custom(format!("Invalid Beam ID: {v}")))?;
+        match t {
+            BeamIdType::AppId => Ok(AppOrProxyId::AppId(AppId::new(v).unwrap())),
+            BeamIdType::ProxyId => Ok(AppOrProxyId::ProxyId(ProxyId::new(v).unwrap())),
+            BeamIdType::BrokerId => {
+                Err(serde::de::Error::custom("Expected AppOrProxyId, got BrokerId."))
+            }
+        }
     }
 }
