@@ -219,7 +219,7 @@ mod tests {
             println!("Location: {}", location);
             location_regex.captures(location)
                 .expect("Returned Location header does not match format.");
-            assert!(location.contains(&task.id.to_string()));s
+            assert!(location.contains(&task.id.to_string()));
         }
         Ok(())
     }
