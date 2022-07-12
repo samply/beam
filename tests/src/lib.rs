@@ -81,6 +81,7 @@ mod tests {
                 txes.push(tx);
                 let mut proc = Command::cargo_bin(cmd)
                     .unwrap_or(Command::new(cmd));
+                println!("Command: {:?}", proc);
                 let mut proc = {
                     let mut proc = proc
                         .envs(env)
