@@ -5,9 +5,6 @@ mod serve_tasks;
 mod serve_health;
 mod banner;
 
-#[cfg(debug_assertions)]
-mod devhelper;
-
 use std::{collections::HashMap, sync::Arc};
 
 use shared::*;
@@ -17,8 +14,9 @@ use tracing::info;
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {    
     shared::config::prepare_env();
+
     #[cfg(debug_assertions)]
-    if devhelper::print_example_objects() { return Ok(()); }
+    if shared::examples::print_example_objects() { return Ok(()); }
     
     shared::logger::init_logger()?;
     banner::print_banner();

@@ -3,37 +3,45 @@ use std::{net::SocketAddr, path::PathBuf, fs::read_to_string};
 use axum::http::Uri;
 use clap::Parser;
 use static_init::dynamic;
-use crate::{errors::SamplyBrokerError, ClientId};
+use crate::{errors::SamplyBrokerError};
 use tracing::info;
 use std::str::FromStr;
 
 /// Settings for Samply.Broker.Central
 #[derive(Parser,Debug)]
 #[clap(author, version, about, long_about = None, arg_required_else_help(true))]
-pub struct CliArgs {
+struct CliArgs {
     /// Local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8080").unwrap())]
-    pub bind_addr: SocketAddr,
+    bind_addr: SocketAddr,
 
     /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
     #[clap(long, env, value_parser)]
-    pub http_proxy: Option<Uri>,
+    http_proxy: Option<Uri>,
+
+    /// The broker's base URL, e.g. https://broker.samply.de
+    #[clap(long, env, value_parser)]
+    broker_url: Uri,
 
     /// samply.pki: URL to HTTPS endpoint
     #[clap(long, env, value_parser)]
-    pub pki_address: Uri,
+    pki_address: Uri,
 
     /// samply.pki: Authentication realm
     #[clap(long, env, value_parser, default_value = "samply_pki")]
-    pub pki_realm: String,
+    pki_realm: String,
 
     /// samply.pki: File containing the authentication token
     #[clap(long, env, value_parser, default_value = "/run/secrets/pki.secret")]
-    pub pki_apikey_file: PathBuf,
+    pki_apikey_file: PathBuf,
 
     /// samply.pki: Path to own secret key
     #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
     privkey_file: PathBuf,
+
+    /// (included for technical reasons)
+    #[clap(long)]
+    test_threads: Option<String>
 }
 
 pub struct Config {

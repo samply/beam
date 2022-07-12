@@ -2,21 +2,21 @@
 
 #[cfg(test)]
 mod tests {
-    use std::{process::{Command, Child}, thread, time::{Duration, Instant}, io::ErrorKind, collections::{HashSet, HashMap}, iter::Map, path::Path, mem::take};
+    use std::{process::{Command, Child, Stdio}, thread, time::{Duration, Instant}, io::{ErrorKind, BufReader, BufRead}, collections::{HashSet, HashMap}, iter::Map, path::Path, mem::take};
 
     use assert_cmd::prelude::*;
     use regex::Regex;
-    use reqwest::{StatusCode, header::{self, HeaderValue, AUTHORIZATION}, Method};
-    use restest::{request, Context, Request, assert_body_matches};
-    use shared::{generate_example_tasks, MsgTaskRequest, MsgTaskResult, MyUuid, ClientId, Msg, MsgId};
+    use reqwest::{StatusCode, header::{self, HeaderValue, AUTHORIZATION}, Method, Url};
+    use shared::{MsgTaskRequest, MsgTaskResult, MyUuid, Msg, MsgId, config_proxy, beam_id::{AppId, BeamId, BrokerId, ProxyId}, examples::generate_example_tasks};
     use static_init::dynamic;
 
     use rsa::{pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
     use tokio::{sync::{oneshot, OnceCell, Mutex}, runtime::Handle};
 
-    const PEMFILE: &str = "../pki/test.priv.pem";
-    const MY_PROXY_ID: &str = "test.broker.samply.de";
-    const MY_CLIENT_ID_SHORT: &str = "itsme";
+    const BROKER_URL: &str = "http://localhost:8080";
+    const PROXY_URL: &str = "http://localhost:8081";
+    const PROXY_ID_SHORT: &str = "proxy23";
+    const APP_ID_SHORT: &str = "app1";
     const VAULT_BASE: &str = "http://localhost:8200";
     const VAULT_HEALTH: &str = "http://localhost:8200/v1/sys/health";
     const PROXY_HEALTH: &str = "http://localhost:8081/v1/health";
@@ -24,14 +24,24 @@ mod tests {
     // const CTX_PROXY: Context = Context::new().with_port(8081);
     // const CTX_VAULT: Context = Context::new().with_port(8200);
 
+    #[dynamic]
+    static BROKER_ID: String = Url::try_from(BROKER_URL).unwrap().host_str().unwrap().to_string();
+    #[dynamic]
+    static PROXY_ID: String = format!("{PROXY_ID_SHORT}.{}", BROKER_ID.as_str());
+    #[dynamic(lazy)]
+    static APP_ID: AppId = AppId::new(&format!("{}.{}", APP_ID_SHORT, PROXY_ID.as_str())).unwrap();
+
+    #[dynamic(lazy)]
+    static mut EXAMPLES: (Vec<MsgTaskRequest>,Vec<MsgTaskResult>) = generate_example_tasks(Some(BrokerId::new(&BROKER_ID).unwrap()), Some(ProxyId::new(PROXY_ID.as_str()).unwrap()));
+
     #[dynamic(drop)]
     static mut SERVERS: Servers = Servers::start().unwrap();
     #[dynamic]
     static AUTH: String = {
-        let mut a = String::from("ClientApiKey ");
-        a.push_str(MY_CLIENT_ID_SHORT);
-        a.push_str(".");
-        a.push_str(MY_PROXY_ID);
+        let mut a = String::from("ApiKey ");
+        a.push_str(APP_ID_SHORT);
+        a.push('.');
+        a.push_str(PROXY_ID.as_str());
         a.push_str(" MySecret");
         a
     };
@@ -44,34 +54,56 @@ mod tests {
     impl Servers {
         fn start() -> anyhow::Result<Self> {
             let mut txes = Vec::new();
-            for (cmd, args, env, wait_pkcs1_key, _wait_health) in 
+            let pem_file = &format!("../pki/{}.priv.pem", PROXY_ID_SHORT);
+            for (cmd, args, env, wait_pkcs1_key, _wait_health, wait_output) in 
                 [
                     ("bash",
                         vec!("-c", "../pki/pki devsetup"),
                         HashMap::new(),
-                        Some(PEMFILE),
-                        Some(VAULT_HEALTH)),
+                        Some(pem_file),
+                        Some(VAULT_HEALTH),
+                        Some("Success: PEM files stored to")),
                     ("central",
-                        vec!("--pki-address", VAULT_BASE, "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", PEMFILE),
+                        vec!("--broker-url", BROKER_URL, "--pki-address", VAULT_BASE, "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", pem_file),
                         HashMap::new(),
-                        Some(PEMFILE),
-                        Some(CENTRAL_HEALTH)),
+                        Some(pem_file),
+                        Some(CENTRAL_HEALTH),
+                        None,),
                     ("proxy", 
-                        vec!("--broker-url", "http://localhost:8080", "--client-id", MY_PROXY_ID, "--pki-address", "http://localhost:8200", "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", PEMFILE),
-                        HashMap::from([("CLIENTKEY_".to_string() + MY_CLIENT_ID_SHORT, "MySecret")]),
-                        Some(PEMFILE),
-                        Some(PROXY_HEALTH))
+                        vec!("--broker-url", BROKER_URL, "--proxy-id", PROXY_ID.as_str(), "--pki-address", VAULT_BASE, "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", pem_file),
+                        HashMap::from([(config_proxy::APPKEY_PREFIX.to_string() + APP_ID_SHORT, "MySecret")]),
+                        Some(pem_file),
+                        Some(PROXY_HEALTH),
+                        None)
                 ] {
-                println!("{}: START", cmd);
+                println!("{}: START with args: {:?}", cmd, args);
                 let (tx, rx) = oneshot::channel::<()>();
                 txes.push(tx);
                 let mut proc = Command::cargo_bin(cmd)
                     .unwrap_or(Command::new(cmd));
-                let proc = proc.envs(env);
-                let mut proc = proc
-                    .args(args)
-                    .spawn()
-                    .expect(&format!("Unable to start process {}", cmd));
+                println!("Command: {:?}", proc);
+                let mut proc = {
+                    let mut proc = proc
+                        .envs(env)
+                        .args(args);
+                    if wait_output.is_some() {
+                        proc = proc.stdout(Stdio::piped());
+                    }
+                    proc
+                        .spawn()
+                        .expect(&format!("Unable to start process {}", cmd))
+                };
+                if let Some(wait_output) = wait_output {
+                    let mut buf = String::new();
+                    let mut reader = BufReader::new(proc.stdout.take().unwrap());
+                    while reader.read_line(&mut buf).unwrap() > 0 {
+                        if buf.contains(wait_output) {
+                            eprintln!("Awaitet output received: \"{wait_output}\"");
+                            break;
+                        }
+                        buf.clear();
+                    }
+                }
                 thread::spawn(move || {
                     println!("Server {} started.", cmd);
                     if let Err(e) = rx.blocking_recv() {
@@ -166,14 +198,6 @@ mod tests {
     }
 
     #[dynamic]
-    static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
-
-    #[dynamic]
-    static MY_CLIENT_ID: ClientId = ClientId::new(MY_PROXY_ID).unwrap();
-    // #[dynamic]
-    // static mut EXAMPLES: HashMap<MyUuid, MsgTaskRequest> = generate_example_tasks(Some(ClientId::new(MY_PROXY_ID).unwrap()));
-
-    #[dynamic]
     static CLIENT: reqwest::Client = {
         let mut headers = header::HeaderMap::new();
         let mut value = header::HeaderValue::from_str(AUTH.as_str()).unwrap();
@@ -188,37 +212,37 @@ mod tests {
     #[tokio::test]
     async fn b_post_task() -> anyhow::Result<()>{
         wait_for_servers().await;
-        for task in EXAMPLES.fast_write().unwrap().values_mut() {
-            let resp = CLIENT
+        for task in &EXAMPLES.fast_read().unwrap().0 {
+            let req = CLIENT
                 .post("http://localhost:8081/v1/tasks")
-                .json(task)
-                .send().await?;
-            assert_eq!(resp.status(), StatusCode::CREATED);
+                .json(task);
+            let resp = req.send().await?;
+            assert_eq!(resp.status(), StatusCode::CREATED, "\nSent: {:?}\nGot: {:?}", task, resp);
             let location = resp.headers().get(header::LOCATION)
                 .expect("Returned Location header is empty")
                 .to_str()?;
             let location_regex = Regex::new("^.*/(.*)/?$")?;
             println!("Location: {}", location);
-            let cap = location_regex.captures(location)
+            location_regex.captures(location)
                 .expect("Returned Location header does not match format.");
-            let location = &cap[1];
-            task.id = MsgId::try_from(location)?;
+            assert!(location.contains(&task.id.to_string()));
         }
         Ok(())
     }
 
     #[tokio::test]
     async fn c_post_results() -> anyhow::Result<()> {
-        let mut ex = EXAMPLES.fast_write().unwrap();
-        for task in ex.values_mut() {
-            for (_, mut result) in &mut task.results {
-                result.msg.task = task.id;
-                result.msg.from = MY_CLIENT_ID.clone();
-                let resp = CLIENT
-                    .post(format!("http://localhost:8081/v1/tasks/{}/results", task.id))
-                    .json(&result.msg)
-                    .send().await?;
-                assert!([StatusCode::CREATED, StatusCode::NO_CONTENT].contains(&resp.status()));
+        for result in &EXAMPLES.fast_read().unwrap().1 {
+            // result.msg.task = task.id;
+            // result.msg.from = APP_ID.clone().into();
+            let resp = CLIENT
+                .post(format!("http://localhost:8081/v1/tasks/{}/results", result.task))
+                .json(&result)
+                .send().await?;
+            if result.from == APP_ID.value() {
+                assert!([StatusCode::CREATED, StatusCode::NO_CONTENT].contains(&resp.status()), "\nSent: {:?}\nGot: {:?}", result, resp);
+            } else {
+                assert!(resp.status() == StatusCode::UNAUTHORIZED);
             }
         }
         Ok(())
@@ -226,15 +250,13 @@ mod tests {
 
     #[tokio::test]
     async fn d_get_tasks() -> anyhow::Result<()>{
-        let ex = EXAMPLES.fast_write().unwrap();
-        for task in ex.values() {
+        let ex = &EXAMPLES.fast_read().unwrap().0;
+        for task in ex {
             let resp =
-                CLIENT.get(format!("http://localhost:8081/v1/tasks?from={}", task.from))
+                CLIENT.get(format!("{}/v1/tasks?from={}", PROXY_URL, task.from))
                 .send().await?;
             assert_eq!(resp.status(), StatusCode::OK);
             let got_tasks = resp.json::<Vec<MsgTaskRequest>>().await.unwrap();
-            // println!("Task: {:?}", task);
-            // println!("Tasks: {:?}", tasks);
             assert_eq!(got_tasks.len(), ex.len());
         }
         Ok(())

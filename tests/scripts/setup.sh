@@ -1,16 +1,23 @@
 #/bin/bash
 
-eval $(cargo run --bin central -- examples test.broker.samply.de 2>/dev/null)
+eval $(cargo run --bin central -- examples 2>/dev/null)
+
+if [ "$?" != "0" ]; then
+    echo -e "Failed to fetch examples; try running the following command and checking for errors:\n\ncargo run --bin central -- examples"
+    exit 1
+fi
 
 SD=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 export WORKSPACE=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && cd ../../ && pwd )
 
 export BROKER_URL="http://localhost:8080"
-export CLIENT_ID="test.broker.samply.de"
+export BROKER_ID="localhost"
+export PROXY_ID="proxy23.localhost"
+export APP_ID="app1"
 export PKI_ADDRESS="http://localhost:8200"
 export PKI_APIKEY_FILE="$WORKSPACE/tests/pki_apikey.secret"
-export PRIVKEY_FILE="$WORKSPACE/pki/test.priv.pem"
-export CLIENTKEY_test="MySecret"
+export PRIVKEY_FILE="$WORKSPACE/pki/proxy23.priv.pem"
+export APPKEY_app1="MySecret"
 
 export P="http://localhost:8081" # for scripts
 
@@ -53,7 +60,7 @@ function success {
 }
 
 function curl_get {
-    curl -H "content-type: application/json" -H "Authorization: ClientApiKey test.$CLIENT_ID MySecret" $@
+    curl -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID.$PROXY_ID MySecret" $@
 }
 
 function curl_get_out {
@@ -70,7 +77,7 @@ function curl_get_noout {
 
 
 function curl_post {
-    curl -H "content-type: application/json" -H "Authorization: ClientApiKey test.$CLIENT_ID MySecret" -d @- $@
+    curl -H "content-type: application/json" -H "Authorization: ClientApiKey $APP_ID.$PROXY_ID MySecret" -d @- $@
 }
 
 function curl_post_out {

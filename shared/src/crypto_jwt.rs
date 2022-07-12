@@ -5,7 +5,7 @@ use openssl::base64;
 use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use tracing::{debug, error, warn};
-use crate::{ClientId, errors::SamplyBrokerError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config};
+use crate::{BeamId, errors::SamplyBrokerError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::ProxyId};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -49,12 +49,12 @@ where
     }
 }
 
-pub async fn extract_jwt(token: &str) -> Result<(crypto::ClientPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBrokerError> {
+pub async fn extract_jwt(token: &str) -> Result<(crypto::ProxyPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBrokerError> {
     let metadata = Token::decode_metadata(token)
         .map_err(|_| SamplyBrokerError::RequestValidationFailed)?;
-    let client_id = ClientId::try_from(metadata.key_id().unwrap_or_default())
+    let proxy_id = ProxyId::new(metadata.key_id().unwrap_or_default())
         .map_err(|_| SamplyBrokerError::RequestValidationFailed)?;
-    let public = crypto::get_cert_and_client_by_cname_as_pemstr(&client_id).await;
+    let public = crypto::get_cert_and_client_by_cname_as_pemstr(&proxy_id).await;
     if public.is_none() {
         return Err(SamplyBrokerError::VaultError("Unable to retrieve matching certificate".into()));
     }
@@ -72,7 +72,7 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
     let token_with_extended_signature = std::str::from_utf8(req.headers().get(header::AUTHORIZATION).ok_or(ERR_SIG)?.as_bytes()).map_err(|_| ERR_SIG)?;
     let token_with_extended_signature = token_with_extended_signature.trim_start_matches("SamplyJWT ");
     
-    let (public, pubkey, mut content_with) 
+    let (proxy_public_info, pubkey, mut content_with) 
         = extract_jwt(token_with_extended_signature).await
         .map_err(|_| ERR_SIG)?;
     
@@ -120,9 +120,12 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
             .map_err(|_| ERR_BODY)?;
         (custom_without, token_without_extended_signature)
     } else {
+        // TODO: We need to fetch the message from the custom_with
+        let msg = serde_json::from_value::<M>(content_with.custom)
+            .map_err(|_| ERR_SIG)?;
         let msg_empty = MsgEmpty {
-            id: MsgId::new(),
-            from: public.client.clone(),
+            id: *msg.get_id(),
+            from: msg.get_from().clone(),
         };
         let serialized = serde_json::to_string(&msg_empty).unwrap(); // known input
         (
@@ -131,8 +134,8 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
         )
     };
 
-    // Check if Messages' "from" attribute actually matches the public.client
-    if public.client != *custom_without.get_from() {
+    // Check if Messages' "from" attribute can be signed by the proxy
+    if ! custom_without.get_from().can_be_signed_by(&proxy_public_info.beam_id) {
         return Err(ERR_FROM);
     }
     // TODO: Check if Date header makes sense (replay attacks)

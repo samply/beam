@@ -6,7 +6,7 @@ use axum::{
     Extension, Json, Router, extract::{Query, Path}, response::IntoResponse
 };
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, ClientId, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_CLIENTID, config};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace};
 
@@ -119,8 +119,8 @@ where M: Clone + HasWaitId<K>, K: PartialEq
 
 #[derive(Deserialize)]
 struct ToFromParam {
-    from: Option<ClientId>,
-    to: Option<ClientId>,
+    from: Option<AppOrProxyId>,
+    to: Option<AppOrProxyId>,
 }
 
 /// GET /v1/tasks
@@ -136,6 +136,9 @@ async fn get_tasks(
     if from.is_none() && to.is_none() {
         return Err((StatusCode::BAD_REQUEST, "Please supply either \"from\" or \"to\" query parameter."));
     }
+    debug!(?from);
+    debug!(?to);
+    debug!(?msg);
     if (from.is_some() && *from.as_ref().unwrap() != msg.msg.from) 
     || (to.is_some() && *to.as_ref().unwrap() != msg.msg.from) { // Rewrite in Rust 1.64: https://github.com/rust-lang/rust/pull/94927
         return Err((StatusCode::UNAUTHORIZED, "You can only list messages created by you (from) or directed to you (to)."));
@@ -159,8 +162,8 @@ async fn get_tasks(
 #[allow(dead_code)]
 enum MsgFilterMode { Or, And }
 struct MsgFilter<'a> {
-    from: Option<&'a ClientId>,
-    to: Option<&'a ClientId>,
+    from: Option<&'a AppOrProxyId>,
+    to: Option<&'a AppOrProxyId>,
     mode: MsgFilterMode
 }
 
