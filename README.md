@@ -1,20 +1,25 @@
-# Samply.Beam
+![Logo](./doc/Logo.svg)
 Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. Using an easy to use REST interface, it provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation.
 
 ## Why use Samply.Beam?
 Samply.Beam was developed to solve a principal difficulty of interconnecting apllications across strict network boundaries, e.g. in hospital IT environments.
 For data protection reasions (and good reasons, at that) the applications' ability to freely communicate are severely restricted, e.g., by strict firewall rules, forbidding inbound connections and/or using HTTP proxy systems. Howover, for federated data analysis these applications must be able to perform high-performance communication. Many currently employed solutions, such as placing a message queue in a not-as-tighly-controlled network environment (a DMZ) and let the application in the "high-security" network poll that queue, suffer from performance issues and introduce many complexities to the system. Many additional tasks, user management, authentication and authorization, and so on, are handled by the applications.
 
-After years of suffering basically the same difficulties, we developed Samply.Beam as an easy to deploy, secure, high-performance "communication helper" allowing us to handle most common communication pattern in distributed computation in an efficient and simple way, while removing complexity from the applications. Samply.Beam handles all "plumbing", such as the negotiation of communication parameters, target discovery, but helps with routiniely performed tasks such as authentication and authorization, end-to-end encryption and signatures, and certificate management and validation. This way your application can focus on it's main purpose, without getting boged down by integration tasks.
+After years of suffering basically the same difficulties, we developed Samply.Beam as an easy to deploy, secure, high-performance "communication helper" allowing us to handle most common communication pattern in distributed computation in an efficient and simple way, while removing complexity from the applications. Samply.Beam handles all "plumbing", such as the negotiation of communication parameters, target discovery, but helps with routiniely performed tasks such as authentication and authorization, end-to-end encryption and signatures, and certificate management and validation. This way your application can focus on it's main purpose, without getting boged down by integration tasks. Samply.Beam is fully content agnostic, only your applications have to understand the communication payload. This allows the integration of arbitraty applications in a Samply.Beam-connected system.
 
 ## Table of Content
+ - [System Architecture](#system-architecture)
+ - [Getting Started](#getting-started)
+ - [JSON Data Objects](#data-objects-json)
+ - [API Description](#api)
+ - [Roadmap](#roadmap)
 
 
 ## System Architecture
 
 ![Architecture Schema](./doc/Architecture.svg)
 
-Samply.Beam consists of a centrally run component and distributed nodes. 
+Samply.Beam consists of two centrally run components and a proxy at the distributed nodes. The *Samply.Broker* is the central component responsible for facilitating connections, storing and forwarding tasks and messages, and communication with the central *Certificate Authority*, a [Hashicorp Vault](https://github.com/hashicorp/vault) instance managing all certificates required for signing and encrypting the payload. The local *Samply.Proxys* andle all communication with the broker, 
 
 ## Getting started
 Running the `central` binary will open a central broker instance listening on `0.0.0.0:8080`. The instance can be queried via the API (see next section).
@@ -145,7 +150,7 @@ date: Mon, 27 Jun 2022 14:26:45 GMT
 ]
 ```
 
-## Long-polling API access
+### Long-polling API access
 As part of making this API performant, all reading endpoints support long-polling as an efficient alternative to regular (repeated) polling. Using this function requires the following parameters:
 - `poll_count`: The API call will block until this many results are available ...
 - `poll_timeout`: ... or this many milliseconds have passed, whichever comes first.
