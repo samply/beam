@@ -23,10 +23,6 @@ struct CliArgs {
     #[clap(long, env, value_parser)]
     broker_url: Uri,
 
-    /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
-    #[clap(long, env, value_parser)]
-    pub http_proxy: Option<Uri>,
-
     /// samply.pki: URL to HTTPS endpoint
     #[clap(long, env, value_parser)]
     pki_address: Uri,

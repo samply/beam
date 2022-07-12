@@ -15,14 +15,12 @@ pub fn print_example_objects() -> bool {
             Some(id) => ProxyId::new(&id).ok(),
             None => None,
         };
-        let tasks = generate_example_tasks(broker_id, proxy_id);
-        let mut num_results = 0;
-        for (num_tasks, task) in tasks.values().enumerate() {
-            println!("export TASK{}='{}'", num_tasks, serde_json::to_string(task).unwrap().replace('\'', "\'"));
-            for result in task.results.values() {
-                println!("export RESULT{}='{}'", num_results, serde_json::to_string(&result.msg).unwrap().replace('\'', "\'"));
-                num_results += 1;
-            }
+        let (tasks, results) = generate_example_tasks(broker_id, proxy_id);
+        for (num, task) in tasks.iter().enumerate() {
+            println!("export TASK{}='{}'", num, serde_json::to_string(task).unwrap().replace('\'', "\'"));
+        }
+        for (num, result) in results.iter().enumerate() {
+            println!("export RESULT{}='{}'", num, serde_json::to_string(&result).unwrap().replace('\'', "\'"));
         }
         true
     } else {
@@ -30,8 +28,7 @@ pub fn print_example_objects() -> bool {
     }
 }
 
-pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) -> HashMap<MsgId, MsgTaskRequest> {
-    let mut tasks: HashMap<MsgId, MsgTaskRequest> = HashMap::new();
+pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) -> (Vec<MsgTaskRequest>,Vec<MsgTaskResult>) {
     let broker = broker.unwrap_or_else(|| BrokerId::new(&config::CONFIG_SHARED.broker_domain).unwrap());
     let proxy = {
         if let Some(id) = proxy {
@@ -40,7 +37,7 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
             }
             id
         } else {
-            ProxyId::new(&format!("proxy{}.{}", random_number(), broker)).unwrap()
+            ProxyId::new(&format!("proxy{}.{}", 23, broker)).unwrap()
         }
     };
     let app1 = AppId::new(&format!("app1.{proxy}")).unwrap();
@@ -68,16 +65,15 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
         task: task_for_apps_1_2.id,
         result: crate::WorkResult::PermFailed("Unable to complete".to_string()),
     };
-    tasks.insert(task_for_apps_1_2.id, task_for_apps_1_2);
-    let task_in_map = tasks.values_mut().next().unwrap(); // only used in testing
-    for result in [response_by_app1, response_by_app2] {
-        let result = MsgSigned{
-            msg: result,
-            sig: String::from("just_an_example"),
-        };
-        task_in_map.results.insert(result.msg.from.clone(), result);
+    let mut tasks = Vec::new();
+    for task in [task_for_apps_1_2] {
+        tasks.push(task);
     }
-    tasks
+    let mut results = Vec::new();
+    for result in [response_by_app1, response_by_app2] {
+        results.push(result);
+    }
+    (tasks, results)
 }
 
 // Random

@@ -220,6 +220,12 @@ impl PartialEq<AppId> for AppOrProxyId {
     }
 }
 
+impl PartialEq<&String> for AppOrProxyId {
+    fn eq(&self, other: &&String) -> bool {
+        self.value() == *other
+    }
+}
+
 impl PartialEq<ProxyId> for AppOrProxyId {
     fn eq(&self, other: &ProxyId) -> bool {
         match self {
