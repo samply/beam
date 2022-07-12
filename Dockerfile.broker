@@ -4,5 +4,5 @@ COPY . .
 RUN cargo build --bin broker --release
 
 FROM debian:bullseye-slim
-COPY --from=builder /usr/src/app/target/release/central /usr/local/bin/
-ENTRYPOINT [ "/usr/local/bin/central" ]
+COPY --from=builder /usr/src/app/target/release/broker /usr/local/bin/
+ENTRYPOINT [ "/usr/local/bin/broker" ]
