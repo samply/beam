@@ -23,7 +23,6 @@ jobs:
       run: cargo build --release
     - name: Cargo (run tests)
       run: tests/scripts/cargo-test.sh
-      working-directory: ./tests
     - name: Upload Artifact (central)
       uses: actions/upload-artifact@v3
       with:
