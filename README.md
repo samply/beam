@@ -1,5 +1,20 @@
-# Samply.Broker
-A distributed task broker designed for efficient communication across strict network environments.
+# Samply.Beam
+Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. Using an easy to use REST interface, it provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation.
+
+## Why use Samply.Beam?
+Samply.Beam was developed to solve a principal difficulty of interconnecting apllications across strict network boundaries, e.g. in hospital IT environments.
+For data protection reasions (and good reasons, at that) the applications' ability to freely communicate are severely restricted, e.g., by strict firewall rules, forbidding inbound connections and/or using HTTP proxy systems. Howover, for federated data analysis these applications must be able to perform high-performance communication. Many currently employed solutions, such as placing a message queue in a not-as-tighly-controlled network environment (a DMZ) and let the application in the "high-security" network poll that queue, suffer from performance issues and introduce many complexities to the system. Many additional tasks, user management, authentication and authorization, and so on, are handled by the applications.
+
+After years of suffering basically the same difficulties, we developed Samply.Beam as an easy to deploy, secure, high-performance "communication helper" allowing us to handle most common communication pattern in distributed computation in an efficient and simple way, while removing complexity from the applications. Samply.Beam handles all "plumbing", such as the negotiation of communication parameters, target discovery, but helps with routiniely performed tasks such as authentication and authorization, end-to-end encryption and signatures, and certificate management and validation. This way your application can focus on it's main purpose, without getting boged down by integration tasks.
+
+## Table of Content
+
+
+## System Architecture
+
+![Architecture Schema](./doc/Architecture.svg)
+
+Samply.Beam consists of a centrally run component and distributed nodes. 
 
 ## Getting started
 Running the `central` binary will open a central broker instance listening on `0.0.0.0:8080`. The instance can be queried via the API (see next section).
@@ -140,7 +155,11 @@ For example, retrieving a task's results:
 - `GET /tasks/<task_id>/results?poll_count=5` will block forever until 5 results are available,
 - `GET /tasks/<task_id>/results?poll_count=5&poll_timeout=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code 206 (Partial Content) is returned to indicate that the result is incomplete.
 
-## To-Dos
-- Make listen address & port configurable
-- Authentication. This will change the API (e.g. `worker_id` will be no longer required as this is derived from the authentication)
-- Additional client component to sign (and possibly encrypt) actual messages
+## Roadmap
+- [X] API Key authentication of local applications
+- [X] Certificate management
+- [X] End-to-End signatures
+- [ ] End-to-End encryptions
+- [ ] Docker deployment packages
+- [ ] Integration of OAuth2
+- [ ] Integration of LDAP
