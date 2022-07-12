@@ -4,7 +4,7 @@ use openssl::error::ErrorStack;
 use vaultrs::{client::VaultClientSettingsBuilderError, error::ClientError};
 
 #[derive(thiserror::Error, Debug)]
-pub enum SamplyBrokerError {
+pub enum SamplyBeamError {
     #[error("Invalid bind address supplied: {0}")]
     BindAddr(AddrParseError),
     #[error("Invalid broker address supplied: {0}")]
@@ -31,33 +31,33 @@ pub enum SamplyBrokerError {
     InvalidBeamId(String)
 }
 
-impl From<AddrParseError> for SamplyBrokerError {
+impl From<AddrParseError> for SamplyBeamError {
     fn from(e: AddrParseError) -> Self {
-        let ret = SamplyBrokerError::BindAddr(e);
+        let ret = SamplyBeamError::BindAddr(e);
         println!("Building error: {}", ret);
         ret
     }
 }
 
-impl From<VaultClientSettingsBuilderError> for SamplyBrokerError {
+impl From<VaultClientSettingsBuilderError> for SamplyBeamError {
     fn from(e: VaultClientSettingsBuilderError) -> Self {
         Self::VaultError(format!("Unable to build vault client settings: {}", e))
     }
 }
 
-impl From<ClientError> for SamplyBrokerError {
+impl From<ClientError> for SamplyBeamError {
     fn from(e: ClientError) -> Self {
-        Self::VaultError(format!("Error in connection to central certificate authority: {}", e))
+        Self::VaultError(format!("Error in connection to certificate authority: {}", e))
     }
 }
 
-impl From<ErrorStack> for SamplyBrokerError {
+impl From<ErrorStack> for SamplyBeamError {
     fn from(e: ErrorStack) -> Self {
         Self::SignEncryptError(e.to_string())
     }
 }
 
-impl From<rsa::errors::Error> for SamplyBrokerError {
+impl From<rsa::errors::Error> for SamplyBeamError {
     fn from(e: rsa::errors::Error) -> Self {
         Self::SignEncryptError(e.to_string())
     }

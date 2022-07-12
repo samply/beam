@@ -63,7 +63,7 @@ mod tests {
                         Some(pem_file),
                         Some(VAULT_HEALTH),
                         Some("Success: PEM files stored to")),
-                    ("central",
+                    ("broker",
                         vec!("--broker-url", BROKER_URL, "--pki-address", VAULT_BASE, "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", pem_file),
                         HashMap::new(),
                         Some(pem_file),

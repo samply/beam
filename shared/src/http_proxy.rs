@@ -3,7 +3,7 @@ use hyper::{Client, client::{HttpConnector, connect::Connect}, service::Service}
 use hyper_proxy::{Intercept, Proxy, ProxyConnector};
 use tracing::{debug, info};
 
-use crate::{config, errors::SamplyBrokerError, BeamId};
+use crate::{config, errors::SamplyBeamError, BeamId};
 
 // TODO: To access http (non-TLS) targets, implement http_headers, cf. documentation of hyper_proxy
 

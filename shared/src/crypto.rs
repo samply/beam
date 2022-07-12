@@ -10,7 +10,7 @@ use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 use vaultrs::{client::{VaultClient, VaultClientSettingsBuilder},pki};
 
-use crate::{errors::SamplyBrokerError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}};
+use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}};
 
 type Serial = String;
 const SIGNATURE_LENGTH: u16 = 256;
@@ -20,11 +20,11 @@ pub(crate) struct CertificateCache{
     cn_to_serial: HashMap<ProxyId, Serial>,
     vault_client: VaultClient,
     pki_realm: String,
-    update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBrokerError>>>,
+    update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>,
 }
 
 impl CertificateCache {
-    pub fn new(update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBrokerError>>>) -> Result<CertificateCache,SamplyBrokerError> {
+    pub fn new(update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>) -> Result<CertificateCache,SamplyBeamError> {
         Ok(Self{
         serial_to_x509: HashMap::new(),
         cn_to_serial: HashMap::new(),
@@ -81,9 +81,9 @@ impl CertificateCache {
     }
 
     /// Manually update cache from fetching all certs from the central vault
-    async fn update_certificates() -> Result<(),SamplyBrokerError> {
+    async fn update_certificates() -> Result<(),SamplyBeamError> {
         debug!("Triggering certificate update ...");
-        let (tx, rx) = oneshot::channel::<Result<(),SamplyBrokerError>>();
+        let (tx, rx) = oneshot::channel::<Result<(),SamplyBeamError>>();
         CERT_CACHE.read().await.update_trigger.send(tx).await
             .expect("Internal Error: Certificate Store Updater is not listening for requests.");
         match rx.await {
@@ -91,11 +91,11 @@ impl CertificateCache {
                 debug!("Certificate update successfully completed.");
                 result
             },
-            Err(e) => Err(SamplyBrokerError::InternalSynchronizationError(e.to_string()))
+            Err(e) => Err(SamplyBeamError::InternalSynchronizationError(e.to_string()))
         }
     }
 
-    async fn update_certificates_mut(&mut self) -> Result<(),SamplyBrokerError> {
+    async fn update_certificates_mut(&mut self) -> Result<(),SamplyBeamError> {
         info!("Updating certificates ...");
         let certificate_list = pki::cert::list(&self.vault_client, &self.pki_realm).await?;
         let new_certificate_serials: Vec<&String> = {
@@ -149,7 +149,7 @@ impl CertificateCache {
 
 #[dynamic(lazy)]
 static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
-    let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBrokerError>>>(1);
+    let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBeamError>>>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
     let cc2 = cc.clone();
     tokio::task::spawn(async move {
@@ -250,7 +250,7 @@ fn extract_x509(cert: Option<X509>) -> Option<ProxyPublicPortion> {
     })
 }
 
-pub(crate) fn hash(data: &[u8]) -> Result<[u8; 32],SamplyBrokerError> {
+pub(crate) fn hash(data: &[u8]) -> Result<[u8; 32],SamplyBeamError> {
     let mut hasher = Sha256::new();
     hasher.update(&data);
     let digest = hasher.finalize();
@@ -259,12 +259,12 @@ pub(crate) fn hash(data: &[u8]) -> Result<[u8; 32],SamplyBrokerError> {
 }
 
 /// Sign a message with private key. Prepends signature to payload
-pub(crate) fn sign(data: &[u8], private_key: &RsaPrivateKey) -> Result<Vec<u8>, SamplyBrokerError> {
+pub(crate) fn sign(data: &[u8], private_key: &RsaPrivateKey) -> Result<Vec<u8>, SamplyBeamError> {
     let mut hasher = Sha256::new();
     hasher.update(&data);
     let digest = hasher.finalize();
     let mut sig = private_key.sign(PaddingScheme::new_pkcs1v15_sign(Some(rsa::hash::Hash::SHA2_256)), &digest)
-        .map_err(|_| SamplyBrokerError::SignEncryptError("Unable to sign message.".into()))?;
+        .map_err(|_| SamplyBeamError::SignEncryptError("Unable to sign message.".into()))?;
     assert!(sig.len() as u16 == SIGNATURE_LENGTH); 
     let mut payload: Vec<u8> = data.to_vec();
     sig.append(&mut payload);
@@ -272,7 +272,7 @@ pub(crate) fn sign(data: &[u8], private_key: &RsaPrivateKey) -> Result<Vec<u8>, 
 }
 
 /// Encrypt the given fields in the json object
-pub(crate) async fn encrypt(task: &MsgTaskRequest, fields: &Vec<&str>) -> Result<EncryptedMsgTaskRequest, SamplyBrokerError> {
+pub(crate) async fn encrypt(task: &MsgTaskRequest, fields: &Vec<&str>) -> Result<EncryptedMsgTaskRequest, SamplyBeamError> {
     // TODO: Refactor and complete
     let mut symmetric_key = [0;256];
     let mut nonce = [0;12];
@@ -297,25 +297,25 @@ pub(crate) async fn encrypt(task: &MsgTaskRequest, fields: &Vec<&str>) -> Result
     //     })
     //     .encrypt(&mut rng, PaddingScheme::new_oaep::<sha2::Sha256>(), symmetric_key)
     //     .or_else(|e| Err(SamplyBrokerError::SignEncryptError(&e.to_string())));
-    Err(SamplyBrokerError::SignEncryptError("Not implemented".into()))
+    Err(SamplyBeamError::SignEncryptError("Not implemented".into()))
 }
 
 /// Encryption method without operation
-async fn nop_encrypt(json: serde_json::Value, fields_: &Vec<&str>) -> Result<serde_json::Value, SamplyBrokerError> {
+async fn nop_encrypt(json: serde_json::Value, fields_: &Vec<&str>) -> Result<serde_json::Value, SamplyBeamError> {
     Ok(json)
 }
 
 /// Entry point for web framework to encrypt and sing payload
-pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &Vec<&str>) -> Result<(),SamplyBrokerError> {
+pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &Vec<&str>) -> Result<(),SamplyBeamError> {
 
     // Body -> JSON
     let body_json = serde_json::from_str(r#"{"to": ["recipeint1", "recipient2"],}"#)
-        .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Error serializing request".into())))?;
+        .or_else(|e| Err(SamplyBeamError::SignEncryptError("Error serializing request".into())))?;
     let body = req.body_mut();
 
     // Encrypt Message
     let encrypted_payload = nop_encrypt(body_json, encrypt_fields).await
-        .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Cannot encrypt message".into())))?;
+        .or_else(|e| Err(SamplyBeamError::SignEncryptError("Cannot encrypt message".into())))?;
 
     //Sign Message
     let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &config::CONFIG_SHARED.privkey_rsa)?;
@@ -349,25 +349,25 @@ pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &V
 /* Utility Functions */
 
 /// Extracts the pem-encoded public key from a x509 certificate
-fn x509_cert_to_x509_public_key(cert: &X509) -> Result<Vec<u8>, SamplyBrokerError> {
+fn x509_cert_to_x509_public_key(cert: &X509) -> Result<Vec<u8>, SamplyBeamError> {
     match cert.public_key() {
-        Ok(key) => key.public_key_to_pem().or_else(|_| Err(SamplyBrokerError::SignEncryptError("Invalid public key in x509 certificate.".into()))),
-        Err(_) => Err(SamplyBrokerError::SignEncryptError("Unable to extract public key from certificate.".into()))
+        Ok(key) => key.public_key_to_pem().or_else(|_| Err(SamplyBeamError::SignEncryptError("Invalid public key in x509 certificate.".into()))),
+        Err(_) => Err(SamplyBeamError::SignEncryptError("Unable to extract public key from certificate.".into()))
     }
 }
 
 /// Converts the x509 pem-encoded public key to the rsa public key
-fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, SamplyBrokerError> {
+fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, SamplyBeamError> {
     let rsa_key = 
         RsaPublicKey::from_pkcs1_pem(
             std::str::from_utf8(cert_key)
-            .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Invalid character in certificate public key".into())))?)
-        .or_else(|e| Err(SamplyBrokerError::SignEncryptError("Can not extract public rsa key from certificate".into())));
+            .or_else(|e| Err(SamplyBeamError::SignEncryptError("Invalid character in certificate public key".into())))?)
+        .or_else(|e| Err(SamplyBeamError::SignEncryptError("Can not extract public rsa key from certificate".into())));
     rsa_key
 }
 
 /// Convenience function to extract a rsa public key from a x509 certificate. Calls x509_cert_to_x509_public_key and x509_public_key_to_rsa_pub_key internally.
-fn x509_cert_to_rsa_pub_key(cert: &X509) -> Result<RsaPublicKey, SamplyBrokerError> {
+fn x509_cert_to_rsa_pub_key(cert: &X509) -> Result<RsaPublicKey, SamplyBeamError> {
     x509_public_key_to_rsa_pub_key(&x509_cert_to_x509_public_key(cert)?)
 }
 

@@ -6,7 +6,7 @@ source $SCRIPT_DIR/../tests/scripts/setup.sh
 
 export VAULT_TOKEN=root
 export LISTEN_ADDR=0.0.0.0:8200
-#export DOMAIN="broker.samply.de"
+#export DOMAIN="beam.samply.de"
 export PATH=$PATH:$SCRIPT_DIR
 
 PROXY_ID_SHORT=$(echo $PROXY_ID | cut -d '.' -f 1)

@@ -1,4 +1,4 @@
-use crate::{SamplyBrokerError, crypto};
+use crate::{SamplyBeamError, crypto};
 use std::{path::PathBuf, rc::Rc, sync::Arc, fs::read_to_string};
 use hyper::Uri;
 use clap::Parser;
@@ -6,7 +6,7 @@ use jwt_simple::prelude::RS256KeyPair;
 use rsa::{RsaPrivateKey, pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
 use static_init::dynamic;
 
-/// Settings for Samply.Broker.Shared
+/// Settings for Samply.Beam (Shared)
 #[derive(Parser,Debug)]
 #[clap(author, version, about, long_about = None)]
 struct VaultConfig {
@@ -61,25 +61,25 @@ pub(crate) struct Config {
 }
 
 impl crate::config::Config for Config {
-    fn load() -> Result<Self,SamplyBrokerError> {
+    fn load() -> Result<Self,SamplyBeamError> {
         let vc = VaultConfig::parse();
 
         // Private key
         let privkey_pem = read_to_string(&vc.privkey_file)
-            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Unable to load private key from file {}: {}", vc.privkey_file.to_string_lossy(), e)))?
+            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to load private key from file {}: {}", vc.privkey_file.to_string_lossy(), e)))?
             .trim().to_string();
         let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
             .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
-            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
+            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
         let mut privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem)
-            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
+            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
         if let Some(proxy_id) = vc.proxy_id {
             privkey_rs256 = privkey_rs256.with_key_id(&proxy_id);
         }
     
         // API Key
         let pki_apikey = read_to_string(vc.pki_apikey_file)
-            .map_err(|_| SamplyBrokerError::ConfigurationFailed("Failed to read PKI token.".into()))?
+            .map_err(|_| SamplyBeamError::ConfigurationFailed("Failed to read PKI token.".into()))?
             .trim().to_string();
 
         let broker_domain = vc.broker_url.host();
