@@ -81,12 +81,17 @@ mod tests {
                 txes.push(tx);
                 let mut proc = Command::cargo_bin(cmd)
                     .unwrap_or(Command::new(cmd));
-                let proc = proc.envs(env);
-                let mut proc = proc
-                    .args(args)
-                    .stdout(Stdio::piped())
-                    .spawn()
-                    .expect(&format!("Unable to start process {}", cmd));
+                let mut proc = {
+                    let mut proc = proc
+                        .envs(env)
+                        .args(args);
+                    if wait_output.is_some() {
+                        proc = proc.stdout(Stdio::piped());
+                    }
+                    proc
+                        .spawn()
+                        .expect(&format!("Unable to start process {}", cmd))
+                };
                 if let Some(wait_output) = wait_output {
                     let mut buf = String::new();
                     let mut reader = BufReader::new(proc.stdout.take().unwrap());
