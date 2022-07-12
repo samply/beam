@@ -10,7 +10,7 @@ use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 use vaultrs::{client::{VaultClient, VaultClientSettingsBuilder},pki};
 
-use crate::{errors::SamplyBrokerError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id2::{ProxyId, BeamId}};
+use crate::{errors::SamplyBrokerError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}};
 
 type Serial = String;
 const SIGNATURE_LENGTH: u16 = 256;

@@ -7,7 +7,7 @@ mod tests {
     use assert_cmd::prelude::*;
     use regex::Regex;
     use reqwest::{StatusCode, header::{self, HeaderValue, AUTHORIZATION}, Method, Url};
-    use shared::{MsgTaskRequest, MsgTaskResult, MyUuid, Msg, MsgId, config_proxy, beam_id2::{AppId, BeamId, BrokerId, ProxyId}, examples::generate_example_tasks};
+    use shared::{MsgTaskRequest, MsgTaskResult, MyUuid, Msg, MsgId, config_proxy, beam_id::{AppId, BeamId, BrokerId, ProxyId}, examples::generate_example_tasks};
     use static_init::dynamic;
 
     use rsa::{pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
@@ -219,9 +219,7 @@ mod tests {
             println!("Location: {}", location);
             location_regex.captures(location)
                 .expect("Returned Location header does not match format.");
-            assert!(location.contains(&task.id.to_string()));
-            // let location = &cap[1];
-            // task.id = MsgId::try_from(location)?;
+            assert!(location.contains(&task.id.to_string()));s
         }
         Ok(())
     }

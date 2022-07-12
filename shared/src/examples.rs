@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rand::Rng;
 
-use crate::{beam_id2::{BeamId, AppId, BrokerId, ProxyId}, MsgId, MsgTaskRequest, config, MsgTaskResult, MsgSigned, FailureStrategy};
+use crate::{beam_id::{BeamId, AppId, BrokerId, ProxyId}, MsgId, MsgTaskRequest, config, MsgTaskResult, MsgSigned, FailureStrategy};
 
 #[cfg(debug_assertions)]
 pub fn print_example_objects() -> bool {

@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 
-use beam_id2::{BeamId, AppId, AppOrProxyId};
+use beam_id::{BeamId, AppId, AppOrProxyId};
 use crypto_jwt::extract_jwt;
 use errors::SamplyBrokerError;
 use static_init::dynamic;
@@ -32,7 +32,7 @@ pub mod config_proxy;
 
 pub mod middleware;
 pub mod http_proxy;
-pub mod beam_id2;
+pub mod beam_id;
 
 #[cfg(debug_assertions)]
 pub mod examples;

@@ -6,7 +6,7 @@ use hyper::{Client, client::HttpConnector, StatusCode, Request, Body, Uri, body,
 use hyper_proxy::ProxyConnector;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use shared::{config, config_proxy, crypto_jwt, MsgTaskRequest, MsgTaskResult, MsgEmpty, Msg, MsgSigned, beam_id2::AppId, MsgId};
+use shared::{config, config_proxy, crypto_jwt, MsgTaskRequest, MsgTaskResult, MsgEmpty, Msg, MsgSigned, beam_id::AppId, MsgId};
 use tracing::{warn, debug, error};
 
 use crate::auth::AuthenticatedApp;

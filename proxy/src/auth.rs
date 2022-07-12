@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use axum::{async_trait, extract::{FromRequest, RequestParts}};
 use hyper::{StatusCode, header::{HeaderName, self}};
-use shared::{config_proxy, config, beam_id2::{AppId, BeamId}};
+use shared::{config_proxy, config, beam_id::{AppId, BeamId}};
 
 use tracing::debug;
 
