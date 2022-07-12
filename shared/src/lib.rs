@@ -34,7 +34,6 @@ pub mod middleware;
 pub mod http_proxy;
 pub mod beam_id;
 
-#[cfg(debug_assertions)]
 pub mod examples;
 
 #[derive(Debug,Serialize,Deserialize,Clone,Copy,PartialEq,Eq,Hash)]
