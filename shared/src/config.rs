@@ -1,10 +1,10 @@
 use static_init::dynamic;
 use tracing::debug;
 
-use crate::{config_proxy, config_broker, config_shared, errors::SamplyBrokerError};
+use crate::{config_proxy, config_broker, config_shared, errors::SamplyBeamError};
 
 pub(crate) trait Config: Sized{
-    fn load() -> Result<Self,SamplyBrokerError>;
+    fn load() -> Result<Self,SamplyBeamError>;
 }
 
 fn load<T: Config>() -> T where {

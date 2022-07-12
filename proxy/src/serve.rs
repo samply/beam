@@ -1,5 +1,5 @@
 use hyper::Client;
-use shared::{config, errors::SamplyBrokerError};
+use shared::{config, errors::SamplyBeamError};
 use tracing::{info, debug, warn, error};
 
 use crate::{serve_health, serve_tasks};
@@ -8,7 +8,7 @@ pub(crate) async fn serve() -> anyhow::Result<()> {
     let config = config::CONFIG_PROXY.clone();
     
     let client = shared::http_proxy::build_hyper_client()
-        .map_err(SamplyBrokerError::HttpProxyProblem)?;
+        .map_err(SamplyBeamError::HttpProxyProblem)?;
 
     let router_tasks = serve_tasks::router(&client);
 

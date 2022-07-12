@@ -5,7 +5,7 @@ use openssl::base64;
 use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use tracing::{debug, error, warn};
-use crate::{BeamId, errors::SamplyBrokerError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::ProxyId};
+use crate::{BeamId, errors::SamplyBeamError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::ProxyId};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -49,22 +49,22 @@ where
     }
 }
 
-pub async fn extract_jwt(token: &str) -> Result<(crypto::ProxyPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBrokerError> {
+pub async fn extract_jwt(token: &str) -> Result<(crypto::ProxyPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
     let metadata = Token::decode_metadata(token)
-        .map_err(|_| SamplyBrokerError::RequestValidationFailed)?;
+        .map_err(|_| SamplyBeamError::RequestValidationFailed)?;
     let proxy_id = ProxyId::new(metadata.key_id().unwrap_or_default())
-        .map_err(|_| SamplyBrokerError::RequestValidationFailed)?;
+        .map_err(|_| SamplyBeamError::RequestValidationFailed)?;
     let public = crypto::get_cert_and_client_by_cname_as_pemstr(&proxy_id).await;
     if public.is_none() {
-        return Err(SamplyBrokerError::VaultError("Unable to retrieve matching certificate".into()));
+        return Err(SamplyBeamError::VaultError("Unable to retrieve matching certificate".into()));
     }
     let public = public.unwrap();
     let pubkey = RS256PublicKey::from_pem(&public.pubkey)
         .map_err(|e| {
-            SamplyBrokerError::SignEncryptError(format!("Unable to initialize public key: {}", e))
+            SamplyBeamError::SignEncryptError(format!("Unable to initialize public key: {}", e))
         })?;
     let content = pubkey.verify_token::<Value>(token, None)
-        .map_err(|_| SamplyBrokerError::RequestValidationFailed )?;
+        .map_err(|_| SamplyBeamError::RequestValidationFailed )?;
     Ok((public, pubkey, content))
 }
 
@@ -148,21 +148,21 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
     Ok(msg_signed)
 }
 
-pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBrokerError> {
+pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBeamError> {
     let json = serde_json::to_value(input)
-        .map_err(|e| SamplyBrokerError::SignEncryptError(format!("Serialization failed: {}", e)))?;
+        .map_err(|e| SamplyBeamError::SignEncryptError(format!("Serialization failed: {}", e)))?;
     let privkey = &config::CONFIG_SHARED.privkey_rs256;
     
     let claims = 
         Claims::with_custom_claims::<Value>(json, Duration::from_hours(1));
 
     let token = privkey.sign(claims)
-        .map_err(|_| SamplyBrokerError::SignEncryptError("Unable to sign JWT".into()))?;
+        .map_err(|_| SamplyBeamError::SignEncryptError("Unable to sign JWT".into()))?;
     
     Ok(token)
 }
 
-pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap) -> Result<String,SamplyBrokerError> {
+pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap) -> Result<String,SamplyBeamError> {
     const HEADERS_TO_SIGN: [HeaderName; 1] = [
         // header::HOST, // Host header differs from proxy to broker
         header::DATE,
@@ -176,7 +176,7 @@ pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap)
             let mut bytes = header.as_bytes().to_vec();
             buf.append(&mut bytes);
         } else {
-            return Err(SamplyBrokerError::SignEncryptError("Required header field not present".into()));
+            return Err(SamplyBeamError::SignEncryptError("Required header field not present".into()));
         }
     }
 

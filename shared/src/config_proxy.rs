@@ -7,7 +7,7 @@ use hyper::Uri;
 use serde::Deserialize;
 use tracing::{info, debug};
 
-use crate::{errors::SamplyBrokerError, beam_id::{BeamId, ProxyId, AppId}};
+use crate::{errors::SamplyBeamError, beam_id::{BeamId, ProxyId, AppId}};
 
 #[derive(Clone,Debug)]
 pub struct Config {
@@ -22,7 +22,7 @@ pub struct Config {
 
 pub type ApiKey = String;
 
-/// Settings for Samply.Broker.Proxy
+/// Settings for Samply.Beam (Proxy)
 #[derive(Parser,Debug)]
 #[clap(author, version, about, long_about = None, arg_required_else_help(true))]
 pub struct CliArgs {
@@ -34,11 +34,11 @@ pub struct CliArgs {
     #[clap(long, env, value_parser)]
     pub http_proxy: Option<Uri>,
     
-    /// The broker's base URL, e.g. https://broker.samply.de
+    /// The broker's base URL, e.g. https://broker23.beam.samply.de
     #[clap(long, env, value_parser)]
     pub broker_url: Uri,
 
-    /// This proxy's beam id, e.g. site23.broker.samply.de
+    /// This proxy's beam id, e.g. proxy42.broker23.beam.samply.de
     #[clap(long, env, value_parser)]
     pub proxy_id: String,
 
@@ -65,7 +65,7 @@ pub struct CliArgs {
 
 pub const APPKEY_PREFIX: &str = "APPKEY_";
 
-fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBrokerError>{
+fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBeamError>{
     std::env::vars()
         .filter_map(|(k,v)| {
             k.strip_prefix(APPKEY_PREFIX)
@@ -74,9 +74,9 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBroke
         .map(|(stripped,v)| {
             let app_id = format!("{}.{}", stripped, proxy_id);
             let app_id = AppId::new(&app_id)
-                .map_err(|_| SamplyBrokerError::ConfigurationFailed(format!("Faulty API key definition: Resulting App ID  {} is invalid.", app_id)))?;
+                .map_err(|_| SamplyBeamError::ConfigurationFailed(format!("Faulty API key definition: Resulting App ID  {} is invalid.", app_id)))?;
             if v.is_empty() {
-                return Err(SamplyBrokerError::ConfigurationFailed(format!("Unable to assign empty API key for client {}", app_id)));
+                return Err(SamplyBeamError::ConfigurationFailed(format!("Unable to assign empty API key for client {}", app_id)));
             }
             Ok((app_id, v))
         })
@@ -84,13 +84,13 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBroke
 }
 
 impl crate::config::Config for Config {
-    fn load() -> Result<Config,SamplyBrokerError> {
+    fn load() -> Result<Config,SamplyBeamError> {
         let cli_args = CliArgs::parse();
         let proxy_id = ProxyId::new(&cli_args.proxy_id)
-            .map_err(|e| SamplyBrokerError::ConfigurationFailed(format!("Invalid Beam ID \"{}\" supplied: {}", cli_args.proxy_id, e)))?;
+            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Invalid Beam ID \"{}\" supplied: {}", cli_args.proxy_id, e)))?;
         let api_keys = parse_apikeys(&proxy_id)?;
         if api_keys.is_empty() {
-            return Err(SamplyBrokerError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {}<clientname>=<key>", APPKEY_PREFIX)));
+            return Err(SamplyBeamError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {}<clientname>=<key>", APPKEY_PREFIX)));
         }
         let config = Config {
             broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
@@ -106,15 +106,15 @@ impl crate::config::Config for Config {
     }        
 }
 
-fn uri_to_host_header(uri: &Uri) -> Result<HeaderValue,SamplyBrokerError> {
+fn uri_to_host_header(uri: &Uri) -> Result<HeaderValue,SamplyBeamError> {
     let hostname: String = uri.host()
-        .ok_or(SamplyBrokerError::WrongBrokerUri("URI's host is empty."))?.into();
+        .ok_or(SamplyBeamError::WrongBrokerUri("URI's host is empty."))?.into();
     let port = match uri.port() {
         Some(p) => format!(":{}",p),
         None => String::from(""),
     };
     let host_header = hostname + &port;
     let host_header: HeaderValue = HeaderValue::from_str(&host_header)
-        .map_err(|_| SamplyBrokerError::WrongBrokerUri("Unable to parse broker URL"))?;
+        .map_err(|_| SamplyBeamError::WrongBrokerUri("Unable to parse broker URL"))?;
     Ok(host_header)
 }

@@ -2,7 +2,7 @@
 
 use beam_id::{BeamId, AppId, AppOrProxyId};
 use crypto_jwt::extract_jwt;
-use errors::SamplyBrokerError;
+use errors::SamplyBeamError;
 use static_init::dynamic;
 use tracing::debug;
 
@@ -107,7 +107,7 @@ pub struct MsgSigned<M: Msg> {
 }
 
 impl<M: Msg> MsgSigned<M> {
-    pub async fn verify(&self) -> Result<(), SamplyBrokerError> {
+    pub async fn verify(&self) -> Result<(), SamplyBeamError> {
         // Signature valid?
         let (proxy_public_info, _, content) 
             = extract_jwt(&self.sig).await?;
@@ -116,12 +116,12 @@ impl<M: Msg> MsgSigned<M> {
         let val = serde_json::to_value(&self.msg)
         .expect("Internal error: Unable to interpret already parsed message to JSON Value.");
         if content.custom != val {
-            return Err(SamplyBrokerError::RequestValidationFailed);
+            return Err(SamplyBeamError::RequestValidationFailed);
         }
 
         // From field matches CN in certificate?
         if ! self.get_from().can_be_signed_by(&proxy_public_info.beam_id) {
-            return Err(SamplyBrokerError::RequestValidationFailed);
+            return Err(SamplyBeamError::RequestValidationFailed);
         }
         debug!("Message has been verified succesfully.");
         Ok(())
