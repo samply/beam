@@ -6,4 +6,4 @@ source $SD/setup.sh
 
 cd $SD/../
 
-exec cargo test -- --test-threads=1
+exec cargo test --release -- --test-threads=1
