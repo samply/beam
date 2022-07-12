@@ -164,7 +164,7 @@ pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBrokerErr
 
 pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap) -> Result<String,SamplyBrokerError> {
     const HEADERS_TO_SIGN: [HeaderName; 1] = [
-        // header::HOST, // Host header differs from proxy to central
+        // header::HOST, // Host header differs from proxy to broker
         header::DATE,
     ];
 

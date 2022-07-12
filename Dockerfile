@@ -1,7 +1,7 @@
 FROM rust:slim-bullseye AS builder
 WORKDIR /usr/src/app
 COPY . .
-RUN cargo build --bin central --release
+RUN cargo build --bin broker --release
 
 FROM debian:bullseye-slim
 COPY --from=builder /usr/src/app/target/release/central /usr/local/bin/

@@ -1,6 +1,6 @@
 #/bin/bash
 
-eval $(cargo run --bin central -- examples 2>/dev/null)
+eval $(cargo run --bin broker -- examples 2>/dev/null)
 
 if [ "$?" != "0" ]; then
     echo -e "Failed to fetch examples; try running the following command and checking for errors:\n\ncargo run --bin central -- examples"
@@ -35,11 +35,11 @@ function start {
     done
     cargo build 2>/dev/null
     $TARGET_DIR/debug/proxy &
-    $TARGET_DIR/debug/central &
+    $TARGET_DIR/debug/broker &
 }
 
 function stop {
-    killall vault proxy central
+    killall vault proxy broker
 }
 
 function clean {

@@ -4,7 +4,7 @@
 
 tasks:
   - init: cargo build
-    command: eval $(cargo run --bin central -- examples)
+    command: eval $(cargo run --bin broker -- examples)
 
 vscode:
   extensions:

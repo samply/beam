@@ -47,7 +47,7 @@ impl From<VaultClientSettingsBuilderError> for SamplyBrokerError {
 
 impl From<ClientError> for SamplyBrokerError {
     fn from(e: ClientError) -> Self {
-        Self::VaultError(format!("Error in connection to central certificate authority: {}", e))
+        Self::VaultError(format!("Error in connection to certificate authority: {}", e))
     }
 }
 

@@ -25,8 +25,8 @@ pub mod errors;
 
 pub mod config;
 pub mod config_shared;
-// #[cfg(feature = "config-for-central")]
-pub mod config_central;
+// #[cfg(feature = "config-for-broker")]
+pub mod config_broker;
 // #[cfg(feature = "config-for-proxy")]
 pub mod config_proxy;
 

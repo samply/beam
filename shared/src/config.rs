@@ -1,7 +1,7 @@
 use static_init::dynamic;
 use tracing::debug;
 
-use crate::{config_proxy, config_central, config_shared, errors::SamplyBrokerError};
+use crate::{config_proxy, config_broker, config_shared, errors::SamplyBrokerError};
 
 pub(crate) trait Config: Sized{
     fn load() -> Result<Self,SamplyBrokerError>;
@@ -22,7 +22,7 @@ pub static CONFIG_PROXY: config_proxy::Config = {
 };
 
 #[dynamic(lazy)]
-pub static CONFIG_CENTRAL: config_central::Config = {
+pub static CONFIG_CENTRAL: config_broker::Config = {
     debug!("Loading config CONFIG_CENTRAL");
     load()
 };
