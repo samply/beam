@@ -44,7 +44,7 @@ struct VaultConfig {
     examples: Option<String>,
 
     /// (included for technical reasons)
-    #[clap(long)]
+    #[clap(long,hide(true))]
     test_threads: Option<String>
 }
 
