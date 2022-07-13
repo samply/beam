@@ -57,9 +57,10 @@ Tasks are represented in the following structure:
 ```json
 {
   "id": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
+  "from": "app7.proxy-hd.broker-project1.samply.de",
   "to": [
-    "6e3cf893-c134-45d2-b9f3-b02d92ad51e0",
-    "0abd8445-b4a9-4e20-8a4a-bd97ed57745c"
+    "app1.proxy-hd.broker-project1.samply.de",
+    "app5.proxy-ma.broker-project1.samply.de"
   ],
   "task_type": "My important task",
   "body": "Much work to do",
@@ -73,7 +74,8 @@ Tasks are represented in the following structure:
 ```
 
 - `id`: UUID to identify the task. When the task is initially created, the value is ignored and replaced by a server-generated one.
-- `to`: UUIDs of *workers* allowed to retrieve the task and submit results.
+- `from`: BeamID of the submitting applications. Is automatically set by the Proxy according to the authentification info.
+- `to`: BeamIDs of *workers* allowed to retrieve the task and submit results.
 - `task_type`: Well-known identifier for the type of work. Not interpreted by the Broker.
 - `body`: Description of work to be done. Not interpreted by the Broker.
 - `failure_strategy`: Advises each client how to handle failures. Possible values `discard`, `retry`.
@@ -86,10 +88,13 @@ A succeeded result for the above task:
 ```json
 {
   "id": "8db76400-e2d9-4d9d-881f-f073336338c1",
-  "worker_id": "6e3cf893-c134-45d2-b9f3-b02d92ad51e0",
+  "from": "app1.proxy-hd.broker-project1.samply.de",
+  "to": [
+    "app7.proxy-hd.broker-project1.samply.de"
+  ],
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
   "result": {
-    "succeeded": "<result payload>"
+    "succeeded": "Successfully quenched 1.43e14 flux pulse devices"
   }
 }
 ```
@@ -98,7 +103,10 @@ A failed task:
 ```json
 {
   "id": "24a49494-6a00-415f-80fc-b2ae34658b98",
-  "worker_id": "0abd8445-b4a9-4e20-8a4a-bd97ed57745c",
+  "from": "app5.proxy-ma.broker-project1.samply.de",
+  "to": [
+    "app7.proxy-hd.broker-project1.samply.de"
+  ],
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
   "result": {
     "permfailed": "Unable to decrypt quantum state"
@@ -107,7 +115,8 @@ A failed task:
 ```
 
 - `id`: UUID identifying the result. When the result is initially created, the value is ignored and replaced by a server-generated one.
-- `worker_id`: UUID identifying the client submitting this result. This needs to match an entry the `to` field in the task.
+- `from`: BeamID identifying the client submitting this result. This needs to match an entry the `to` field in the task.
+- `to`: BeamIDs the intended recipients of the result. Used for encrypted payloads.
 - `task`: UUID identifying the task this result belongs to.
 - `result`: Defines status of this work result. Possible values `unclaimed`, `tempfailed(body)`, `permfailed(body)`, `succeeded(body)`.
 - `result.body`: Either carries the actual result payload of the task (`succeeded`) or an error message.
@@ -137,7 +146,7 @@ Workers regularly call this endpoint to retrieve submitted tasks.
 Method: `GET`  
 URL: `/v1/tasks`  
 Parameters:
-- `worker_id` (optional): Fetch only tasks directed to this worker.
+- `to` (optional): Fetch only tasks directed to this worker.
 - [long polling](#long-polling) is supported.
 
 Returns an array of tasks, cf. [here](#task)
