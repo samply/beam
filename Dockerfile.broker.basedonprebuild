@@ -2,4 +2,5 @@
 
 FROM debian:bullseye-slim
 COPY artifacts/broker /usr/local/bin/
+RUN chmod +x /usr/local/bin/broker
 ENTRYPOINT [ "/usr/local/bin/broker" ]
