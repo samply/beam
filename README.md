@@ -11,20 +11,20 @@ Samply.Beam is a distributed task broker designed for efficient communication ac
  - [Roadmap](#roadmap)
  
  ## Why use Samply.Beam?
-Samply.Beam was developed to solve a principal difficulty of interconnecting federated applications across restrictiv network boundaries. Any federated data computation requires some form of communication among the nodes, often in a reliable and high-performance manner. However, in high-security environments such as internal hospital networks, this communication is severely restricted, e.g., by strict firewall rules, forbidding inbound connections and/or using exotic combinations of HTTP proxy servers. Many currently employed solutions place high technical and organizational burdens on each participating site (e.g., message queues requiring servers in a DMZ) or are even considered harmful to the network's security (e.g., VPN overlay networks), suffer from performance issues and introduce additional complexity to the system. 
+Samply.Beam was developed to solve a principal difficulty of interconnecting federated applications across restrictive network boundaries. Any federated data computation requires some form of communication among the nodes, often in a reliable and high-performance manner. However, in high-security environments such as internal hospital networks, this communication is severely restricted, e.g., by strict firewall rules, forbidding inbound connections and/or using exotic combinations of HTTP proxy servers. Many currently employed solutions place high technical and organizational burdens on each participating site (e.g., message queues requiring servers in a DMZ) or are even considered harmful to the network's security (e.g., VPN overlay networks), suffer from performance issues and introduce additional complexity to the system. 
 
-We developed Samply.Beam as a reusable, easy to maintain, secure, high-performance communication layer allowing us to handle most common communication patterns in distributed computation in an efficient and reusable way, while removing complexity from the applications. Samply.Beam handles all "plumbing", such as the negotiation of communication parameters, target discovery, and helps with routinely performed tasks such as authentication and authorization, end-to-end encryption and signatures, and certificate management and validation. This way your application can focus on its main purpose, without getting boged down by integration tasks. Samply.Beam was created as the latest iteration of the [Bridgehead](https://github.com/samply/bridgehead)'s communication layer, but the software is fully content-agnostic: Only your applications have to understand the communication payload. This allows the integration of arbitraty applications in a Samply.Beam federation.
+We developed Samply.Beam as a reusable, easy to maintain, secure, high-performance communication layer allowing us to handle most common communication patterns in distributed computation in an efficient and reusable way, while removing complexity from the applications. Samply.Beam handles all "plumbing", such as the negotiation of communication parameters, target discovery, and helps with routinely performed tasks such as authentication and authorization, end-to-end encryption and signatures, and certificate management and validation. This way your application can focus on its main purpose, without getting bogged down by integration tasks. Samply.Beam was created as the latest iteration of the [Bridgehead](https://github.com/samply/bridgehead)'s communication layer, but the software is fully content-agnostic: Only your applications have to understand the communication payload. This allows the integration of arbitrary applications in a Samply.Beam federation.
 
 <!-- TODO, merge with text above
 ## Features
 
  - Made for strict network environment in University Hospitals:
-   - Highly performant even with exotic proxy and wirewall systems
+   - Highly performant even with exotic proxy and firewall systems
    - No DMZ, ..., required
-   - Covers akk commen connection patters: Point-to-Point, Fan-Out, Fan-In, Queues, ...
+   - Covers all common connection patters: Point-to-Point, Fan-Out, Fan-In, Queues, ...
  - End-to-End security by using AES-GCM encryption and digital signatures
  - Local component for easy integration: Handles all "plumbing", such as authentication, network issues, ...
- - Easily endensible: Content agnostic, open REST interface, simple to use, simple to adapt
+ - Easily extensible: Content agnostic, open REST interface, simple to use, simple to adapt
 -->
 
 ## System Architecture
@@ -33,7 +33,7 @@ We developed Samply.Beam as a reusable, easy to maintain, secure, high-performan
 
 *Samply.Beam* consists of two centrally run components and one proxy at each distributed node. The *Samply.Broker* is the central component responsible for facilitating connections, storing and forwarding tasks and messages, and communication with the central *Certificate Authority*, a [Hashicorp Vault](https://github.com/hashicorp/vault) instance managing all certificates required for signing and encrypting the payload. The local *Samply.Proxy* handles all communication with the broker, as well as authentication, encryption and signatures.
 
-Each component in the system is uniquely identified by its hierachical *BeamId*:
+Each component in the system is uniquely identified by its hierarchical *BeamId*:
 ```
 app123.proxy345.broker3.samply.de
 <------------------------------->
@@ -44,7 +44,7 @@ app123.proxy345.broker3.samply.de
                       BrokerId
 ```
 This way each component, mainly applications but Proxies and Brokers as well,
-can be adressed in tasks and further federation of brokers is transparently
+can be addressed in tasks and further federation of brokers is transparently
 possible.
 
 ## Getting started
