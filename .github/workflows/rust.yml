@@ -8,6 +8,12 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  pre-check:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: EmbarkStudios/cargo-deny-action@v1
+
   build:
 
     runs-on: ubuntu-latest
