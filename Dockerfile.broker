@@ -1,0 +1,10 @@
+FROM rust:slim-bullseye AS builder
+WORKDIR /usr/src/app
+COPY . .
+
+RUN apt-get update && apt-get -y install libssl-dev pkg-config
+RUN cargo build --bin broker --release
+
+FROM debian:bullseye-slim
+COPY --from=builder /usr/src/app/target/release/broker /usr/local/bin/
+ENTRYPOINT [ "/usr/local/bin/broker" ]

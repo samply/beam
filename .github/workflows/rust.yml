@@ -22,10 +22,14 @@ jobs:
     - name: Cargo (build)
       run: cargo build --release
     - name: Cargo (run tests)
-      run: cargo test --release -- --test-threads=1
-      # ^-- We're unable to run in parallel as we spawn conflicting server processes on defined ports.
-    - name: Upload Artifact (central)
+      run: tests/scripts/cargo-test.sh
+    - name: Upload Artifact (broker)
       uses: actions/upload-artifact@v3
       with:
-        name: central
-        path: target/release/central
+        name: broker
+        path: target/release/broker
+    - name: Upload Artifact (proxy)
+      uses: actions/upload-artifact@v3
+      with:
+        name: proxy
+        path: target/release/proxy

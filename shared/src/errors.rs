@@ -1,63 +1,64 @@
-use std::{net::AddrParseError};
+use std::net::AddrParseError;
 
 use openssl::error::ErrorStack;
-use thiserror::Error;
 use vaultrs::{client::VaultClientSettingsBuilderError, error::ClientError};
 
-#[derive(Error, Debug)]
-pub enum SamplyBrokerError {
+#[derive(thiserror::Error, Debug)]
+pub enum SamplyBeamError {
     #[error("Invalid bind address supplied: {0}")]
     BindAddr(AddrParseError),
     #[error("Invalid broker address supplied: {0}")]
     WrongBrokerUri(&'static str),
     #[error("The request could not be validated.")]
-    ValidationFailed,
+    RequestValidationFailed,
     #[error("Invalid path supplied")]
     InvalidPath,
-    #[error("Signing / encryption failed")]
-    SignEncryptError(&'static str),
-    #[error("Communication with Samply.PKI failed")]
+    #[error("Invalid Client ID: {0}")]
+    InvalidClientIdString(String),
+    #[error("Signing / encryption failed: {0}")]
+    SignEncryptError(String),
+    #[error("Communication with Samply.PKI failed: {0}")]
     VaultError(String),
-    #[error("Unable to read secret config: {0}. Please check parameters --pki-secrets-file and --privkey_file.")]
-    ReadSecretConfig(String),
+    #[error("Unable to read config: {0}. Please check your environment and parameters.")]
+    ConfigurationFailed(String),
     #[error("Internal synchronization error: {0}")]
     InternalSynchronizationError(String),
+    #[error("Error building HTTP request: {0}")]
+    HttpRequestBuildError(#[from] http::Error),
+    #[error("Problem with HTTP proxy: {0}")]
+    HttpProxyProblem(std::io::Error),
+    #[error("Invalid Beam ID: {0}")]
+    InvalidBeamId(String)
 }
 
-impl From<AddrParseError> for SamplyBrokerError {
+impl From<AddrParseError> for SamplyBeamError {
     fn from(e: AddrParseError) -> Self {
-        let ret = SamplyBrokerError::BindAddr(e);
+        let ret = SamplyBeamError::BindAddr(e);
         println!("Building error: {}", ret);
         ret
     }
 }
 
-impl From<VaultClientSettingsBuilderError> for SamplyBrokerError {
-    fn from(_: VaultClientSettingsBuilderError) -> Self {
-        Self::VaultError("Unable to build vault client settings.".into())
+impl From<VaultClientSettingsBuilderError> for SamplyBeamError {
+    fn from(e: VaultClientSettingsBuilderError) -> Self {
+        Self::VaultError(format!("Unable to build vault client settings: {}", e))
     }
 }
 
-impl From<ClientError> for SamplyBrokerError {
+impl From<ClientError> for SamplyBeamError {
     fn from(e: ClientError) -> Self {
-        Self::VaultError(format!("Error in connection to central certificate authority: {}", e))
+        Self::VaultError(format!("Error in connection to certificate authority: {}", e))
     }
 }
 
-impl From<ErrorStack> for SamplyBrokerError {
-    fn from(_: ErrorStack) -> Self {
-        Self::SignEncryptError("SSL engine failed")
+impl From<ErrorStack> for SamplyBeamError {
+    fn from(e: ErrorStack) -> Self {
+        Self::SignEncryptError(e.to_string())
     }
 }
 
-impl From<std::io::Error> for SamplyBrokerError {
-    fn from(e: std::io::Error) -> Self {
-        Self::ReadSecretConfig(e.to_string())
-    }
-}
-
-impl From<rsa::errors::Error> for SamplyBrokerError {
+impl From<rsa::errors::Error> for SamplyBeamError {
     fn from(e: rsa::errors::Error) -> Self {
-        Self::SignEncryptError("Verification of signature failed")
+        Self::SignEncryptError(e.to_string())
     }
 }

@@ -6,7 +6,7 @@ use axum::{
     Extension, Json, Router, extract::{Query, Path}, response::IntoResponse
 };
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, ClientId, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_CLIENTID};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace};
 
@@ -17,36 +17,25 @@ struct State {
     new_result_tx: Arc<RwLock<HashMap<MsgId, Sender<MsgSigned<MsgTaskResult>>>>>,
 }
 
-const BIND_ADDR: &str = "0.0.0.0:8080";
-
-pub(crate) async fn serve_axum(
-    tasks: Arc<RwLock<HashMap<MsgId, MsgSigned<MsgTaskRequest>>>>,
-    new_task_tx: Arc<Sender<MsgSigned<MsgTaskRequest>>>,
-) -> anyhow::Result<()> {
-    let state = State { tasks, new_task_tx, new_result_tx: Arc::new(RwLock::new(HashMap::new())) };
-    let app = Router::new()
-        .route("/tasks", get(get_tasks).post(post_task))
-        .route("/tasks/:task_id/results", get(get_results_for_task).post(post_result))
-        .layer(Extension(state));
-
-    // Graceful shutdown handling
-    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-
-    ctrlc::set_handler(move || tx.blocking_send(()).expect("Could not send shutdown signal on channel."))
-        .expect("Error setting handler for graceful shutdown.");
-
-    info!("Listening for requests on {}", BIND_ADDR);
-    axum::Server::bind(&BIND_ADDR.parse().unwrap())
-        .serve(app.into_make_service())
-        .with_graceful_shutdown(async {
-            rx.recv().await;
-            info!("Shutting down.");
-        })
-        .await?;
-    Ok(())
+pub(crate) fn router() -> Router {
+    Router::new()
+        .route("/v1/tasks", get(get_tasks).post(post_task))
+        .route("/v1/tasks/:task_id/results", get(get_results_for_task).post(post_result))
+        .layer(Extension(State::default()))
 }
 
-// GET /tasks/:task_id/results
+impl Default for State {
+    fn default() -> Self {
+        let tasks: HashMap<MsgId, MsgSigned<MsgTaskRequest>> = HashMap::new();
+        let (new_task_tx, _) = tokio::sync::broadcast::channel::<MsgSigned<MsgTaskRequest>>(512);
+    
+        let tasks = Arc::new(RwLock::new(tasks));
+        let new_task_tx = Arc::new(new_task_tx);
+        State { tasks, new_task_tx, new_result_tx: Arc::new(RwLock::new(HashMap::new())) }
+    }
+}
+
+// GET /v1/tasks/:task_id/results
 async fn get_results_for_task(
     block: HowLongToBlock,
     task_id: MsgId,
@@ -54,7 +43,7 @@ async fn get_results_for_task(
     Extension(state): Extension<State>,
 ) -> Result<(StatusCode, Json<Vec<MsgSigned<MsgTaskResult>>>), (StatusCode, &'static str)> {
     debug!("get_results_for_task called by {}: {:?}, {:?}", msg.get_from(), task_id, block);
-    let filter_for_me = MsgFilter { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::OR };
+    let filter_for_me = MsgFilter { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::Or };
     let (mut results, rx)  = {
         let tasks = state.tasks.read().await;
         let task = match tasks.get(&task_id) {
@@ -64,10 +53,10 @@ async fn get_results_for_task(
         if task.get_from() != msg.get_from() {
             return Err((StatusCode::UNAUTHORIZED, "Not your task."));
         }
-        let results = task.msg.results.values().map(|v| v.clone()).collect();
+        let results = task.msg.results.values().cloned().collect();
         let rx = match would_wait_for_elements(&results, &block) {
             true => Some(state.new_result_tx.read().await.get(&task_id)
-                        .expect(&format!("Internal error: No result_tx found for task {}", task_id))
+                        .unwrap_or_else(|| panic!("Internal error: No result_tx found for task {}", task_id))
                         .subscribe()),
             false => None,
         };
@@ -130,11 +119,11 @@ where M: Clone + HasWaitId<K>, K: PartialEq
 
 #[derive(Deserialize)]
 struct ToFromParam {
-    from: Option<ClientId>,
-    to: Option<ClientId>,
+    from: Option<AppOrProxyId>,
+    to: Option<AppOrProxyId>,
 }
 
-/// GET /tasks
+/// GET /v1/tasks
 /// Will retrieve tasks that are at least FROM or TO the supplied parameters.
 async fn get_tasks(
     block: HowLongToBlock,
@@ -147,12 +136,15 @@ async fn get_tasks(
     if from.is_none() && to.is_none() {
         return Err((StatusCode::BAD_REQUEST, "Please supply either \"from\" or \"to\" query parameter."));
     }
+    debug!(?from);
+    debug!(?to);
+    debug!(?msg);
     if (from.is_some() && *from.as_ref().unwrap() != msg.msg.from) 
     || (to.is_some() && *to.as_ref().unwrap() != msg.msg.from) { // Rewrite in Rust 1.64: https://github.com/rust-lang/rust/pull/94927
         return Err((StatusCode::UNAUTHORIZED, "You can only list messages created by you (from) or directed to you (to)."));
     }
     // Step 1: Get initial vector fill from HashMap + receiver for new elements
-    let filter_from_or_for_me = MsgFilter { from: from.as_ref(), to: to.as_ref(), mode: MsgFilterMode::OR };
+    let filter_from_or_for_me = MsgFilter { from: from.as_ref(), to: to.as_ref(), mode: MsgFilterMode::Or };
     let (mut vec, new_task_rx) = {
         let map = state.tasks.read().await;
         let vec: Vec<MsgSigned<MsgTaskRequest>> = map
@@ -167,18 +159,19 @@ async fn get_tasks(
     Ok((statuscode, Json(vec)))
 }
 
-enum MsgFilterMode { OR, AND }
+#[allow(dead_code)]
+enum MsgFilterMode { Or, And }
 struct MsgFilter<'a> {
-    from: Option<&'a ClientId>,
-    to: Option<&'a ClientId>,
+    from: Option<&'a AppOrProxyId>,
+    to: Option<&'a AppOrProxyId>,
     mode: MsgFilterMode
 }
 
 impl<'a> MsgFilter<'a> {
     fn filter<M: Msg>(&self, msg: &M) -> bool {
         match self.mode {
-            MsgFilterMode::OR => self.filter_or(msg),
-            MsgFilterMode::AND => self.filter_and(msg)
+            MsgFilterMode::Or => self.filter_or(msg),
+            MsgFilterMode::And => self.filter_and(msg)
         }
     }
 
@@ -219,7 +212,7 @@ impl<'a> MsgFilter<'a> {
     }
 }
 
-// POST /tasks
+// POST /v1/tasks
 async fn post_task(
     msg: MsgSigned<MsgTaskRequest>,
     Extension(state): Extension<State>,
@@ -243,11 +236,11 @@ async fn post_task(
     }
     Ok((
         StatusCode::CREATED,
-        [(header::LOCATION, format!("/tasks/{}", msg.msg.id))]
+        [(header::LOCATION, format!("/v1/tasks/{}", msg.msg.id))]
     ))
 }
 
-// POST /tasks/:task_id/results
+// POST /v1/tasks/:task_id/results
 async fn post_result(
     Path(task_id): Path<MsgId>,
     result: MsgSigned<MsgTaskResult>,
@@ -285,12 +278,12 @@ async fn post_result(
         state.new_result_tx.read().await;
     let sender = sender
         .get(&task_id)
-        .expect(&format!("Internal error: No result_tx found for task {}", task_id));
+        .unwrap_or_else(|| panic!("Internal error: No result_tx found for task {}", task_id));
     if let Err(e) = sender.send(result) {
         debug!("Unable to send notification: {}. Ignoring since probably noone is currently waiting for tasks.", e);
     }
     Ok((
         statuscode,
-        [(header::LOCATION, format!("/tasks/{}/results/{}", task_id, worker_id))]
+        [(header::LOCATION, format!("/v1/tasks/{}/results/{}", task_id, worker_id))]
     ))
 }

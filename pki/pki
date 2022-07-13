@@ -2,11 +2,15 @@
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
-export VAULT_ADDR=http://127.0.0.1:8200
+source $SCRIPT_DIR/../tests/scripts/setup.sh
+
 export VAULT_TOKEN=root
 export LISTEN_ADDR=0.0.0.0:8200
-export DOMAIN="broker.samply.de"
+#export DOMAIN="beam.samply.de"
 export PATH=$PATH:$SCRIPT_DIR
+
+PROXY_ID_SHORT=$(echo $PROXY_ID | cut -d '.' -f 1)
+export VAULT_ADDR=$PKI_ADDRESS
 
 function check_prereqs() {
      set +e
@@ -31,7 +35,7 @@ function check_prereqs() {
 }
 
 function start() {
-     exec vault server -dev -dev-root-token-id $VAULT_TOKEN -dev-listen-address=$LISTEN_ADDR
+     exec vault server -dev -dev-root-token-id $VAULT_TOKEN -dev-listen-address=$LISTEN_ADDR -log-level=warn
 }
 
 function clean() {
@@ -52,8 +56,8 @@ function create_intermediate_ca() {
      vault secrets enable -path=samply_pki pki
      vault secrets tune -max-lease-ttl=43800h samply_pki
      vault write -format=json samply_pki/intermediate/generate/internal \
-          common_name="$DOMAIN Intermediate Authority" \
-          issuer_name="$DOMAIN-intermediate" \
+          common_name="$BROKER_ID Intermediate Authority" \
+          issuer_name="$BROKER_ID-intermediate" \
           | jq -r '.data.csr' > pki_hd_intermediate.csr.pem
      vault write -format=json pki/root/sign-intermediate \
           issuer_ref="root-2022" \
@@ -63,7 +67,7 @@ function create_intermediate_ca() {
      vault write samply_pki/intermediate/set-signed certificate=@hd_intermediate.crt.pem
      vault write samply_pki/roles/hd-dot-dktk-dot-com \
           issuer_ref="$(./vault read -field=default samply_pki/config/issuers)" \
-          allowed_domains="$DOMAIN" \
+          allowed_domains="$BROKER_ID" \
           allow_subdomains=true \
           allow_glob_domains=true \
           max_ttl="720h"
@@ -71,7 +75,7 @@ function create_intermediate_ca() {
 
 function request() {
      application="${1:-app1}"
-     cn="${application}.$DOMAIN"
+     cn="${application}.$BROKER_ID"
      data="{\"common_name\": \"$cn\", \"ttl\": \"24h\"}"
      echo $data
      echo "Creating Certificate for domain $cn"
@@ -80,9 +84,9 @@ function request() {
           --data "$data" \
           --no-progress-meter \
      $VAULT_ADDR/v1/samply_pki/issue/hd-dot-dktk-dot-com | jq > ${application}.json
-     cat ${application}.json | jq -r .data.private_key > ${application}.priv.pem
      cat ${application}.json | jq -r .data.certificate > ${application}.crt.pem
      cat ${application}.json | jq -r .data.ca_chain[] > ${application}.chain.pem
+     cat ${application}.json | jq -r .data.private_key > ${application}.priv.pem
      echo "Success: PEM files stored to ${application}*.pem"
 }
 
@@ -119,11 +123,9 @@ case "$1" in
      devsetup)
           set -m # job control
           clean
-          (sleep 3
+          (while ! [ "$(curl -s $VAULT_ADDR/v1/sys/health | jq -r .sealed)" == "false" ]; do sleep 0.1; done
           init
-          request client1
-          request client2
-          request test) &
+          request $PROXY_ID_SHORT) &
           start
           ;;
      *)
