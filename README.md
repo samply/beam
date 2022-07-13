@@ -1,28 +1,21 @@
 ![Logo](./doc/Logo.svg)
 
-Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. Using an easy to use REST interface, it provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation.
-
-## Why use Samply.Beam?
-Samply.Beam was developed to solve a principal difficulty of interconnecting apllications across strict network boundaries, e.g. in hospital IT environments.
-For data protection reasions (and good reasons, at that) the applications' ability to freely communicate are severely restricted, e.g., by strict firewall rules, forbidding inbound connections and/or using HTTP proxy systems. Howover, for federated data analysis these applications must be able to perform high-performance communication. Many currently employed solutions, such as placing a message queue in a not-as-tighly-controlled network environment (a DMZ) and let the application in the "high-security" network poll that queue, suffer from performance issues and introduce many complexities to the system. Many additional tasks, user management, authentication and authorization, and so on, are handled by the applications.
-
-After years of suffering basically the same difficulties, we developed Samply.Beam as an easy to deploy, secure, high-performance "communication helper" allowing us to handle most common communication pattern in distributed computation in an efficient and simple way, while removing complexity from the applications. Samply.Beam handles all "plumbing", such as the negotiation of communication parameters, target discovery, but helps with routiniely performed tasks such as authentication and authorization, end-to-end encryption and signatures, and certificate management and validation. This way your application can focus on it's main purpose, without getting boged down by integration tasks. Samply.Beam is fully content agnostic, only your applications have to understand the communication payload. This allows the integration of arbitraty applications in a Samply.Beam-connected system.
+Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. It provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation on top of an easy to use REST API.
 
 ## Table of Content
+<!-- - [Features](#features) -->
  - [System Architecture](#system-architecture)
- - [Features](#features)
  - [Getting Started](#getting-started)
  - [JSON Data Objects](#data-objects-json)
  - [API Description](#api)
  - [Roadmap](#roadmap)
+ 
+ ## Why use Samply.Beam?
+Samply.Beam was developed to solve a principal difficulty of interconnecting federated applications across restrictiv network boundaries. Any federated data computation requires some form of communication among the nodes, often in a reliable and high-performance manner. However, in high-security environments such as internal hospital networks, this communication is severely restricted, e.g., by strict firewall rules, forbidding inbound connections and/or using exotic combinations of HTTP proxy servers. Many currently employed solutions place high technical and organizational burdens on each participating site (e.g., message queues requiring servers in a DMZ) or are even considered harmful to the network's security (e.g., VPN overlay networks), suffer from performance issues and introduce additional complexity to the system. 
 
+We developed Samply.Beam as a reusable, easy to maintain, secure, high-performance communication layer allowing us to handle most common communication patterns in distributed computation in an efficient and reusable way, while removing complexity from the applications. Samply.Beam handles all "plumbing", such as the negotiation of communication parameters, target discovery, and helps with routinely performed tasks such as authentication and authorization, end-to-end encryption and signatures, and certificate management and validation. This way your application can focus on its main purpose, without getting boged down by integration tasks. Samply.Beam was created as the latest iteration of the [Bridgehead](https://github.com/samply/bridgehead)'s communication layer, but the software is fully content-agnostic: Only your applications have to understand the communication payload. This allows the integration of arbitraty applications in a Samply.Beam federation.
 
-## System Architecture
-
-![Architecture Schema](./doc/Architecture.svg)
-
-*Samply.Beam* consists of two centrally run components and one proxy at each distributed node. The *Samply.Broker* is the central component responsible for facilitating connections, storing and forwarding tasks and messages, and communication with the central *Certificate Authority*, a [Hashicorp Vault](https://github.com/hashicorp/vault) instance managing all certificates required for signing and encrypting the payload. The local *Samply.Proxy* handles all communication with the broker, as well as authentication, encryption and signatures.
-
+<!--
 ## Features
 
  - Made for strict network environment in University Hospitals:
@@ -32,6 +25,13 @@ After years of suffering basically the same difficulties, we developed Samply.Be
  - End-to-End security by using AES-GCM encryption and digital signatures
  - Local component for easy integration: Handles all "plumbing", such as authentication, network issues, ...
  - Easily endensible: Content agnostic, open REST interface, simple to use, simple to adapt
+-->
+
+## System Architecture
+
+![Architecture Schema](./doc/Architecture.svg) <!-- TODO: Update and remove margin at top -->
+
+*Samply.Beam* consists of two centrally run components and one proxy at each distributed node. The *Samply.Broker* is the central component responsible for facilitating connections, storing and forwarding tasks and messages, and communication with the central *Certificate Authority*, a [Hashicorp Vault](https://github.com/hashicorp/vault) instance managing all certificates required for signing and encrypting the payload. The local *Samply.Proxy* handles all communication with the broker, as well as authentication, encryption and signatures.
 
 ## Getting started
 Running the `central` binary will open a central broker instance listening on `0.0.0.0:8080`. The instance can be queried via the API (see next section).
