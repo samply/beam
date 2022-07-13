@@ -285,7 +285,7 @@ impl<M> HasWaitId<MsgId> for MsgSigned<M> where M: HasWaitId<MsgId> + Msg {
 }
 
 impl MsgTaskRequest {
-    fn new(
+    pub fn new(
         from: AppOrProxyId,
         to: Vec<AppOrProxyId>,
         task_type: MsgType,
