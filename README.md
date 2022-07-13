@@ -33,6 +33,20 @@ We developed Samply.Beam as a reusable, easy to maintain, secure, high-performan
 
 *Samply.Beam* consists of two centrally run components and one proxy at each distributed node. The *Samply.Broker* is the central component responsible for facilitating connections, storing and forwarding tasks and messages, and communication with the central *Certificate Authority*, a [Hashicorp Vault](https://github.com/hashicorp/vault) instance managing all certificates required for signing and encrypting the payload. The local *Samply.Proxy* handles all communication with the broker, as well as authentication, encryption and signatures.
 
+Each component in the system is uniquely identified by its hierachical *BeamId*:
+```
+app123.proxy345.broker3.samply.de
+<------------------------------->
+            AppId
+      <------------------------->
+                ProxyId
+                <--------------->
+                      BrokerId
+```
+This way each component, mainly applications but Proxies and Brokers as well,
+can be adressed in tasks and further federation of brokers is transparently
+possible.
+
 ## Getting started
 Running the `central` binary will open a central broker instance listening on `0.0.0.0:8080`. The instance can be queried via the API (see next section).
 
