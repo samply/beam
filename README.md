@@ -1,5 +1,37 @@
-# Samply.Broker
-A distributed task broker designed for efficient communication across strict network environments.
+![Logo](./doc/Logo.svg) <!-- TODO: New Logo -->
+
+Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. It provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation on top of an easy to use REST API.
+
+## Table of Content
+<!-- - [Features](#features) -->
+ - [System Architecture](#system-architecture)
+ - [Getting Started](#getting-started)
+ - [JSON Data Objects](#data-objects-json)
+ - [API Description](#api)
+ - [Roadmap](#roadmap)
+ 
+ ## Why use Samply.Beam?
+Samply.Beam was developed to solve a principal difficulty of interconnecting federated applications across restrictiv network boundaries. Any federated data computation requires some form of communication among the nodes, often in a reliable and high-performance manner. However, in high-security environments such as internal hospital networks, this communication is severely restricted, e.g., by strict firewall rules, forbidding inbound connections and/or using exotic combinations of HTTP proxy servers. Many currently employed solutions place high technical and organizational burdens on each participating site (e.g., message queues requiring servers in a DMZ) or are even considered harmful to the network's security (e.g., VPN overlay networks), suffer from performance issues and introduce additional complexity to the system. 
+
+We developed Samply.Beam as a reusable, easy to maintain, secure, high-performance communication layer allowing us to handle most common communication patterns in distributed computation in an efficient and reusable way, while removing complexity from the applications. Samply.Beam handles all "plumbing", such as the negotiation of communication parameters, target discovery, and helps with routinely performed tasks such as authentication and authorization, end-to-end encryption and signatures, and certificate management and validation. This way your application can focus on its main purpose, without getting boged down by integration tasks. Samply.Beam was created as the latest iteration of the [Bridgehead](https://github.com/samply/bridgehead)'s communication layer, but the software is fully content-agnostic: Only your applications have to understand the communication payload. This allows the integration of arbitraty applications in a Samply.Beam federation.
+
+<!-- TODO, merge with text above
+## Features
+
+ - Made for strict network environment in University Hospitals:
+   - Highly performant even with exotic proxy and wirewall systems
+   - No DMZ, ..., required
+   - Covers akk commen connection patters: Point-to-Point, Fan-Out, Fan-In, Queues, ...
+ - End-to-End security by using AES-GCM encryption and digital signatures
+ - Local component for easy integration: Handles all "plumbing", such as authentication, network issues, ...
+ - Easily endensible: Content agnostic, open REST interface, simple to use, simple to adapt
+-->
+
+## System Architecture
+
+![Architecture Schema](./doc/Architecture.svg) <!-- TODO: Update and remove margin at top -->
+
+*Samply.Beam* consists of two centrally run components and one proxy at each distributed node. The *Samply.Broker* is the central component responsible for facilitating connections, storing and forwarding tasks and messages, and communication with the central *Certificate Authority*, a [Hashicorp Vault](https://github.com/hashicorp/vault) instance managing all certificates required for signing and encrypting the payload. The local *Samply.Proxy* handles all communication with the broker, as well as authentication, encryption and signatures.
 
 ## Getting started
 Running the `central` binary will open a central broker instance listening on `0.0.0.0:8080`. The instance can be queried via the API (see next section).
@@ -71,7 +103,7 @@ A failed task:
 Create a new task to be worked on by defined workers.
 
 Method: `POST`  
-URL: `/tasks`  
+URL: `/v1/tasks`  
 Body: see [Task](#task)  
 Parameters: none
 
@@ -89,7 +121,7 @@ In subsequent requests, use the URL defined in the `location` header to refer to
 Workers regularly call this endpoint to retrieve submitted tasks.
 
 Method: `GET`  
-URL: `/tasks`  
+URL: `/v1/tasks`  
 Parameters:
 - `worker_id` (optional): Fetch only tasks directed to this worker.
 - [long polling](#long-polling) is supported.
@@ -112,7 +144,7 @@ date: Mon, 27 Jun 2022 14:05:59 GMT
 The submitter of the task (see [Create Task](#create-task)) calls this endpoint to retrieve the results.
 
 Method: `GET`  
-URL: `/tasks/<task_id>/results`  
+URL: `/v1/tasks/<task_id>/results`  
 Parameters:
 - [long polling](#long-polling) is supported.
 
@@ -130,17 +162,21 @@ date: Mon, 27 Jun 2022 14:26:45 GMT
 ]
 ```
 
-## Long-polling API access
+### Long-polling API access
 As part of making this API performant, all reading endpoints support long-polling as an efficient alternative to regular (repeated) polling. Using this function requires the following parameters:
 - `poll_count`: The API call will block until this many results are available ...
 - `poll_timeout`: ... or this many milliseconds have passed, whichever comes first.
 
 For example, retrieving a task's results:
-- `GET /tasks/<task_id>/results` will return immediately with however many results are available,
-- `GET /tasks/<task_id>/results?poll_count=5` will block forever until 5 results are available,
-- `GET /tasks/<task_id>/results?poll_count=5&poll_timeout=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code 206 (Partial Content) is returned to indicate that the result is incomplete.
+- `GET /v1/tasks/<task_id>/results` will return immediately with however many results are available,
+- `GET /v1/tasks/<task_id>/results?poll_count=5` will block forever until 5 results are available,
+- `GET /v1/tasks/<task_id>/results?poll_count=5&poll_timeout=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code 206 (Partial Content) is returned to indicate that the result is incomplete.
 
-## To-Dos
-- Make listen address & port configurable
-- Authentication. This will change the API (e.g. `worker_id` will be no longer required as this is derived from the authentication)
-- Additional client component to sign (and possibly encrypt) actual messages
+## Roadmap
+- [X] API Key authentication of local applications
+- [X] Certificate management
+- [X] End-to-End signatures
+- [ ] End-to-End encryptions
+- [ ] Docker deployment packages
+- [ ] Integration of OAuth2
+- [ ] Integration of LDAP
