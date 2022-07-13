@@ -1,4 +1,4 @@
-![Logo](./doc/Logo.svg)
+![Logo](./doc/Logo.svg) <!-- TODO: New Logo -->
 
 Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. It provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation on top of an easy to use REST API.
 
@@ -15,7 +15,7 @@ Samply.Beam was developed to solve a principal difficulty of interconnecting fed
 
 We developed Samply.Beam as a reusable, easy to maintain, secure, high-performance communication layer allowing us to handle most common communication patterns in distributed computation in an efficient and reusable way, while removing complexity from the applications. Samply.Beam handles all "plumbing", such as the negotiation of communication parameters, target discovery, and helps with routinely performed tasks such as authentication and authorization, end-to-end encryption and signatures, and certificate management and validation. This way your application can focus on its main purpose, without getting boged down by integration tasks. Samply.Beam was created as the latest iteration of the [Bridgehead](https://github.com/samply/bridgehead)'s communication layer, but the software is fully content-agnostic: Only your applications have to understand the communication payload. This allows the integration of arbitraty applications in a Samply.Beam federation.
 
-<!--
+<!-- TODO, merge with text above
 ## Features
 
  - Made for strict network environment in University Hospitals:
