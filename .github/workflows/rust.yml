@@ -20,6 +20,12 @@ jobs:
     name: Build and test applications
     needs: [ pre-check ]
 
+    strategy:
+      matrix:
+        component:
+          - proxy
+          - broker
+
     runs-on: ubuntu-latest
 
     steps:
@@ -33,34 +39,11 @@ jobs:
       run: cargo build --release
     - name: Cargo (run tests)
       run: tests/scripts/cargo-test.sh
-    - name: Upload Artifact (broker)
+    - name: Upload Artifact ${{ matrix.component }}
       uses: actions/upload-artifact@v3
       with:
-        name: broker
-        path: target/release/broker
-    - name: Upload Artifact (proxy)
-      uses: actions/upload-artifact@v3
-      with:
-        name: proxy
-        path: target/release/proxy
-
-  try-out-artifact:
-    needs: [ build-and-test ]
-
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Download Previous Build Artifacts
-      uses: actions/download-artifact@v2
-      with:
-        name: broker
-    - name: Download Previous Build Artifacts
-      uses: actions/download-artifact@v2
-      with:
-        name: proxy
-    - run: find
-    - run: bash -c find
-
+        name: ${{ matrix.component }}
+        path: target/release/${{ matrix.component }}
 
   docker-broker:
     needs: [ build-and-test ]
@@ -75,7 +58,7 @@ jobs:
       # Define the build context of your image, typically default '.' will be enough
       # build-context: '.'
       # Define the Dockerfile of your image, typically default './Dockerfile' will be enough
-      build-file: './Dockerfile.broker.basedonprebuild'
+      build-file: './Dockerfile.broker.githubci'
       # NOTE: This doesn't work currently
       # A list of build arguments, passed to the docker build
       # build-args: |
@@ -102,7 +85,7 @@ jobs:
       # Define the build context of your image, typically default '.' will be enough
       # build-context: '.'
       # Define the Dockerfile of your image, typically default './Dockerfile' will be enough
-      build-file: './Dockerfile.proxy.basedonprebuild'
+      build-file: './Dockerfile.proxy.githubci'
       # NOTE: This doesn't work currently
       # A list of build arguments, passed to the docker build
       # build-args: |
