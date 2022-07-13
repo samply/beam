@@ -195,6 +195,22 @@ For example, retrieving a task's results:
 - `GET /v1/tasks/<task_id>/results?poll_count=5` will block forever until 5 results are available,
 - `GET /v1/tasks/<task_id>/results?poll_count=5&poll_timeout=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code 206 (Partial Content) is returned to indicate that the result is incomplete.
 
+### Health Check
+To monitor the operational status of Samply.Beam, each component implements a
+specific health check endpoint.
+
+Method: `GET`  
+URL: `/v1/health`  
+Parameters:
+- None
+
+In the current version only an appropriate status code is returned. However, in
+the future more detailed health information might be returned in the reply body.
+```
+HTTP/1.1 200 OK
+content-length: 0
+date: Mon, 27 Jun 2022 14:26:45 GMT
+```
 ## Roadmap
 - [X] API Key authentication of local applications
 - [X] Certificate management
