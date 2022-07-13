@@ -45,7 +45,7 @@ jobs:
         path: target/release/proxy
 
   try-out-artifact:
-    needs: [ build-test-rust ]
+    needs: [ build-and-test ]
 
     runs-on: ubuntu-latest
 
@@ -63,7 +63,7 @@ jobs:
 
 
   docker-broker:
-    needs: [ build-test-rust ]
+    needs: [ build-and-test ]
     # This workflow defines how a maven package is built, tested and published.
     # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
     uses: samply/github-workflows/.github/workflows/docker-ci.yml@feature/artifact-into-subdir
@@ -90,7 +90,7 @@ jobs:
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   # NOTE: Repetition currently necessary. Reusable workflows are not runable with strategy matrix. See: https://stackoverflow.com/a/70173578, workaround could be later implemented: https://github.community/t/reusable-workflow-with-strategy-matrix/205676
   docker-proxy:
-    needs: [ build-test-rust ]
+    needs: [ build-and-test ]
     # This workflow defines how a maven package is built, tested and published.
     # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
     uses: samply/github-workflows/.github/workflows/docker-ci.yml@feature/artifact-into-subdir
