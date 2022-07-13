@@ -8,13 +8,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  pre-check:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v3
-    - uses: EmbarkStudios/cargo-deny-action@v1
-
   build:
 
     runs-on: ubuntu-latest
@@ -26,6 +19,8 @@ jobs:
         profile: minimal
         toolchain: stable
     - uses: Swatinem/rust-cache@v1
+    - name: Pre-check licenses and security advisories
+      uses: EmbarkStudios/cargo-deny-action@v1
     - name: Cargo (build)
       run: cargo build --release
     - name: Cargo (run tests)
