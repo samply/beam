@@ -1,5 +1,5 @@
 # This assumes that the binary is available at path "broker"
 
 FROM debian:bullseye-slim
-COPY broker /usr/local/bin/
+COPY artifacts/broker /usr/local/bin/
 ENTRYPOINT [ "/usr/local/bin/broker" ]

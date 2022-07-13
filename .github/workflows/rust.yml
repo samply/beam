@@ -16,7 +16,8 @@ jobs:
     - uses: actions/checkout@v3
     - uses: EmbarkStudios/cargo-deny-action@v1
 
-  build-test-rust:
+  build-and-test:
+    name: Build and test applications
     needs: [ pre-check ]
 
     runs-on: ubuntu-latest
@@ -53,15 +54,19 @@ jobs:
       uses: actions/download-artifact@v2
       with:
         name: broker
+    - name: Download Previous Build Artifacts
+      uses: actions/download-artifact@v2
+      with:
+        name: proxy
     - run: find
     - run: bash -c find
 
 
-  build-docker-broker:
+  docker-broker:
     needs: [ build-test-rust ]
     # This workflow defines how a maven package is built, tested and published.
     # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
-    uses: samply/github-workflows/.github/workflows/docker-ci.yml@main
+    uses: samply/github-workflows/.github/workflows/docker-ci.yml@feature/artifact-into-subdir
     with:
       # The Docker Hub Repository you want eventually push to, e.g samply/share-client
       image-name: "ghcr.io/samply/beam-broker"
@@ -84,11 +89,11 @@ jobs:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
   # NOTE: Repetition currently necessary. Reusable workflows are not runable with strategy matrix. See: https://stackoverflow.com/a/70173578, workaround could be later implemented: https://github.community/t/reusable-workflow-with-strategy-matrix/205676
-  build-proxy:
+  docker-proxy:
     needs: [ build-test-rust ]
     # This workflow defines how a maven package is built, tested and published.
     # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
-    uses: samply/github-workflows/.github/workflows/docker-ci.yml@main
+    uses: samply/github-workflows/.github/workflows/docker-ci.yml@feature/artifact-into-subdir
     with:
       # The Docker Hub Repository you want eventually push to, e.g samply/share-client
       image-name: "ghcr.io/samply/beam-proxy"

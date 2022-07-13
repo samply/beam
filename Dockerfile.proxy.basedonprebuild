@@ -1,5 +1,5 @@
 # This assumes that the binary is available at path "proxy"
 
 FROM debian:bullseye-slim
-COPY proxy /usr/local/bin/
+COPY artifacts/proxy /usr/local/bin/
 ENTRYPOINT [ "/usr/local/bin/proxy" ]
