@@ -25,7 +25,11 @@ mod tests {
     // const CTX_VAULT: Context = Context::new().with_port(8200);
 
     #[dynamic]
-    static BROKER_ID: String = Url::try_from(BROKER_URL).unwrap().host_str().unwrap().to_string();
+    static BROKER_ID: String = {
+        let id = Url::try_from(BROKER_URL).unwrap().host_str().unwrap().to_string();
+        BrokerId::set_broker_id(id.clone());
+        id
+    };
     #[dynamic]
     static PROXY_ID: String = format!("{PROXY_ID_SHORT}.{}", BROKER_ID.as_str());
     #[dynamic(lazy)]

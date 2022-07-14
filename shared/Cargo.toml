@@ -35,8 +35,11 @@ sha2 = "0.10.2"
 openssl = "0.10.40"
 aes-gcm = "0.9.4"
 vaultrs = { git = "https://github.com/jmgilman/vaultrs", default-features = false, features = [ "native-tls" ] }# <= Change once update > 0.6.2 is out
-static_init = "1.0.2"
 jwt-simple = { git = "https://github.com/jedisct1/rust-jwt-simple", rev="b6a2c5be" } # <= Change once version >0.11.0 is out
+
+# Global variables
+static_init = "1.0.2"
+once_cell = "1.13.0"
 
 # Error handling
 thiserror = "1.0.31"

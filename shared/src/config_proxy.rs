@@ -7,7 +7,7 @@ use hyper::Uri;
 use serde::Deserialize;
 use tracing::{info, debug};
 
-use crate::{errors::SamplyBeamError, beam_id::{BeamId, ProxyId, AppId}};
+use crate::{errors::SamplyBeamError, beam_id::{BeamId, ProxyId, AppId, self, BrokerId}};
 
 #[derive(Clone,Debug)]
 pub struct Config {
@@ -86,6 +86,7 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBeamE
 impl crate::config::Config for Config {
     fn load() -> Result<Config,SamplyBeamError> {
         let cli_args = CliArgs::parse();
+        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
         let proxy_id = ProxyId::new(&cli_args.proxy_id)
             .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Invalid Beam ID \"{}\" supplied: {}", cli_args.proxy_id, e)))?;
         let api_keys = parse_apikeys(&proxy_id)?;
