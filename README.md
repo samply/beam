@@ -48,7 +48,7 @@ can be addressed in tasks and further federation of brokers is transparently
 possible.
 
 ## Getting started
-Running the `central` binary will open a central broker instance listening on `0.0.0.0:8080`. The instance can be queried via the API (see next section).
+Running the `broker` binary will open a central broker instance listening on `0.0.0.0:8080`. The instance can be queried via the API (see next section).
 
 ## Data objects (JSON)
 ### Task
@@ -62,24 +62,24 @@ Tasks are represented in the following structure:
     "app1.proxy-hd.broker-project1.samply.de",
     "app5.proxy-ma.broker-project1.samply.de"
   ],
-  "task_type": "My important task",
   "body": "Much work to do",
   "failure_strategy": {
     "retry": {
       "backoff_millisecs": 1000,
       "max_tries": 5
     }
-  }
+  },
+  "metadata": "The broker can use this field e.g., to filter"
 }
 ```
 
 - `id`: UUID to identify the task. When the task is initially created, the value is ignored and replaced by a server-generated one.
-- `from`: BeamID of the submitting applications. Is automatically set by the Proxy according to the authentification info.
+- `from`: BeamID of the submitting applications. Is automatically set by the Proxy according to the authentication info.
 - `to`: BeamIDs of *workers* allowed to retrieve the task and submit results.
-- `task_type`: Well-known identifier for the type of work. Not interpreted by the Broker.
 - `body`: Description of work to be done. Not interpreted by the Broker.
 - `failure_strategy`: Advises each client how to handle failures. Possible values `discard`, `retry`.
 - `failure_strategy.retry`: How often to retry (`max_tries`) a failed task and how long to wait in between each try (`backoff_millisecs`).
+- `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Result](#result) for more examples) and is not encrypted.
 
 ### Result
 Each task can hold 0...n results by each *worker* defined in the task's `to` field.
@@ -95,7 +95,8 @@ A succeeded result for the above task:
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
   "result": {
     "succeeded": "Successfully quenched 1.43e14 flux pulse devices"
-  }
+  },
+  "metadata": ["Arbitrary", "types", "are", "possible"]
 }
 ```
 
@@ -110,6 +111,9 @@ A failed task:
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
   "result": {
     "permfailed": "Unable to decrypt quantum state"
+  },
+  "metadata": {
+    "complex": ["filter", "possibility"]
   }
 }
 ```
@@ -120,6 +124,7 @@ A failed task:
 - `task`: UUID identifying the task this result belongs to.
 - `result`: Defines status of this work result. Possible values `unclaimed`, `tempfailed(body)`, `permfailed(body)`, `succeeded(body)`.
 - `result.body`: Either carries the actual result payload of the task (`succeeded`) or an error message.
+- `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Task](#task)) and is not encrypted.
 
 ## API
 ### Create task
