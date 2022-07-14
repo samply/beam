@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use rand::Rng;
+use serde_json::json;
 
 use crate::{beam_id::{BeamId, AppId, BrokerId, ProxyId}, MsgId, MsgTaskRequest, config, MsgTaskResult, MsgSigned, FailureStrategy};
 
@@ -47,8 +48,8 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
         app1.clone().into(),
         vec![app1.clone().into(), app2.clone().into()],
         "My important task".to_string(),
-        "This task is for app1 and app2".to_string(),
         FailureStrategy::Retry { backoff_millisecs: 1000, max_tries: 5 },
+        json!(["The", "Broker", "can", "read", "and", "filter", "this"])
     );
 
     let response_by_app1 = MsgTaskResult {
@@ -57,6 +58,7 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
         to: vec![app1.clone().into()],
         task: task_for_apps_1_2.id,
         result: crate::WorkResult::Succeeded("All done!".to_string()),
+        metadata: json!("A normal string works, too!")
     };
     let response_by_app2 = MsgTaskResult {
         id: MsgId::new(),
@@ -64,6 +66,7 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
         to: vec![app1.into()],
         task: task_for_apps_1_2.id,
         result: crate::WorkResult::PermFailed("Unable to complete".to_string()),
+        metadata: json!({ "I": { "like": [ "results", "cake" ] } })
     };
     let mut tasks = Vec::new();
     for task in [task_for_apps_1_2] {

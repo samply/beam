@@ -3,6 +3,7 @@
 use beam_id::{BeamId, AppId, AppOrProxyId};
 use crypto_jwt::extract_jwt;
 use errors::SamplyBeamError;
+use serde_json::{Value, json};
 use static_init::dynamic;
 use tracing::debug;
 
@@ -149,12 +150,17 @@ impl Msg for MsgEmpty {
     fn get_to(&self) -> &Vec<AppOrProxyId> {
         &EMPTY_VEC_APPORPROXYID
     }
+
+    fn get_metadata(&self) -> &Value {
+        &json!(null)
+    }
 }
 
 pub trait Msg: Serialize {
     fn get_id(&self) -> &MsgId;
     fn get_from(&self) -> &AppOrProxyId;
     fn get_to(&self) -> &Vec<AppOrProxyId>;
+    fn get_metadata(&self) -> &Value;
 }
 
 pub trait MsgWithBody : Msg{
@@ -183,6 +189,10 @@ impl<M: Msg> Msg for MsgSigned<M> {
     fn get_to(&self) -> &Vec<AppOrProxyId> {
         self.msg.get_to()
     }
+
+    fn get_metadata(&self) -> &Value {
+        self.msg.get_metadata()
+    }
 }
 
 impl Msg for MsgTaskRequest {
@@ -197,6 +207,10 @@ impl Msg for MsgTaskRequest {
     fn get_to(&self) -> &Vec<AppOrProxyId> {
         &self.to
     }
+
+    fn get_metadata(&self) -> &Value {
+        &self.metadata
+    }
 }
 
 impl Msg for MsgTaskResult {
@@ -210,6 +224,10 @@ impl Msg for MsgTaskResult {
 
     fn get_to(&self) -> &Vec<AppOrProxyId> {
         &self.to
+    }
+
+    fn get_metadata(&self) -> &Value {
+        &self.metadata
     }
 }
 
@@ -230,12 +248,12 @@ pub struct MsgTaskRequest {
     pub id: MsgId,
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
-    pub task_type: MsgType,
     pub body: String,
     // pub expire: SystemTime,
     pub failure_strategy: FailureStrategy,
     #[serde(skip)]
     pub results: HashMap<AppOrProxyId,MsgSigned<MsgTaskResult>>,
+    pub metadata: Value
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EncryptedMsgTaskRequest {
@@ -243,7 +261,6 @@ pub struct EncryptedMsgTaskRequest {
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     //auth
-    pub task_type: Option<MsgType>,
     pub body: Option<String>,
     // pub expire: SystemTime,
     pub failure_strategy: Option<FailureStrategy>,
@@ -260,6 +277,7 @@ pub struct MsgTaskResult {
     pub to: Vec<AppOrProxyId>,
     pub task: MsgId,
     pub result: WorkResult,
+    pub metadata: Value,
 }
 
 pub trait HasWaitId<T> {
@@ -288,18 +306,18 @@ impl MsgTaskRequest {
     pub fn new(
         from: AppOrProxyId,
         to: Vec<AppOrProxyId>,
-        task_type: MsgType,
         body: String,
         failure_strategy: FailureStrategy,
+        metadata: serde_json::Value
     ) -> Self {
         MsgTaskRequest {
             id: MsgId::new(),
             from,
             to,
-            task_type,
             body,
             failure_strategy,
             results: HashMap::new(),
+            metadata
         }
     }
 }
@@ -309,7 +327,8 @@ pub struct MsgPing {
     id: MsgId,
     from: AppOrProxyId,
     to: Vec<AppOrProxyId>,
-    nonce: [u8; 16]
+    nonce: [u8; 16],
+    metadata: Value
 }
 
 impl MsgPing {
@@ -317,7 +336,7 @@ impl MsgPing {
         let mut nonce = [0;16];
         openssl::rand::rand_bytes(&mut nonce)
             .expect("Critical Error: Failed to generate random byte array.");
-        MsgPing { id: MsgId::new(), from, to: vec![to], nonce }
+        MsgPing { id: MsgId::new(), from, to: vec![to], nonce, metadata: json!(null) }
     }
 }
 
@@ -332,6 +351,10 @@ impl Msg for MsgPing {
 
     fn get_to(&self) -> &Vec<AppOrProxyId> {
         &self.to
+    }
+
+    fn get_metadata(&self) -> &Value {
+        &self.metadata
     }
 }
 
