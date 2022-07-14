@@ -18,6 +18,8 @@ export PKI_ADDRESS="http://localhost:8200"
 export PKI_APIKEY_FILE="$WORKSPACE/tests/pki_apikey.secret"
 export PRIVKEY_FILE="$WORKSPACE/pki/proxy23.priv.pem"
 export APPKEY_app1="MySecret"
+export APPKEY_pusher1="Pusher1Secret"
+export APPKEY_pusher2="Pusher2Secret"
 
 export P="http://localhost:8081" # for scripts
 

@@ -43,7 +43,7 @@ async fn get_results_for_task(
     Extension(state): Extension<State>,
 ) -> Result<(StatusCode, Json<Vec<MsgSigned<MsgTaskResult>>>), (StatusCode, &'static str)> {
     debug!("get_results_for_task called by {}: {:?}, {:?}", msg.get_from(), task_id, block);
-    let filter_for_me = MsgFilter { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::Or };
+    let filter_for_me = MsgFilterNoTask { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::Or };
     let (mut results, rx)  = {
         let tasks = state.tasks.read().await;
         let task = match tasks.get(&task_id) {
@@ -63,7 +63,7 @@ async fn get_results_for_task(
         (results, rx)
     };
     if let Some(rx) = rx {
-        wait_for_elements(&mut results, &block, rx, filter_for_me).await;
+        wait_for_elements_notask(&mut results, &block, rx, &filter_for_me).await;
     }
     let statuscode = wait_get_statuscode(&results, &block);
     Ok((statuscode, Json(results)))
@@ -81,7 +81,8 @@ fn wait_get_statuscode<S>(vec: &Vec<S>, block: &HowLongToBlock) -> StatusCode {
     }
 }
 
-async fn wait_for_elements<'a, K,M: Msg>(vec: &mut Vec<M>, block: &HowLongToBlock, mut new_element_rx: Receiver<M>, filter: MsgFilter<'a>)
+// TODO: Is there a way to write this function in a generic way? (1/2)
+async fn wait_for_elements_notask<'a, K,M: Msg>(vec: &mut Vec<M>, block: &HowLongToBlock, mut new_element_rx: Receiver<M>, filter: &MsgFilterNoTask<'a>)
 where M: Clone + HasWaitId<K>, K: PartialEq
 {
     let wait_until =
@@ -117,75 +118,120 @@ where M: Clone + HasWaitId<K>, K: PartialEq
     }
 }
 
+// TODO: Is there a way to write this function in a generic way? (2/2)
+async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, block: &HowLongToBlock, mut new_element_rx: Receiver<MsgSigned<MsgTaskRequest>>, filter: &MsgFilterForTask<'a>)
+{
+    let wait_until =
+        time::Instant::now() + block.poll_timeout.unwrap_or(time::Duration::from_secs(31536000));
+    trace!(
+        "Now is {:?}. Will wait until {:?}",
+        time::Instant::now(),
+        wait_until
+    );
+    while usize::from(block.poll_count.unwrap_or(0)) > vec.len()
+        && time::Instant::now() < wait_until {
+        trace!(
+            "Items in vec: {}, time remaining: {:?}",
+            vec.len(),
+            wait_until - time::Instant::now()
+        );
+        tokio::select! {
+            _ = tokio::time::sleep_until(wait_until) => {
+                break;
+            },
+            result = new_element_rx.recv() => {
+                match result {
+                    Ok(req) => {
+                        if filter.filter(&req) {
+                            vec.retain(|el| el.get_wait_id() != req.get_wait_id());
+                            vec.push(req);
+                        }
+                    },
+                    Err(_) => { panic!("Unable to receive from queue! What happened?"); }
+                }
+            }
+        }
+    }
+}
+
 #[derive(Deserialize)]
-struct ToFromParam {
+struct TaskFilter {
     from: Option<AppOrProxyId>,
     to: Option<AppOrProxyId>,
+    unanswered: bool,
 }
 
 /// GET /v1/tasks
 /// Will retrieve tasks that are at least FROM or TO the supplied parameters.
 async fn get_tasks(
     block: HowLongToBlock,
-    Query(to_from): Query<ToFromParam>,
+    Query(taskfilter): Query<TaskFilter>,
     msg: MsgSigned<MsgEmpty>,
     Extension(state): Extension<State>,
 ) -> Result<(StatusCode, impl IntoResponse),(StatusCode, impl IntoResponse)> {
-    let from = to_from.from;
-    let to = to_from.to;
+    let from = taskfilter.from;
+    let to = taskfilter.to;
     if from.is_none() && to.is_none() {
         return Err((StatusCode::BAD_REQUEST, "Please supply either \"from\" or \"to\" query parameter."));
     }
     debug!(?from);
     debug!(?to);
     debug!(?msg);
+    let unanswered_by = if taskfilter.unanswered && to.is_some() {
+        Some(to.clone().unwrap())
+    } else {
+        None
+    };
     if (from.is_some() && *from.as_ref().unwrap() != msg.msg.from) 
     || (to.is_some() && *to.as_ref().unwrap() != msg.msg.from) { // Rewrite in Rust 1.64: https://github.com/rust-lang/rust/pull/94927
         return Err((StatusCode::UNAUTHORIZED, "You can only list messages created by you (from) or directed to you (to)."));
     }
     // Step 1: Get initial vector fill from HashMap + receiver for new elements
-    let filter_from_or_for_me = MsgFilter { from: from.as_ref(), to: to.as_ref(), mode: MsgFilterMode::Or };
+    let normal = MsgFilterNoTask { from: from.as_ref(), to: to.as_ref(), mode: MsgFilterMode::Or };
+    let filter = MsgFilterForTask { normal, unanswered_by: unanswered_by.as_ref() };
     let (mut vec, new_task_rx) = {
         let map = state.tasks.read().await;
         let vec: Vec<MsgSigned<MsgTaskRequest>> = map
             .iter()
-            .filter_map(|(_,v)| if filter_from_or_for_me.filter(v) { Some(v.clone()) } else { None })
+            .filter_map(|(_,v)|
+                if filter.filter(&v) {
+                    Some(v.clone()) 
+                } else { 
+                    None 
+                })
             .collect();
         (vec, state.new_task_tx.subscribe())
     };
     // Step 2: Extend vector with new elements, waiting for `block` amount of time/items
-    wait_for_elements(&mut vec, &block, new_task_rx, filter_from_or_for_me).await;
+    wait_for_elements_task(&mut vec, &block, new_task_rx, &filter).await;
     let statuscode = wait_get_statuscode(&vec, &block);
     Ok((statuscode, Json(vec)))
 }
 
-#[allow(dead_code)]
-enum MsgFilterMode { Or, And }
-struct MsgFilter<'a> {
-    from: Option<&'a AppOrProxyId>,
-    to: Option<&'a AppOrProxyId>,
-    mode: MsgFilterMode
-}
+trait MsgFilterTrait<M: Msg> {
+    // fn new() -> Self;
+    fn from(&self) -> Option<&AppOrProxyId>;
+    fn to(&self) -> Option<&AppOrProxyId>;
+    fn mode(&self) -> &MsgFilterMode;
 
-impl<'a> MsgFilter<'a> {
-    fn filter<M: Msg>(&self, msg: &M) -> bool {
-        match self.mode {
+    fn filter(&self, msg: &M) -> bool {
+        match self.mode() {
             MsgFilterMode::Or => self.filter_or(msg),
             MsgFilterMode::And => self.filter_and(msg)
         }
     }
 
     /// Returns true iff the from or the to conditions match (or both)
-    fn filter_or<M: Msg>(&self, msg: &M) -> bool {
-        if self.from.is_none() && self.to.is_none() {
+    fn filter_or(&self, msg: &M) -> bool {
+        if self.from().is_none() && self.to().is_none() {
             return true;
         }
-        if let Some(to) = &self.to {
+        if let Some(to) = &self.to() {
             if msg.get_to().contains(to) {
                 return true;
             }
         }
-        if let Some(from) = &self.from {
+        if let Some(from) = &self.from() {
             if msg.get_from() == *from {
                 return true;
             }
@@ -194,21 +240,85 @@ impl<'a> MsgFilter<'a> {
     }
 
     /// Returns true iff all defined from/to conditions are met.
-    fn filter_and<M: Msg>(&self, msg: &M) -> bool {
-        if self.from.is_none() && self.to.is_none() {
+    fn filter_and(&self, msg: &M) -> bool {
+        if self.from().is_none() && self.to().is_none() {
             return true;
         }
-        if let Some(to) = self.to {
+        if let Some(to) = self.to() {
             if ! msg.get_to().contains(to) {
                 return false;
             }
         }
-        if let Some(from) = &self.from {
+        if let Some(from) = &self.from() {
             if msg.get_from() != *from {
                 return false;
             }
         }
         true
+    }
+}
+
+#[allow(dead_code)]
+enum MsgFilterMode { Or, And }
+struct MsgFilterNoTask<'a> {
+    from: Option<&'a AppOrProxyId>,
+    to: Option<&'a AppOrProxyId>,
+    mode: MsgFilterMode
+}
+
+struct MsgFilterForTask<'a> {
+    normal: MsgFilterNoTask<'a>,
+    unanswered_by: Option<&'a AppOrProxyId>,
+}
+
+impl<'a> MsgFilterForTask<'a> {
+    fn unanswered(&self, msg: &MsgTaskRequest) -> bool {
+        if self.unanswered_by.is_none() {
+            debug!("Is {} unanswered? Yes, criterion not defined.", msg.get_id());
+            return true;
+        }
+        let unanswered = self.unanswered_by.unwrap();
+        for res in msg.results.values() {
+            if res.get_from() == unanswered {
+                debug!("Is {} unanswered? No, answer found.", msg.get_id());
+                return false;
+            }
+        }
+        debug!("Is {} unanswered? Yes, no matching answer found.", msg.get_id());
+        true
+    }
+}
+
+impl<'a> MsgFilterTrait<MsgSigned<MsgTaskRequest>> for MsgFilterForTask<'a> {
+    fn from(&self) -> Option<&AppOrProxyId> {
+        self.normal.from
+    }
+
+    fn to(&self) -> Option<&AppOrProxyId> {
+        self.normal.to
+    }
+
+    fn filter(&self, msg: &MsgSigned<MsgTaskRequest>) -> bool {
+        MsgFilterNoTask::filter(&self.normal, msg)
+            && self.unanswered(&msg.msg)
+    }
+
+    fn mode(&self) -> &MsgFilterMode {
+        &self.normal.mode
+    }
+}
+
+impl<'a, M: Msg> MsgFilterTrait<M> for MsgFilterNoTask<'a> {
+    fn from(&self) -> Option<&AppOrProxyId> {
+        self.from
+    }
+
+    fn to(&self) -> Option<&AppOrProxyId> {
+        self.to
+    }
+
+    fn mode(&self) -> &MsgFilterMode {
+        &self.mode
     }
 }
 
