@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use rand::Rng;
 use serde_json::json;
 
-use crate::{beam_id::{BeamId, AppId, BrokerId, ProxyId}, MsgId, MsgTaskRequest, config, MsgTaskResult, MsgSigned, FailureStrategy};
+use crate::config;
+use dataobjects::{beam_id::{BeamId, AppId, BrokerId, ProxyId}, MsgId, MsgTaskRequest, MsgTaskResult, MsgSigned, FailureStrategy, WorkResult};
 
 #[cfg(debug_assertions)]
 pub fn print_example_objects() -> bool {
@@ -57,7 +58,7 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
         from: app1.clone().into(),
         to: vec![app1.clone().into()],
         task: task_for_apps_1_2.id,
-        result: crate::WorkResult::Succeeded("All done!".to_string()),
+        result: WorkResult::Succeeded("All done!".to_string()),
         metadata: json!("A normal string works, too!")
     };
     let response_by_app2 = MsgTaskResult {
@@ -65,7 +66,7 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
         from: app2.into(),
         to: vec![app1.into()],
         task: task_for_apps_1_2.id,
-        result: crate::WorkResult::PermFailed("Unable to complete".to_string()),
+        result: WorkResult::PermFailed("Unable to complete".to_string()),
         metadata: json!({ "I": { "like": [ "results", "cake" ] } })
     };
     let mut tasks = Vec::new();

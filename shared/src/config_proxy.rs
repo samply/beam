@@ -7,7 +7,8 @@ use hyper::Uri;
 use serde::Deserialize;
 use tracing::{info, debug};
 
-use crate::{errors::SamplyBeamError, beam_id::{BeamId, ProxyId, AppId, self, BrokerId}};
+use crate::errors::SamplyBeamError;
+use dataobjects::beam_id::{AppId, BeamId, ProxyId, self, BrokerId};
 
 #[derive(Clone,Debug)]
 pub struct Config {

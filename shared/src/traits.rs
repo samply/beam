@@ -1,12 +1,7 @@
 use axum::{async_trait, extract::{FromRequest, Query, Path}, BoxError, http::StatusCode};
 
 use crate::*;
-
-#[derive(Deserialize)]
-struct HowLongToBlockAsIntegers {
-    poll_timeout: Option<u64>,
-    poll_count: Option<u16>,
-}
+use dataobjects::{MyUuid, HowLongToBlock, HowLongToBlockAsIntegers};
 
 #[async_trait]
 impl<B> FromRequest<B> for HowLongToBlock

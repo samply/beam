@@ -1,9 +1,9 @@
-use std::{ops::Deref, fmt::Display, hash::Hash, str::FromStr};
+use std::{fmt::Display, hash::Hash, str::FromStr};
 
 use serde::{Serialize, Deserialize, de::Visitor};
 use once_cell::sync::OnceCell;
 
-use crate::{errors::SamplyBeamError, config};
+use crate::errors::BeamIdError;
 
 static BROKER_ID: OnceCell<String> = OnceCell::new();
 
@@ -32,7 +32,7 @@ pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
             assert_eq!(domain, value, "Tried to initialize broker_id with two different values");
         }
     }
-    fn str_has_type(value: &str) -> Result<BeamIdType,SamplyBeamError> {
+    fn str_has_type(value: &str) -> Result<BeamIdType,BeamIdError> {
         let domain = BROKER_ID.get();
         debug_assert!(domain.is_some(), "BeamId::str_has_type() called but broker_id not initialized");
         let domain = domain.unwrap();
@@ -40,7 +40,7 @@ pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
         // Broker
         let part = split.next();
         if part.is_none() || part.unwrap() != domain {
-            return Err(SamplyBeamError::InvalidBeamId(format!("Beam ID must end with {domain}")));
+            return Err(BeamIdError::InvalidBeamId(format!("Beam ID must end with {domain}")));
         }
         let part = split.next();
         if part.is_none() {
@@ -53,7 +53,7 @@ pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
         }
         check_valid_id_part(part.unwrap())?;
         if let Some(s) = split.next() {
-            return Err(SamplyBeamError::InvalidBeamId(format!("Beam ID must not continue left of AppID part: {s}")));
+            return Err(BeamIdError::InvalidBeamId(format!("Beam ID must not continue left of AppID part: {s}")));
         }
         Ok(BeamIdType::AppId)
     }
@@ -61,16 +61,16 @@ pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
         Self::str_has_type(self.value()).unwrap()
     }
     fn value(&self) -> &String;
-    fn new(id: &str) -> Result<Self,SamplyBeamError>;
+    fn new(id: &str) -> Result<Self,BeamIdError>;
     fn can_be_signed_by<B: BeamId>(&self, other_id: &B) -> bool {
         return self.value().ends_with(other_id.value());
     }
 }
 
-fn check_valid_id_part(id: &str) -> Result<(),SamplyBeamError> {
+fn check_valid_id_part(id: &str) -> Result<(),BeamIdError> {
     for char in id.chars() {
         if !(char.is_alphanumeric() || char == '-'){
-            return Err(SamplyBeamError::InvalidBeamId(format!("Invalid Beam ID element: {id}")));
+            return Err(BeamIdError::InvalidBeamId(format!("Invalid Beam ID element: {id}")));
         }
     }
     Ok(())
@@ -101,10 +101,10 @@ impl BeamId for AppId {
         &self.0
     }
 
-    fn new(id: &str) -> Result<Self,SamplyBeamError> {
+    fn new(id: &str) -> Result<Self,BeamIdError> {
         let given_type = Self::str_has_type(id)?;
         if given_type != BeamIdType::AppId {
-            return Err(SamplyBeamError::InvalidBeamId(format!("{id} is a {given_type}, not an AppId.")));
+            return Err(BeamIdError::InvalidBeamId(format!("{id} is a {given_type}, not an AppId.")));
         }
         Ok(Self(id.to_string()))
     }
@@ -117,10 +117,10 @@ impl BeamId for ProxyId {
         &self.0
     }
 
-    fn new(id: &str) -> Result<Self,SamplyBeamError> {
+    fn new(id: &str) -> Result<Self,BeamIdError> {
         let given_type = Self::str_has_type(id)?;
         if given_type != BeamIdType::ProxyId {
-            return Err(SamplyBeamError::InvalidBeamId(format!("{id} is a {given_type}, not a ProxyId.")));
+            return Err(BeamIdError::InvalidBeamId(format!("{id} is a {given_type}, not a ProxyId.")));
         }
         Ok(Self(id.to_string()))
     }
@@ -133,10 +133,10 @@ impl BeamId for BrokerId {
         &self.0
     }
 
-    fn new(id: &str) -> Result<Self,SamplyBeamError> {
+    fn new(id: &str) -> Result<Self,BeamIdError> {
         let given_type = Self::str_has_type(id)?;
         if given_type != BeamIdType::BrokerId {
-            return Err(SamplyBeamError::InvalidBeamId(format!("{id} is a {given_type}, not a BrokerId.")));
+            return Err(BeamIdError::InvalidBeamId(format!("{id} is a {given_type}, not a BrokerId.")));
         }
         Ok(Self(id.to_string()))
     }
@@ -175,7 +175,7 @@ impl BeamId for AnyBeamId {
         }
     }
 
-    fn new(id: &str) -> Result<Self,SamplyBeamError> {
+    fn new(id: &str) -> Result<Self,BeamIdError> {
         let res = match AppId::str_has_type(id)? { // TODO: Better use trait
             BeamIdType::AppId => Self::AppId(AppId::new(id)?),
             BeamIdType::ProxyId => Self::ProxyId(ProxyId::new(id)?),
@@ -205,11 +205,11 @@ impl BeamId for AppOrProxyId {
         }
     }
 
-    fn new(id: &str) -> Result<Self,SamplyBeamError> {
+    fn new(id: &str) -> Result<Self,BeamIdError> {
         let res = match AppId::str_has_type(id)? { // TODO: Better use trait
             BeamIdType::AppId => Self::AppId(AppId::new(id)?),
             BeamIdType::ProxyId => Self::ProxyId(ProxyId::new(id)?),
-            BeamIdType::BrokerId => { return Err(SamplyBeamError::InvalidBeamId("An AppOrProxyId cannot carry a BrokerId.".into())); },
+            BeamIdType::BrokerId => { return Err(BeamIdError::InvalidBeamId("An AppOrProxyId cannot carry a BrokerId.".into())); },
         };
         Ok(res)
     }
@@ -234,7 +234,7 @@ impl From<&AppId> for AppOrProxyId {
 }
 
 impl FromStr for AppId {
-    type Err = SamplyBeamError;
+    type Err = BeamIdError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         AppId::new(s)

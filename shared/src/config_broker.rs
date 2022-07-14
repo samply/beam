@@ -3,9 +3,10 @@ use std::{net::SocketAddr, path::PathBuf, fs::read_to_string};
 use axum::http::Uri;
 use clap::Parser;
 use static_init::dynamic;
-use crate::{errors::SamplyBeamError, beam_id::{BrokerId, BeamId}};
+use crate::errors::SamplyBeamError;
 use tracing::info;
 use std::str::FromStr;
+use dataobjects::beam_id::{BrokerId, BeamId};
 
 /// Settings for Samply.Beam (Broker)
 #[derive(Parser,Debug)]

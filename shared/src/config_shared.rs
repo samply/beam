@@ -1,4 +1,5 @@
-use crate::{SamplyBeamError, crypto, beam_id::{BrokerId, BeamId}};
+use crate::{SamplyBeamError, crypto};
+use dataobjects::beam_id::{BrokerId, BeamId};
 use std::{path::PathBuf, rc::Rc, sync::Arc, fs::read_to_string};
 use hyper::Uri;
 use clap::Parser;

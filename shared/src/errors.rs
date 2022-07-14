@@ -13,8 +13,6 @@ pub enum SamplyBeamError {
     RequestValidationFailed,
     #[error("Invalid path supplied")]
     InvalidPath,
-    #[error("Invalid Client ID: {0}")]
-    InvalidClientIdString(String),
     #[error("Signing / encryption failed: {0}")]
     SignEncryptError(String),
     #[error("Communication with Samply.PKI failed: {0}")]
@@ -27,8 +25,6 @@ pub enum SamplyBeamError {
     HttpRequestBuildError(#[from] http::Error),
     #[error("Problem with HTTP proxy: {0}")]
     HttpProxyProblem(std::io::Error),
-    #[error("Invalid Beam ID: {0}")]
-    InvalidBeamId(String)
 }
 
 impl From<AddrParseError> for SamplyBeamError {
