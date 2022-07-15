@@ -35,13 +35,13 @@ We developed Samply.Beam as a reusable, easy to maintain, secure, high-performan
 
 Each component in the system is uniquely identified by its hierarchical *BeamId*:
 ```
-app123.proxy345.broker3.samply.de
-<------------------------------->
+app3.proxy2.broker1.samply.de
+<--------------------------->
             AppId
-      <------------------------->
-                ProxyId
-                <--------------->
-                      BrokerId
+     <---------------------->
+             ProxyId
+            <--------------->
+                 BrokerId
 ```
 This way each component, mainly applications but Proxies and Brokers as well,
 can be addressed in tasks and further federation of brokers is transparently
