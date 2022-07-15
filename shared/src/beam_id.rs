@@ -1,10 +1,13 @@
-use std::{ops::Deref, fmt::Display, hash::Hash};
+use std::{ops::Deref, fmt::Display, hash::Hash, str::FromStr};
 
 use serde::{Serialize, Deserialize, de::Visitor};
+use once_cell::sync::OnceCell;
 
 use crate::{errors::SamplyBeamError, config};
 
-#[derive(PartialEq)]
+static BROKER_ID: OnceCell<String> = OnceCell::new();
+
+#[derive(PartialEq,Debug)]
 pub enum BeamIdType {
     AppId,
     ProxyId,
@@ -23,8 +26,16 @@ impl Display for BeamIdType {
 }
 
 pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
+    fn set_broker_id(domain: String) {
+        let res = BROKER_ID.set(domain.clone());
+        if let Err(value) = res {
+            assert_eq!(domain, value, "Tried to initialize broker_id with two different values");
+        }
+    }
     fn str_has_type(value: &str) -> Result<BeamIdType,SamplyBeamError> {
-        let domain = &config::CONFIG_SHARED.broker_domain;
+        let domain = BROKER_ID.get();
+        debug_assert!(domain.is_some(), "BeamId::str_has_type() called but broker_id not initialized");
+        let domain = domain.unwrap();
         let mut split = value.split('.').rev();
         // Broker
         let part = split.next();
@@ -131,6 +142,17 @@ impl BeamId for BrokerId {
     }
 }
 
+impl AppId {
+    pub fn proxy_id(&self) -> ProxyId {
+        // just cut off text until first '.'
+        let first_dot = self.0.find('.').unwrap(); // always exists in an AppId
+        let mut shortened = self.0.clone();
+        shortened.replace_range(..first_dot+1, "");
+        assert_eq!(ProxyId::str_has_type(&shortened).unwrap(), BeamIdType::ProxyId);
+        ProxyId(shortened)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AnyBeamId {
     AppId(AppId),
@@ -211,6 +233,14 @@ impl From<&AppId> for AppOrProxyId {
     }
 }
 
+impl FromStr for AppId {
+    type Err = SamplyBeamError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        AppId::new(s)
+    }
+}
+
 impl PartialEq<AppId> for AppOrProxyId {
     fn eq(&self, other: &AppId) -> bool {
         match self {
@@ -274,4 +304,14 @@ impl<'de> Visitor<'de> for AppOrProxyIdVisitor {
             }
         }
     }
+}
+
+pub fn app_to_broker_id(app_id: &str) -> String {
+    let mut shortened = app_id.to_string();
+    // cut off text until second '.'
+    for _ in 1..=2 {
+        let first_dot = shortened.find('.').unwrap(); // TODO
+        shortened.replace_range(..first_dot+1, "");
+    }
+    shortened
 }
