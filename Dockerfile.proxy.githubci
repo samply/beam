@@ -1,6 +1,10 @@
 # This assumes that the binary is available at path "proxy"
 
+#Distroless images have no chmod command
+FROM alpine AS chmodder
+COPY artifacts/proxy /
+RUN chmod +x /proxy
+
 FROM gcr.io/distroless/cc
-COPY artifacts/proxy /usr/local/bin/
-RUN chmod +x /usr/local/bin/proxy
-ENTRYPOINT [ "/usr/local/bin/proxy" ]
+COPY --from=chmodder /proxy /
+ENTRYPOINT [ "/proxy" ]
