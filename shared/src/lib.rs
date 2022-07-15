@@ -85,6 +85,18 @@ pub enum WorkResult {
     Succeeded(TaskResponse),
 }
 
+impl Display for WorkResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match self {
+            WorkResult::Unclaimed => String::from("Unclaimed"),
+            WorkResult::TempFailed(e) => format!("Temporary failure: {e}"),
+            WorkResult::PermFailed(e) => format!("Permanent failure: {e}"),
+            WorkResult::Succeeded(e) => format!("Success: {e}"),
+        };
+        f.write_str(&str)
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum FailureStrategy {
