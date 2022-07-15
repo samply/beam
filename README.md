@@ -81,7 +81,7 @@ Tasks are represented in the following structure:
 }
 ```
 
-- `id`: UUID to identify the task. When the task is initially created, the value is ignored and replaced by a server-generated one.
+- `id`: UUID to identify the task. Note that when the task is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Callers must check the reply's `Location` header for the actual ID.
 - `from`: BeamID of the submitting applications. Is automatically set by the Proxy according to the authentication info.
 - `to`: BeamIDs of *workers* allowed to retrieve the task and submit results.
 - `body`: Description of work to be done. Not interpreted by the Broker.
@@ -126,7 +126,7 @@ A failed task:
 }
 ```
 
-- `id`: UUID identifying the result. When the result is initially created, the value is ignored and replaced by a server-generated one.
+- `id`: UUID identifying the result. Note that when the result is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Callers must check the reply's `Location` header for the actual ID.
 - `from`: BeamID identifying the client submitting this result. This needs to match an entry the `to` field in the task.
 - `to`: BeamIDs the intended recipients of the result. Used for encrypted payloads.
 - `task`: UUID identifying the task this result belongs to.
