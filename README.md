@@ -229,7 +229,8 @@ date: Mon, 27 Jun 2022 14:26:45 GMT
 - [X] API Key authentication of local applications
 - [X] Certificate management
 - [X] End-to-End signatures
-- [ ] End-to-End encryptions
-- [ ] Docker deployment packages
-- [ ] Integration of OAuth2
-- [ ] Integration of LDAP
+- [ ] End-to-End encryption
+- [X] Docker deployment packages: CI/CD
+- [ ] Docker deployment packages: Documentation
+- [ ] Broker-side filtering of the unencrypted fields with JSON queries
+- [ ] Integration of OAuth2 (in discussion)
