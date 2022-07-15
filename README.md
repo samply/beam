@@ -56,7 +56,7 @@ In practice,
 This design ensures that each component, mainly applications but Proxies and Brokers as well, can be addressed in tasks. Should the need arise in the future, this network could be federated by federating the brokers (not unsimilar to E-Mail/SMTP, XMPP, etc.)
 
 ## Getting started
-Running the `broker` binary will open a central broker instance listening on `0.0.0.0:8080`. The instance can be queried via the API (see next section).
+Running the `broker` binary will open a central broker instance listening on `0.0.0.0:8080` (default, see CLI args for options). The instance can be queried via the API (see next section).
 
 ## Data objects (JSON)
 ### Task
@@ -77,7 +77,7 @@ Tasks are represented in the following structure:
       "max_tries": 5
     }
   },
-  "metadata": "The broker can use this field e.g., to filter"
+  "metadata": "The broker can read and use this field e.g., to apply filters on behalf of an app"
 }
 ```
 
@@ -87,7 +87,7 @@ Tasks are represented in the following structure:
 - `body`: Description of work to be done. Not interpreted by the Broker.
 - `failure_strategy`: Advises each client how to handle failures. Possible values `discard`, `retry`.
 - `failure_strategy.retry`: How often to retry (`max_tries`) a failed task and how long to wait in between each try (`backoff_millisecs`).
-- `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Result](#result) for more examples) and is not encrypted.
+- `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Result](#result) for more examples) and can be handled by the broker (thus intentionally not encrypted).
 
 ### Result
 Each task can hold 0...n results by each *worker* defined in the task's `to` field.
@@ -121,7 +121,7 @@ A failed task:
     "permfailed": "Unable to decrypt quantum state"
   },
   "metadata": {
-    "complex": ["filter", "possibility"]
+    "complex": "A map (key 'complex') is possible, too"
   }
 }
 ```
@@ -207,19 +207,17 @@ As part of making this API performant, all reading endpoints support long-pollin
 For example, retrieving a task's results:
 - `GET /v1/tasks/<task_id>/results` will return immediately with however many results are available,
 - `GET /v1/tasks/<task_id>/results?poll_count=5` will block forever until 5 results are available,
-- `GET /v1/tasks/<task_id>/results?poll_count=5&poll_timeout=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code 206 (Partial Content) is returned to indicate that the result is incomplete.
+- `GET /v1/tasks/<task_id>/results?poll_count=5&poll_timeout=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code `206 (Partial Content)` is returned to indicate that the result is incomplete.
 
 ### Health Check
-To monitor the operational status of Samply.Beam, each component implements a
-specific health check endpoint.
+To monitor the operational status of Samply.Beam, each component implements a specific health check endpoint.
 
 Method: `GET`  
 URL: `/v1/health`  
 Parameters:
 - None
 
-In the current version only an appropriate status code is returned. However, in
-the future more detailed health information might be returned in the reply body.
+In the current version only an appropriate status code is returned once/if initialization has succeeded. However, in the future more detailed health information might be returned in the reply body.
 ```
 HTTP/1.1 200 OK
 content-length: 0
