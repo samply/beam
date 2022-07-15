@@ -3,7 +3,6 @@ on:
   push:
     branches:
       - main
-      - test/dockerhub
 jobs:
   PushContainerReadme:
     runs-on: ubuntu-latest
