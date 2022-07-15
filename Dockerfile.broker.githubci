@@ -1,0 +1,10 @@
+# This assumes that the binary is available at path "broker"
+
+#Distroless images have no chmod command
+FROM alpine AS chmodder
+COPY artifacts/broker /
+RUN chmod +x /broker
+
+FROM gcr.io/distroless/cc
+COPY --from=chmodder /broker /
+ENTRYPOINT [ "/broker" ]
