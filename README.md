@@ -159,7 +159,8 @@ Workers regularly call this endpoint to retrieve submitted tasks.
 Method: `GET`  
 URL: `/v1/tasks`  
 Parameters:
-- `to` (optional): Fetch only tasks directed to this worker.
+- `from` (optional): Fetch only tasks created by this ID.
+- `to` (optional): Fetch only tasks directed to this ID.
 - [long polling](#long-polling) is supported.
 
 Returns an array of tasks, cf. [here](#task)
