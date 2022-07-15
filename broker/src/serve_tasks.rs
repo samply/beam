@@ -158,7 +158,7 @@ async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, bl
 struct TaskFilter {
     from: Option<AppOrProxyId>,
     to: Option<AppOrProxyId>,
-    unanswered: bool,
+    unanswered: Option<bool>,
 }
 
 /// GET /v1/tasks
@@ -177,7 +177,7 @@ async fn get_tasks(
     debug!(?from);
     debug!(?to);
     debug!(?msg);
-    let unanswered_by = if taskfilter.unanswered && to.is_some() {
+    let unanswered_by = if taskfilter.unanswered.is_some() && taskfilter.unanswered.unwrap() && to.is_some() {
         Some(to.clone().unwrap())
     } else {
         None
@@ -194,7 +194,7 @@ async fn get_tasks(
         let vec: Vec<MsgSigned<MsgTaskRequest>> = map
             .iter()
             .filter_map(|(_,v)|
-                if filter.filter(&v) {
+                if filter.filter(v) {
                     Some(v.clone()) 
                 } else { 
                     None 
