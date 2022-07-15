@@ -4,6 +4,6 @@ COPY . .
  
 RUN cargo build --bin proxy --release
 
-FROM debian:bullseye-slim
+FROM gcr.io/distroless/cc
 COPY --from=builder /usr/src/app/target/release/proxy /usr/local/bin/
 ENTRYPOINT [ "/usr/local/bin/proxy" ]

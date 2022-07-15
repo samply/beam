@@ -1,6 +1,6 @@
 # This assumes that the binary is available at path "proxy"
 
-FROM debian:bullseye-slim
+FROM gcr.io/distroless/cc
 COPY artifacts/proxy /usr/local/bin/
 RUN chmod +x /usr/local/bin/proxy
 ENTRYPOINT [ "/usr/local/bin/proxy" ]

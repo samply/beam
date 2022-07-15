@@ -1,6 +1,6 @@
 # This assumes that the binary is available at path "broker"
 
-FROM debian:bullseye-slim
+FROM gcr.io/distroless/cc
 COPY artifacts/broker /usr/local/bin/
 RUN chmod +x /usr/local/bin/broker
 ENTRYPOINT [ "/usr/local/bin/broker" ]
