@@ -3,6 +3,9 @@ name: Rust
 on:
   push:
   pull_request:
+  schedule:
+    # Fetch new base image updates every night at 1am
+    - cron: '0 1 * * *'
 
 env:
   CARGO_TERM_COLOR: always
