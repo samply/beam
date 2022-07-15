@@ -49,7 +49,7 @@ jobs:
     needs: [ build-and-test ]
     # This workflow defines how a maven package is built, tested and published.
     # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
-    uses: samply/github-workflows/.github/workflows/docker-ci.yml@feature/artifact-into-subdir
+    uses: samply/github-workflows/.github/workflows/docker-ci.yml@main
     with:
       # The Docker Hub Repository you want eventually push to, e.g samply/share-client
       image-name: "ghcr.io/samply/beam-broker"
@@ -76,7 +76,7 @@ jobs:
     needs: [ build-and-test ]
     # This workflow defines how a maven package is built, tested and published.
     # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
-    uses: samply/github-workflows/.github/workflows/docker-ci.yml@feature/artifact-into-subdir
+    uses: samply/github-workflows/.github/workflows/docker-ci.yml@main
     with:
       # The Docker Hub Repository you want eventually push to, e.g samply/share-client
       image-name: "ghcr.io/samply/beam-proxy"
