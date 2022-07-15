@@ -43,9 +43,17 @@ app3.proxy2.broker1.samply.de
             <--------------->
                  BrokerId
 ```
-This way each component, mainly applications but Proxies and Brokers as well,
-can be addressed in tasks and further federation of brokers is transparently
-possible.
+Although all IDs may look like fully-qualified domain names:
+- Only the *BrokerId* has to be a DNS-resolvable FQDN reachable via the network (Proxies will communicate with `https://broker1.samply.de/...`)
+- The *ProxyId* (`proxy2...`) is not represented in DNS but via the Proxy's certificate, which states `CN=proxy2.broker2.samply.de`
+- Finally, the *AppId* (`app3...`) results from using the correct API key in communication with the Proxy (Header `Authorization: app3.broker2.samply.de <app3's API key>`)
+
+In practice,
+- there is one Broker per research network (`broker1.samply.de`)
+- each site has one Bridgehead with one Proxy instance (`proxy2` for site #2)
+- many apps use `proxy2` to communicate within the network (`app1`, `app2`, `app3`, ...)
+
+This design ensures that each component, mainly applications but Proxies and Brokers as well, can be addressed in tasks. Should the need arise in the future, this network could be federated by federating the brokers (not unsimilar to E-Mail/SMTP, XMPP, etc.)
 
 ## Getting started
 Running the `broker` binary will open a central broker instance listening on `0.0.0.0:8080`. The instance can be queried via the API (see next section).
