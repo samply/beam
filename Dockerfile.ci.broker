@@ -1,0 +1,11 @@
+# This assumes binaries are present, see COPY directive.
+
+#FROM gcr.io/distroless/cc
+FROM ubuntu:bionic
+#ARG COMPONENT
+ARG TARGETARCH
+#COPY /artifacts/binaries-$TARGETARCH/$COMPONENT /usr/local/bin/
+COPY /artifacts/binaries-$TARGETARCH/broker /usr/local/bin/
+#ENTRYPOINT [ "/usr/local/bin/$COMPONENT" ]
+ENTRYPOINT [ "/usr/local/bin/broker" ]
+
