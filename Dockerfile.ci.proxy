@@ -2,7 +2,7 @@
 
 FROM alpine AS chmodder
 ARG TARGETARCH
-COPY /artifacts/binaries-$TARGETARCH/proxy /app
+COPY /artifacts/binaries-$TARGETARCH/proxy /app/
 RUN chmod +x /app/*
 
 FROM gcr.io/distroless/cc

@@ -2,7 +2,7 @@
 
 FROM alpine AS chmodder
 ARG TARGETARCH
-COPY /artifacts/binaries-$TARGETARCH/broker /app
+COPY /artifacts/binaries-$TARGETARCH/broker /app/
 RUN chmod +x /app/*
 
 FROM gcr.io/distroless/cc
