@@ -13,7 +13,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize, de::Visitor};
 use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
-use dataobjects::{Msg, MsgSigned};
+use dataobjects::{Msg,HasWaitId,MsgId};
 
 mod traits;
 pub mod logger;
@@ -33,6 +33,16 @@ pub mod http_proxy;
 
 pub mod examples;
 
+#[derive(Clone,Debug,Serialize,Deserialize, PartialEq)]
+pub struct MsgSigned<M: Msg> {
+    pub msg: M,
+    pub sig: String
+}
+impl<M> HasWaitId<MsgId> for MsgSigned<M> where M: HasWaitId<MsgId> + Msg {
+    fn get_wait_id(&self) -> MsgId {
+        self.msg.get_wait_id()
+    }
+}
 
 impl<M: Msg> MsgSigned<M> {
     pub async fn verify(&self) -> Result<(), SamplyBeamError> {

@@ -91,17 +91,6 @@ pub struct HowLongToBlock {
 //#[dynamic]
 pub static EMPTY_VEC_APPORPROXYID: Vec<AppOrProxyId> = Vec::new();
 
-
-#[derive(Clone,Debug,Serialize,Deserialize, PartialEq)]
-pub struct MsgSigned<M: Msg> {
-    pub msg: M,
-    pub sig: String
-}
-impl<M> HasWaitId<MsgId> for MsgSigned<M> where M: HasWaitId<MsgId> + Msg {
-    fn get_wait_id(&self) -> MsgId {
-        self.msg.get_wait_id()
-    }
-}
 #[derive(Serialize,Deserialize,Debug)]
 pub struct MsgEmpty {
     pub id: MsgId,
@@ -191,9 +180,6 @@ pub struct MsgTaskRequest {
     pub body: String,
     // pub expire: SystemTime,
     pub failure_strategy: FailureStrategy,
-    //TODO --> Combined Object to broker
-    #[serde(skip)]
-    pub results: HashMap<AppOrProxyId,MsgSigned<MsgTaskResult>>,
     pub metadata: Value
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -207,8 +193,6 @@ pub struct EncryptedMsgTaskRequest {
     pub failure_strategy: Option<FailureStrategy>,
     pub encrypted: String,
     pub encryption_keys: Vec<Option<String>>,
-    #[serde(skip)]
-    pub results: HashMap<AppOrProxyId,MsgTaskResult>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -251,7 +235,6 @@ impl MsgTaskRequest {
             to,
             body,
             failure_strategy,
-            results: HashMap::new(),
             metadata
         }
     }

@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use rand::Rng;
 use serde_json::json;
 
-use crate::config;
-use dataobjects::{beam_id::{BeamId, AppId, BrokerId, ProxyId}, MsgId, MsgTaskRequest, MsgTaskResult, MsgSigned, FailureStrategy, WorkResult};
+use crate::{config,MsgSigned};
+use dataobjects::{beam_id::{BeamId, AppId, BrokerId, ProxyId}, MsgId, MsgTaskRequest, MsgTaskResult, FailureStrategy, WorkResult};
 
 #[cfg(debug_assertions)]
 pub fn print_example_objects() -> bool {
@@ -81,9 +81,14 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
 }
 
 // Random
+//
 
-impl AppId {
-    pub fn random(parent: &ProxyId) -> Self {
+trait RandomId<I> where I: BeamId {
+    fn random(parent: &I) -> Self;
+}
+
+impl RandomId<ProxyId> for AppId {
+    fn random(parent: &ProxyId) -> Self {
         let mut rnd = random_str();
         rnd.push('.');
         rnd.push_str(&parent.to_string());
@@ -92,8 +97,8 @@ impl AppId {
     }
 }
 
-impl ProxyId {
-    pub fn random(parent: &BrokerId) -> Self {
+impl RandomId<BrokerId> for ProxyId {
+    fn random(parent: &BrokerId) -> Self {
         let mut rnd = random_str();
         rnd.push('.');
         rnd.push_str(&parent.to_string());

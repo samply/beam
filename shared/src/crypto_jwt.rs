@@ -5,8 +5,8 @@ use openssl::base64;
 use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use tracing::{debug, error, warn};
-use crate::{errors::SamplyBeamError, crypto, config};
-use dataobjects::{beam_id::{BeamId,ProxyId}, MsgSigned, Msg, MsgEmpty, MsgId, MsgWithBody};
+use crate::{errors::SamplyBeamError, crypto, config, MsgSigned};
+use dataobjects::{beam_id::{BeamId,ProxyId}, Msg, MsgEmpty, MsgId, MsgWithBody};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
