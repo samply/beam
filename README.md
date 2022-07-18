@@ -162,6 +162,12 @@ Parameters:
 - `from` (optional): Fetch only tasks created by this ID.
 - `to` (optional): Fetch only tasks directed to this ID.
 - [long polling](#long-polling) is supported.
+- `filter` (optional): Fetch only tasks fulfilling the filter query. Generic
+  queries are not yet implemented, but the following "convenience" filters
+  reflecting common use cases exist:
+  * `filter=todo`: Retrieves unfinished tasks directed to the asking party once.
+    Is a combination of: `to` contains me and `results` do not contain me and
+    `poll_cound=1`
 
 Returns an array of tasks, cf. [here](#task)
 ```
