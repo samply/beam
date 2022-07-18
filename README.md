@@ -153,7 +153,7 @@ date: Mon, 27 Jun 2022 13:58:35 GMT
 
 In subsequent requests, use the URL defined in the `location` header to refer to the task (NOT the one you supplied in your POST body).
 
-### Retrieve task
+### Retrieve tasks
 Workers regularly call this endpoint to retrieve submitted tasks.
 
 Method: `GET`  
@@ -162,6 +162,10 @@ Parameters:
 - `from` (optional): Fetch only tasks created by this ID.
 - `to` (optional): Fetch only tasks directed to this ID.
 - [long polling](#long-polling) is supported.
+- `filter` (optional): Fetch only tasks fulfilling the specified filter criterion. Generic queries are not yet implemented, but the following "convenience filters" reflecting common use cases exist:
+  - `filter=todo`: Matches unfinished tasks to be worked on by the asking client. Is a combination of:
+    - `to` contains me and
+    - `results` do not contain me.
 
 Returns an array of tasks, cf. [here](#task)
 ```
