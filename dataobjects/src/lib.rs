@@ -10,6 +10,8 @@ use rand::Rng;
 use serde::{Deserialize, Serialize, de::Visitor};
 use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
+use rand::prelude::*;
+use rand_chacha::ChaCha20Rng;
 
 pub type MsgId = MyUuid;
 pub type MsgType = String;
@@ -252,7 +254,8 @@ pub struct MsgPing {
 impl MsgPing {
     pub fn new(from: AppOrProxyId, to: AppOrProxyId) -> Self {
         let mut nonce = [0;16];
-        openssl::rand::rand_bytes(&mut nonce)
+        let mut random_generator = ChaCha20Rng::from_entropy();
+        random_generator.try_fill_bytes(&mut nonce)
             .expect("Critical Error: Failed to generate random byte array.");
         MsgPing { id: MsgId::new(), from, to: vec![to], nonce, metadata: json!(null) }
     }
