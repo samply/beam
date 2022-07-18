@@ -33,17 +33,17 @@ pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
         }
     }
     fn str_has_type(value: &str) -> Result<BeamIdType,SamplyBeamError> {
-        let domain = BROKER_ID.get();
-        debug_assert!(domain.is_some(), "BeamId::str_has_type() called but broker_id not initialized");
-        let domain = domain.unwrap();
-        let mut split = value.split('.').rev();
+        let broker_id = BROKER_ID.get();
+        debug_assert!(broker_id.is_some(), "BeamId::str_has_type() called but broker_id not initialized");
+        let broker_id = broker_id.unwrap();
         // Broker
-        let part = split.next();
-        if part.is_none() || part.unwrap() != domain {
-            return Err(SamplyBeamError::InvalidBeamId(format!("Beam ID ends with {} but must end with {}", part.unwrap(), domain)));
+        let rest = value.strip_suffix(broker_id.as_str());
+        if rest.is_none() {
+            return Err(SamplyBeamError::InvalidBeamId(format!("Beam ID must end with {}", broker_id)));
         }
-        let part = split.next();
-        if part.is_none() {
+        let mut split = rest.unwrap().split('.').rev();
+        let part = split.nth(1);
+        if part.is_none() || part.unwrap().is_empty() {
             return Ok(BeamIdType::BrokerId);
         }
         check_valid_id_part(part.unwrap())?;
@@ -316,4 +316,20 @@ pub fn app_to_broker_id(app_id: &str) -> Result<String,SamplyBeamError> {
         shortened.replace_range(..first_dot+1, "");
     }
     Ok(shortened)
+}
+
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    use super::*;
+
+    #[test]
+    fn test_str_has_type() {
+        assert!(BROKER_ID.set("broker.samply.de".to_string()).is_ok());
+        assert_eq!(BrokerId::str_has_type("broker.samply.de").unwrap(), BeamIdType::BrokerId);
+        assert_eq!(BrokerId::str_has_type("proxy23.broker.samply.de").unwrap(), BeamIdType::ProxyId);
+        assert_eq!(BrokerId::str_has_type("app12.proxy23.broker.samply.de").unwrap(), BeamIdType::AppId);
+        assert!(BrokerId::str_has_type("roker.samply.de").is_err());
+        assert!(BrokerId::str_has_type("moreString.app12.proxy23.broker.samply.de").is_err());
+    }
 }
