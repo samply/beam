@@ -158,7 +158,13 @@ async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, bl
 struct TaskFilter {
     from: Option<AppOrProxyId>,
     to: Option<AppOrProxyId>,
-    unanswered: Option<bool>,
+    filter: Option<FilterParam>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum FilterParam {
+    Todo
 }
 
 /// GET /v1/tasks
@@ -170,18 +176,22 @@ async fn get_tasks(
     Extension(state): Extension<State>,
 ) -> Result<(StatusCode, impl IntoResponse),(StatusCode, impl IntoResponse)> {
     let from = taskfilter.from;
-    let to = taskfilter.to;
+    let mut to = taskfilter.to;
+    let unanswered_by = match taskfilter.filter {
+        Some(FilterParam::Todo) => {
+            if to.is_none() {
+                to = Some(msg.get_from().clone());
+            }
+            Some(msg.get_from().clone())
+        },
+        None => None,
+    };
     if from.is_none() && to.is_none() {
         return Err((StatusCode::BAD_REQUEST, "Please supply either \"from\" or \"to\" query parameter."));
     }
     debug!(?from);
     debug!(?to);
     debug!(?msg);
-    let unanswered_by = if taskfilter.unanswered.is_some() && taskfilter.unanswered.unwrap() && to.is_some() {
-        Some(to.clone().unwrap())
-    } else {
-        None
-    };
     if (from.is_some() && *from.as_ref().unwrap() != msg.msg.from) 
     || (to.is_some() && *to.as_ref().unwrap() != msg.msg.from) { // Rewrite in Rust 1.64: https://github.com/rust-lang/rust/pull/94927
         return Err((StatusCode::UNAUTHORIZED, "You can only list messages created by you (from) or directed to you (to)."));

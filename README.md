@@ -230,5 +230,6 @@ date: Mon, 27 Jun 2022 14:26:45 GMT
 - [ ] End-to-End encryption
 - [X] Docker deployment packages: CI/CD
 - [ ] Docker deployment packages: Documentation
+- [X] Broker-side filtering using pre-defined criteria
 - [ ] Broker-side filtering of the unencrypted fields with JSON queries
 - [ ] Integration of OAuth2 (in discussion)
