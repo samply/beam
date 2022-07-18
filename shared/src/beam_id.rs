@@ -306,12 +306,14 @@ impl<'de> Visitor<'de> for AppOrProxyIdVisitor {
     }
 }
 
-pub fn app_to_broker_id(app_id: &str) -> String {
+pub fn app_to_broker_id(app_id: &str) -> Result<String,SamplyBeamError> {
     let mut shortened = app_id.to_string();
     // cut off text until second '.'
     for _ in 1..=2 {
-        let first_dot = shortened.find('.').unwrap(); // TODO
+        let first_dot = 
+            shortened.find('.')
+            .ok_or_else(|| SamplyBeamError::InvalidBeamId(format!("{app_id} is not a valid AppId. An AppId has the form <app>.<proxy>.<broker>, see documentation.")))?;
         shortened.replace_range(..first_dot+1, "");
     }
-    shortened
+    Ok(shortened)
 }
