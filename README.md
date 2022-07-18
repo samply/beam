@@ -101,7 +101,7 @@ A succeeded result for the above task:
     "app7.proxy-hd.broker-project1.samply.de"
   ],
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
-  "result": {
+  "status": {
     "succeeded": "Successfully quenched 1.43e14 flux pulse devices"
   },
   "metadata": ["Arbitrary", "types", "are", "possible"]
@@ -117,7 +117,7 @@ A failed task:
     "app7.proxy-hd.broker-project1.samply.de"
   ],
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
-  "result": {
+  "status": {
     "permfailed": "Unable to decrypt quantum state"
   },
   "metadata": {
@@ -126,12 +126,12 @@ A failed task:
 }
 ```
 
-- `id`: UUID identifying the result. Note that when the result is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Callers must check the reply's `Location` header for the actual ID.
+- `id`: UUID identifying the result. Note that when the result is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Currently, since there can be only 0..1 results per client (= `from` field), a result's URL has the form `/v1/tasks/<task_id>/results/<id_in_from_field>` and the `id` field is only used internally, e.g. for filtering. However, for future compatibility, callers must check the reply's `Location` header for the actual URL to the task.
 - `from`: BeamID identifying the client submitting this result. This needs to match an entry the `to` field in the task.
 - `to`: BeamIDs the intended recipients of the result. Used for encrypted payloads.
 - `task`: UUID identifying the task this result belongs to.
-- `result`: Defines status of this work result. Possible values `unclaimed`, `tempfailed(body)`, `permfailed(body)`, `succeeded(body)`.
-- `result.body`: Either carries the actual result payload of the task (`succeeded`) or an error message.
+- `status`: Defines status of this work result. Possible values `claimed`, `tempfailed(body)`, `permfailed(body)`, `succeeded(body)`. It is up to the application how these statuses are used. For example, some application might require workers to acknowledge the receipt of tasks by setting `status=claimed`, whereas others have only short-running tasks and skip this step.
+- `status.body`: Either carries the actual result payload of the task (`succeeded`) or an error message.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Task](#task)) and is not encrypted.
 
 ## API
