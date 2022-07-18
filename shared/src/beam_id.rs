@@ -40,7 +40,7 @@ pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
         // Broker
         let part = split.next();
         if part.is_none() || part.unwrap() != domain {
-            return Err(SamplyBeamError::InvalidBeamId(format!("Beam ID must end with {domain}")));
+            return Err(SamplyBeamError::InvalidBeamId(format!("Beam ID ends with {} but must end with {}", part.unwrap(), domain)));
         }
         let part = split.next();
         if part.is_none() {
