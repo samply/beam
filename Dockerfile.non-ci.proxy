@@ -1,7 +1,6 @@
 FROM rust:bullseye AS builder
 WORKDIR /usr/src/app
-COPY . .
- 
+COPY . . 
 RUN cargo build --bin proxy --release
 
 FROM gcr.io/distroless/cc
