@@ -29,7 +29,7 @@ jobs:
       matrix:
         arch:
           - amd64
-          - arm64
+#          - arm64
 
     steps:
       - name: Set up QEMU
@@ -84,7 +84,7 @@ jobs:
 #        PROFILE=${{ env.PROFILE }}
 #        COMPONENT=broker
       # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
-      # build-platforms: "linux/amd64,linux/arm64"
+      build-platforms: "linux/amd64"
       # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
       artifact-name: '*'
     # This passes the secrets from calling workflow to the called workflow
@@ -113,7 +113,7 @@ jobs:
 #        PROFILE=${{ env.PROFILE }}
 #        COMPONENT=broker
       # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
-      # build-platforms: "linux/amd64,linux/arm64"
+      build-platforms: "linux/amd64"
       # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
       artifact-name: '*'
     # This passes the secrets from calling workflow to the called workflow
