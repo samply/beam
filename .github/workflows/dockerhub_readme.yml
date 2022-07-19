@@ -1,0 +1,27 @@
+name: Docker Hub Readme
+on:
+  push:
+    branches:
+      - main
+jobs:
+  PushContainerReadme:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        component:
+          - proxy
+          - broker
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Sync Readme
+        uses: lablans/sync-dockerhub-readme@feature/replace-patterns
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD_REQUIRED_FOR_README_SYNC }}
+          repository: ${{ github.repository }}-${{ matrix.component }}
+          readme: "./README.md"
+          replace_pattern: "](./"
+          replace_with: "](${{ github.server_url }}/${{ github.repository }}/raw/${{ github.ref_name }}/"

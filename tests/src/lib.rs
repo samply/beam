@@ -17,6 +17,7 @@ mod tests {
     const PROXY_URL: &str = "http://localhost:8081";
     const PROXY_ID_SHORT: &str = "proxy23";
     const APP_ID_SHORT: &str = "app1";
+    const APP_KEY: &str = "MySecret";
     const VAULT_BASE: &str = "http://localhost:8200";
     const VAULT_HEALTH: &str = "http://localhost:8200/v1/sys/health";
     const PROXY_HEALTH: &str = "http://localhost:8081/v1/health";
@@ -25,7 +26,11 @@ mod tests {
     // const CTX_VAULT: Context = Context::new().with_port(8200);
 
     #[dynamic]
-    static BROKER_ID: String = Url::try_from(BROKER_URL).unwrap().host_str().unwrap().to_string();
+    static BROKER_ID: String = {
+        let id = Url::try_from(BROKER_URL).unwrap().host_str().unwrap().to_string();
+        BrokerId::set_broker_id(id.clone());
+        id
+    };
     #[dynamic]
     static PROXY_ID: String = format!("{PROXY_ID_SHORT}.{}", BROKER_ID.as_str());
     #[dynamic(lazy)]
@@ -42,7 +47,7 @@ mod tests {
         a.push_str(APP_ID_SHORT);
         a.push('.');
         a.push_str(PROXY_ID.as_str());
-        a.push_str(" MySecret");
+        a.push_str(&format!(" {}", APP_KEY));
         a
     };
 
@@ -71,7 +76,10 @@ mod tests {
                         None,),
                     ("proxy", 
                         vec!("--broker-url", BROKER_URL, "--proxy-id", PROXY_ID.as_str(), "--pki-address", VAULT_BASE, "--pki-apikey-file", "pki_apikey.secret", "--privkey-file", pem_file),
-                        HashMap::from([(config_proxy::APPKEY_PREFIX.to_string() + APP_ID_SHORT, "MySecret")]),
+                        HashMap::from([
+                            (format!("{}_0_ID", config_proxy::APP_PREFIX), APP_ID_SHORT),
+                            (format!("{}_0_KEY", config_proxy::APP_PREFIX), APP_KEY),
+                        ]),
                         Some(pem_file),
                         Some(PROXY_HEALTH),
                         None)

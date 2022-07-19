@@ -1,10 +1,13 @@
-use std::{ops::Deref, fmt::Display, hash::Hash};
+use std::{ops::Deref, fmt::Display, hash::Hash, str::FromStr};
 
 use serde::{Serialize, Deserialize, de::Visitor};
+use once_cell::sync::OnceCell;
 
 use crate::{errors::SamplyBeamError, config};
 
-#[derive(PartialEq)]
+static BROKER_ID: OnceCell<String> = OnceCell::new();
+
+#[derive(PartialEq,Debug)]
 pub enum BeamIdType {
     AppId,
     ProxyId,
@@ -23,16 +26,24 @@ impl Display for BeamIdType {
 }
 
 pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
-    fn str_has_type(value: &str) -> Result<BeamIdType,SamplyBeamError> {
-        let domain = &config::CONFIG_SHARED.broker_domain;
-        let mut split = value.split('.').rev();
-        // Broker
-        let part = split.next();
-        if part.is_none() || part.unwrap() != domain {
-            return Err(SamplyBeamError::InvalidBeamId(format!("Beam ID must end with {domain}")));
+    fn set_broker_id(domain: String) {
+        let res = BROKER_ID.set(domain.clone());
+        if let Err(value) = res {
+            assert_eq!(domain, value, "Tried to initialize broker_id with two different values");
         }
-        let part = split.next();
-        if part.is_none() {
+    }
+    fn str_has_type(value: &str) -> Result<BeamIdType,SamplyBeamError> {
+        let broker_id = BROKER_ID.get();
+        debug_assert!(broker_id.is_some(), "BeamId::str_has_type() called but broker_id not initialized");
+        let broker_id = broker_id.unwrap();
+        // Broker
+        let rest = value.strip_suffix(broker_id.as_str());
+        if rest.is_none() {
+            return Err(SamplyBeamError::InvalidBeamId(format!("Beam ID must end with {}", broker_id)));
+        }
+        let mut split = rest.unwrap().split('.').rev();
+        let part = split.nth(1);
+        if part.is_none() || part.unwrap().is_empty() {
             return Ok(BeamIdType::BrokerId);
         }
         check_valid_id_part(part.unwrap())?;
@@ -131,6 +142,17 @@ impl BeamId for BrokerId {
     }
 }
 
+impl AppId {
+    pub fn proxy_id(&self) -> ProxyId {
+        // just cut off text until first '.'
+        let first_dot = self.0.find('.').unwrap(); // always exists in an AppId
+        let mut shortened = self.0.clone();
+        shortened.replace_range(..first_dot+1, "");
+        assert_eq!(ProxyId::str_has_type(&shortened).unwrap(), BeamIdType::ProxyId);
+        ProxyId(shortened)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AnyBeamId {
     AppId(AppId),
@@ -211,6 +233,14 @@ impl From<&AppId> for AppOrProxyId {
     }
 }
 
+impl FromStr for AppId {
+    type Err = SamplyBeamError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        AppId::new(s)
+    }
+}
+
 impl PartialEq<AppId> for AppOrProxyId {
     fn eq(&self, other: &AppId) -> bool {
         match self {
@@ -273,5 +303,33 @@ impl<'de> Visitor<'de> for AppOrProxyIdVisitor {
                 Err(serde::de::Error::custom("Expected AppOrProxyId, got BrokerId."))
             }
         }
+    }
+}
+
+pub fn app_to_broker_id(app_id: &str) -> Result<String,SamplyBeamError> {
+    let mut shortened = app_id.to_string();
+    // cut off text until second '.'
+    for _ in 1..=2 {
+        let first_dot = 
+            shortened.find('.')
+            .ok_or_else(|| SamplyBeamError::InvalidBeamId(format!("{app_id} is not a valid AppId. An AppId has the form <app>.<proxy>.<broker>, see documentation.")))?;
+        shortened.replace_range(..first_dot+1, "");
+    }
+    Ok(shortened)
+}
+
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    use super::*;
+
+    #[test]
+    fn test_str_has_type() {
+        assert!(BROKER_ID.set("broker.samply.de".to_string()).is_ok());
+        assert_eq!(BrokerId::str_has_type("broker.samply.de").unwrap(), BeamIdType::BrokerId);
+        assert_eq!(BrokerId::str_has_type("proxy23.broker.samply.de").unwrap(), BeamIdType::ProxyId);
+        assert_eq!(BrokerId::str_has_type("app12.proxy23.broker.samply.de").unwrap(), BeamIdType::AppId);
+        assert!(BrokerId::str_has_type("roker.samply.de").is_err());
+        assert!(BrokerId::str_has_type("moreString.app12.proxy23.broker.samply.de").is_err());
     }
 }

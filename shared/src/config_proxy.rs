@@ -7,7 +7,7 @@ use hyper::Uri;
 use serde::Deserialize;
 use tracing::{info, debug};
 
-use crate::{errors::SamplyBeamError, beam_id::{BeamId, ProxyId, AppId}};
+use crate::{errors::SamplyBeamError, beam_id::{BeamId, ProxyId, AppId, self, BrokerId}};
 
 #[derive(Clone,Debug)]
 pub struct Config {
@@ -22,9 +22,8 @@ pub struct Config {
 
 pub type ApiKey = String;
 
-/// Settings for Samply.Beam (Proxy)
 #[derive(Parser,Debug)]
-#[clap(author, version, about, long_about = None, arg_required_else_help(true))]
+#[clap(name("Samply.Beam.Proxy"), version, arg_required_else_help(true))]
 pub struct CliArgs {
     /// Local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8081").unwrap())]
@@ -63,34 +62,39 @@ pub struct CliArgs {
     test_threads: Option<String>
 }
 
-pub const APPKEY_PREFIX: &str = "APPKEY_";
+pub const APP_PREFIX: &str = "APP";
 
+/// Parses API-Keys from the environment, expecting:
+/// APP_0_ID=app1
+/// APP_0_KEY=App1Secret
+/// APP_1_ID=app2
+/// APP_1_KEY=App2Secret
 fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBeamError>{
-    std::env::vars()
-        .filter_map(|(k,v)| {
-            k.strip_prefix(APPKEY_PREFIX)
-                .map(|stripped| (stripped.to_owned(), v))
-        })
-        .map(|(stripped,v)| {
-            let app_id = format!("{}.{}", stripped, proxy_id);
-            let app_id = AppId::new(&app_id)
-                .map_err(|_| SamplyBeamError::ConfigurationFailed(format!("Faulty API key definition: Resulting App ID  {} is invalid.", app_id)))?;
-            if v.is_empty() {
+    let vars = std::env::vars().collect::<HashMap<String,ApiKey>>();
+    let mut api_keys = HashMap::new();
+    let mut i = 0;
+    while let Some(app_id) = vars.get(&format!("{APP_PREFIX}_{i}_ID")) {
+        if let Some(api_key) = vars.get(&format!("{APP_PREFIX}_{i}_KEY")) {
+            let app_id = AppId::new(&format!("{app_id}.{proxy_id}"))?;
+            if api_key.is_empty() {
                 return Err(SamplyBeamError::ConfigurationFailed(format!("Unable to assign empty API key for client {}", app_id)));
             }
-            Ok((app_id, v))
-        })
-        .collect()
+            api_keys.insert(app_id, api_key.clone());
+        }
+        i += 1;
+    }
+    Ok(api_keys)
 }
 
 impl crate::config::Config for Config {
     fn load() -> Result<Config,SamplyBeamError> {
         let cli_args = CliArgs::parse();
+        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
         let proxy_id = ProxyId::new(&cli_args.proxy_id)
             .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Invalid Beam ID \"{}\" supplied: {}", cli_args.proxy_id, e)))?;
         let api_keys = parse_apikeys(&proxy_id)?;
         if api_keys.is_empty() {
-            return Err(SamplyBeamError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {}<clientname>=<key>", APPKEY_PREFIX)));
+            return Err(SamplyBeamError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {0}_0_ID=<clientname>, {0}_0_KEY=<key>", APP_PREFIX)));
         }
         let config = Config {
             broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
@@ -117,4 +121,27 @@ fn uri_to_host_header(uri: &Uri) -> Result<HeaderValue,SamplyBeamError> {
     let host_header: HeaderValue = HeaderValue::from_str(&host_header)
         .map_err(|_| SamplyBeamError::WrongBrokerUri("Unable to parse broker URL"))?;
     Ok(host_header)
+}
+
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    use super::*;
+
+    #[test]
+    fn test_parse_apikeys() {
+        let apps = [
+            ("app1", "App1Secret"),
+            ("app2", "App2Secret"),
+            ("app3", "App3Secret"),
+        ];
+        for (i, (app, key)) in apps.iter().enumerate() {
+            std::env::set_var(format!("APP_{i}_ID"), app);
+            std::env::set_var(format!("APP_{i}_KEY"), key);
+        }
+        const BROKER_ID: &str = "broker.samply.de";
+        BrokerId::set_broker_id(BROKER_ID.to_string());
+        let parsed = parse_apikeys(&ProxyId::new(&format!("proxy.{BROKER_ID}")).unwrap()).unwrap();
+        assert_eq!(parsed.len(), apps.len());
+    }
 }

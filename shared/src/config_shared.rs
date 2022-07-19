@@ -1,4 +1,4 @@
-use crate::{SamplyBeamError, crypto};
+use crate::{SamplyBeamError, crypto, beam_id::{BrokerId, BeamId}};
 use std::{path::PathBuf, rc::Rc, sync::Arc, fs::read_to_string};
 use hyper::Uri;
 use clap::Parser;
@@ -6,10 +6,9 @@ use jwt_simple::prelude::RS256KeyPair;
 use rsa::{RsaPrivateKey, pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
 use static_init::dynamic;
 
-/// Settings for Samply.Beam (Shared)
 #[derive(Parser,Debug)]
-#[clap(author, version, about, long_about = None)]
-struct VaultConfig {
+#[clap(name("Samply.Beam (shared library)"), version, arg_required_else_help(true))]
+struct CliArgs {
     /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
     #[clap(long, env, value_parser)]
     pub http_proxy: Option<Uri>,
@@ -62,31 +61,32 @@ pub(crate) struct Config {
 
 impl crate::config::Config for Config {
     fn load() -> Result<Self,SamplyBeamError> {
-        let vc = VaultConfig::parse();
+        let cli_args = CliArgs::parse();
+        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
 
         // Private key
-        let privkey_pem = read_to_string(&vc.privkey_file)
-            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to load private key from file {}: {}", vc.privkey_file.to_string_lossy(), e)))?
+        let privkey_pem = read_to_string(&cli_args.privkey_file)
+            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to load private key from file {}: {}", cli_args.privkey_file.to_string_lossy(), e)))?
             .trim().to_string();
         let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
             .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
             .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
         let mut privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem)
             .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
-        if let Some(proxy_id) = vc.proxy_id {
+        if let Some(proxy_id) = cli_args.proxy_id {
             privkey_rs256 = privkey_rs256.with_key_id(&proxy_id);
         }
     
         // API Key
-        let pki_apikey = read_to_string(vc.pki_apikey_file)
+        let pki_apikey = read_to_string(cli_args.pki_apikey_file)
             .map_err(|_| SamplyBeamError::ConfigurationFailed("Failed to read PKI token.".into()))?
             .trim().to_string();
 
-        let broker_domain = vc.broker_url.host();
+        let broker_domain = cli_args.broker_url.host();
         if false {
             todo!() // TODO Tobias: Check if matches certificate, and fail
         }
         let broker_domain = broker_domain.unwrap().to_string();
-        Ok(Config { pki_address: vc.pki_address, pki_realm: vc.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy: vc.http_proxy, broker_domain })
+        Ok(Config { pki_address: cli_args.pki_address, pki_realm: cli_args.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy: cli_args.http_proxy, broker_domain })
     }    
 }

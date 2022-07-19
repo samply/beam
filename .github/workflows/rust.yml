@@ -3,33 +3,120 @@ name: Rust
 on:
   push:
   pull_request:
+  schedule:
+    # Fetch new base image updates every night at 1am
+    - cron: '0 1 * * *'
 
 env:
   CARGO_TERM_COLOR: always
+  PROFILE: release
 
 jobs:
-  build:
-
+  pre-check:
+    name: Security, License Check
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
-    - uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-    - uses: Swatinem/rust-cache@v1
-    - name: Cargo (build)
-      run: cargo build --release
-    - name: Cargo (run tests)
-      run: tests/scripts/cargo-test.sh
-    - name: Upload Artifact (broker)
-      uses: actions/upload-artifact@v3
-      with:
-        name: broker
-        path: target/release/broker
-    - name: Upload Artifact (proxy)
-      uses: actions/upload-artifact@v3
-      with:
-        name: proxy
-        path: target/release/proxy
+    - uses: EmbarkStudios/cargo-deny-action@v1
+
+  build-rust:
+    name: Build (Rust)
+#    needs: [ pre-check ]
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        arch:
+          - amd64
+#          - arm64
+
+    steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+      - uses: actions/checkout@v3
+      - uses: actions/cache@v3
+        with:
+          path: /tmp/cache
+          key: ${{ runner.os }}-${{ matrix.arch }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+           ${{ runner.os }}-${{ matrix.arch }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.toml') }}-
+           ${{ runner.os }}-${{ matrix.arch }}-${{ env.PROFILE }}-
+      - name: Build (${{ matrix.arch }})
+        run: |
+          if [ "$PROFILE" != "debug" ]; then args="--profile $PROFILE"; fi
+          mkdir -p /tmp/cache/target /tmp/cache/cargo/registry
+          docker run --user $(id -u) --platform ${{ matrix.arch }} --rm -v $(pwd):/app -v /tmp/cache/target:/app/target -v /tmp/cache/cargo/registry:/usr/local/cargo/registry -w /app rust cargo build $args
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: binaries-${{ matrix.arch }}
+          path: |
+            /tmp/cache/target/${{ env.PROFILE }}/proxy
+            /tmp/cache/target/${{ env.PROFILE }}/broker
+
+  test:
+    name: Run tests
+    needs: [ build-rust ]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Not implemented
+        run: echo "This will be implemented soon"
+
+  docker-broker:
+    needs: [ build-rust, pre-check, test ]
+    # This workflow defines how a maven package is built, tested and published.
+    # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
+    uses: samply/github-workflows/.github/workflows/docker-ci.yml@get-all-artifacts
+    with:
+      # The Docker Hub Repository you want eventually push to, e.g samply/share-client
+      image-name: "samply/beam-broker"
+      # Define special prefixes for docker tags. They will prefix each images tag.
+      # image-tag-prefix: "foo"
+      # Define the build context of your image, typically default '.' will be enough
+      # build-context: '.'
+      # Define the Dockerfile of your image, typically default './Dockerfile' will be enough
+      build-file: './Dockerfile.ci.broker'
+      # NOTE: This doesn't work currently
+      # A list of build arguments, passed to the docker build
+#      build-args: |
+#        PROFILE=${{ env.PROFILE }}
+#        COMPONENT=broker
+      # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
+      build-platforms: "linux/amd64"
+      # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
+      artifact-name: '*'
+    # This passes the secrets from calling workflow to the called workflow
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  # NOTE: Repetition currently necessary. Reusable workflows are not runable with strategy matrix. See: https://stackoverflow.com/a/70173578, workaround could be later implemented: https://github.community/t/reusable-workflow-with-strategy-matrix/205676
+  docker-proxy:
+    needs: [ build-rust, pre-check, test ]
+    # This workflow defines how a maven package is built, tested and published.
+    # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
+    uses: samply/github-workflows/.github/workflows/docker-ci.yml@get-all-artifacts
+    with:
+      # The Docker Hub Repository you want eventually push to, e.g samply/share-client
+      image-name: "samply/beam-proxy"
+      # Define special prefixes for docker tags. They will prefix each images tag.
+      # image-tag-prefix: "foo"
+      # Define the build context of your image, typically default '.' will be enough
+      # build-context: '.'
+      # Define the Dockerfile of your image, typically default './Dockerfile' will be enough
+      build-file: './Dockerfile.ci.proxy'
+      # NOTE: This doesn't work currently
+      # A list of build arguments, passed to the docker build
+#      build-args: |
+#        PROFILE=${{ env.PROFILE }}
+#        COMPONENT=broker
+      # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
+      build-platforms: "linux/amd64"
+      # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
+      artifact-name: '*'
+    # This passes the secrets from calling workflow to the called workflow
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
