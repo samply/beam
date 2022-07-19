@@ -22,7 +22,6 @@ jobs:
 
   build-rust:
     name: Build (Rust)
-#    needs: [ pre-check ]
     runs-on: ubuntu-latest
 
     strategy:
@@ -54,6 +53,36 @@ jobs:
           path: |
             /tmp/cache/target/${{ env.PROFILE }}/proxy
             /tmp/cache/target/${{ env.PROFILE }}/broker
+
+  bloat:
+    name: Watch Dependency Changes
+    runs-on: ubuntu-latest
+#    needs: [ build-rust ]
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - uses: actions/cache@v3
+        with:
+          path: /tmp/cache
+          key: ${{ runner.os }}-amd64-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+           ${{ runner.os }}-amd64-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.toml') }}-
+           ${{ runner.os }}-amd64-${{ env.PROFILE }}-
+      - run: mv /tmp/cache/target .
+#     Not helping because we're building a different profile.
+#      - uses: actions/download-artifact@v3
+#        with:
+#          name: binaries-amd64
+#          path: artifacts
+#      - run: mv -v artifacts/* target/${{ env.PROFILE }}
+      - uses: orf/cargo-bloat-action@v1
+        with:
+          bloat_args: --profile bloat
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   test:
     name: Run tests
