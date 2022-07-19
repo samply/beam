@@ -56,7 +56,54 @@ In practice,
 This design ensures that each component, mainly applications but Proxies and Brokers as well, can be addressed in tasks. Should the need arise in the future, this network could be federated by federating the brokers (not unsimilar to E-Mail/SMTP, XMPP, etc.)
 
 ## Getting started
-Running the `broker` binary will open a central broker instance listening on `0.0.0.0:8080` (default, see CLI args for options). The instance can be queried via the API (see next section).
+The following paragraph simulates the creation and the completion of a task
+using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
+connected via a central broker. Each party runs an application, called `app1`.
+We will simulate this application.
+
+The used BeamIds are the following:
+
+| Sysem          | BeamID                         |
+|----------------|--------------------------------|
+| Broker         | broker.example.de              |
+| Proxy1         | proxy1.broker.example.de       |
+| App1, Party 1  | app1.proxy1.broker.example.de  |
+| Proxy2         | proxy2.broker.example.de       |
+| App1, Party 2  | app1.proxy2.broker.example.de  |
+
+In the example, `app1` uses the ApiKey `App1Key` for both parties.
+
+### Creating a task
+`app1` at party 1 creates a new task at `proxy1.broker.example.de`:
+```
+curl -k -X POST -v -d "" -H "Authorization: ApiKey app1.proxy1.broker.example.de App1Key" -H "Content-Type: application/json" https://proxy1.broker.example.de/v1/tasks
+```
+This results in the reply:
+```
+HTTP/1.1 201 Created
+location: /tasks/b999cf15-3c31-408f-a3e6-a47502308799
+content-length: 0
+date: Mon, 27 Jun 2022 13:58:35 GMT
+```
+where the `location` header field is the id of the newly created task.
+
+### Listening for relevant tasks
+`app1` at Party 2 is now able to fetch all tasks adressed to them, namely the created task:
+```
+curl -k -X GET -v -H "Authorization: ApiKey app1.proxy2.broker.example.de App1Key" https://proxy2.broker.example.de/v1/tasks&to=app1.proxy2.broker.example.de
+```
+
+TODO: Acknowledge and `PUT` status=processing result.
+
+### Returning a Result
+With the task at hand, party 2 processes the task. No doubt, important work is
+done here. After succeeding, `app1` at party 2 wants to return the frout of its
+labour to party 1 and creates a result:
+
+TODO: PUT result
+
+### Waiting for tasks to complete
+TODO Long-Polling
 
 ## Data objects (JSON)
 ### Task
