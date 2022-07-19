@@ -78,20 +78,20 @@ impl Display for MyUuid {
 
 #[derive(PartialEq, Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase")]
-pub enum WorkResult {
-    Unclaimed,
+pub enum WorkStatus {
+    Claimed,
     TempFailed(TaskResponse),
     PermFailed(TaskResponse),
     Succeeded(TaskResponse),
 }
 
-impl Display for WorkResult {
+impl Display for WorkStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = match self {
-            WorkResult::Unclaimed => String::from("Unclaimed"),
-            WorkResult::TempFailed(e) => format!("Temporary failure: {e}"),
-            WorkResult::PermFailed(e) => format!("Permanent failure: {e}"),
-            WorkResult::Succeeded(e) => format!("Success: {e}"),
+            WorkStatus::Claimed => String::from("Claimed"),
+            WorkStatus::TempFailed(e) => format!("Temporary failure: {e}"),
+            WorkStatus::PermFailed(e) => format!("Permanent failure: {e}"),
+            WorkStatus::Succeeded(e) => format!("Success: {e}"),
         };
         f.write_str(&str)
     }
@@ -285,10 +285,10 @@ pub struct EncryptedMsgTaskRequest {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskResult {
     pub id: MsgId,
-    pub from: AppOrProxyId, // was: worker_id
+    pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub task: MsgId,
-    pub result: WorkResult,
+    pub status: WorkStatus,
     pub metadata: Value,
 }
 
