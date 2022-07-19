@@ -17,7 +17,8 @@ pub struct Config {
     pub pki_address: Uri,
     pub pki_realm: String,
     pub proxy_id: ProxyId,
-    pub api_keys: HashMap<AppId,ApiKey>
+    pub api_keys: HashMap<AppId,ApiKey>,
+    pub http_proxy: Option<Uri>
 }
 
 pub type ApiKey = String;
@@ -103,7 +104,8 @@ impl crate::config::Config for Config {
             bind_addr: cli_args.bind_addr,
             pki_realm: cli_args.pki_realm,
             proxy_id,
-            api_keys
+            api_keys,
+            http_proxy: cli_args.http_proxy
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)
