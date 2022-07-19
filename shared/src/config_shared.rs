@@ -6,9 +6,8 @@ use jwt_simple::prelude::RS256KeyPair;
 use rsa::{RsaPrivateKey, pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
 use static_init::dynamic;
 
-/// Settings for Samply.Beam (Shared)
 #[derive(Parser,Debug)]
-#[clap(author, version, about, long_about = None)]
+#[clap(name("Samply.Beam (shared library)"), version, arg_required_else_help(true))]
 struct CliArgs {
     /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
     #[clap(long, env, value_parser)]

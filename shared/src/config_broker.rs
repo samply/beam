@@ -7,9 +7,8 @@ use crate::{errors::SamplyBeamError, beam_id::{BrokerId, BeamId}};
 use tracing::info;
 use std::str::FromStr;
 
-/// Settings for Samply.Beam (Broker)
 #[derive(Parser,Debug)]
-#[clap(author, version, about, long_about = None, arg_required_else_help(true))]
+#[clap(name("Samply.Beam.Broker"), version, arg_required_else_help(true))]
 struct CliArgs {
     /// Local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8080").unwrap())]
