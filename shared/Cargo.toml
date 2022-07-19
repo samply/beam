@@ -22,7 +22,7 @@ axum = "0.5.9"
 hyper = { version = "0.14.19", features = ["full"] }
 
 # HTTP client with proxy support
-#hyper-tls = "0.5.0"
+hyper-tls = "0.5.0"
 hyper-proxy = "0.9.1"
 
 # Logging
