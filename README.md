@@ -81,7 +81,7 @@ Tasks are represented in the following structure:
 }
 ```
 
-- `id`: UUID to identify the task. Note that when the task is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Callers must check the reply's `Location` header for the actual ID.
+- `id`: UUID to identify the task. Note that when the task is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Callers must assume the submission's `id` property is ignored and check the reply's `Location` header for the actual URL to the task.
 - `from`: BeamID of the submitting applications. Is automatically set by the Proxy according to the authentication info.
 - `to`: BeamIDs of *workers* allowed to retrieve the task and submit results.
 - `body`: Description of work to be done. Not interpreted by the Broker.
@@ -126,12 +126,12 @@ A failed task:
 }
 ```
 
-- `id`: UUID identifying the result. Note that when the result is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Currently, since there can be only 0..1 results per client (= `from` field), a result's URL has the form `/v1/tasks/<task_id>/results/<id_in_from_field>` and the `id` field is only used internally, e.g. for filtering. However, for future compatibility, callers must check the reply's `Location` header for the actual URL to the task.
+- `id`: UUID identifying the result. Note that when the result is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Currently, since there can be only 0..1 results per client (= `from` field), a result's URL has the form `/v1/tasks/<task_id>/results/<id_in_from_field>` and the `id` field is only used internally, e.g. for filtering. However, for future compatibility, Callers must assume the submission's `id` property is ignored and check the reply's `Location` header for the actual URL to the task.
 - `from`: BeamID identifying the client submitting this result. This needs to match an entry the `to` field in the task.
 - `to`: BeamIDs the intended recipients of the result. Used for encrypted payloads.
 - `task`: UUID identifying the task this result belongs to.
-- `status`: Defines status of this work result. Possible values `claimed`, `tempfailed(body)`, `permfailed(body)`, `succeeded(body)`. It is up to the application how these statuses are used. For example, some application might require workers to acknowledge the receipt of tasks by setting `status=claimed`, whereas others have only short-running tasks and skip this step.
-- `status.body`: Either carries the actual result payload of the task (`succeeded`) or an error message.
+- `status`: Defines status of this work result. Possible values `claimed`, `tempfailed(<body>)`, `permfailed(<body>)`, `succeeded(<body>)`. It is up to the application how these statuses are used. For example, some application might require workers to acknowledge the receipt of tasks by setting `status=claimed`, whereas others have only short-running tasks and skip this step.
+- `status.body`: Required for `status`es listed above with `(<body>)`. Either carries the actual result payload of the task (`succeeded`) or an error message.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Task](#task)) and is not encrypted.
 
 ## API
@@ -234,5 +234,6 @@ date: Mon, 27 Jun 2022 14:26:45 GMT
 - [ ] End-to-End encryption
 - [X] Docker deployment packages: CI/CD
 - [ ] Docker deployment packages: Documentation
+- [X] Broker-side filtering using pre-defined criteria
 - [ ] Broker-side filtering of the unencrypted fields with JSON queries
 - [ ] Integration of OAuth2 (in discussion)
