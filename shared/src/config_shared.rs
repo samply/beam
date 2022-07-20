@@ -82,14 +82,14 @@ impl crate::config::Config for Config {
 
 fn load_crypto(cli_args: &CliArgs) -> Result<(RsaPrivateKey, RS256KeyPair), SamplyBeamError> {
     let privkey_pem = read_to_string(&cli_args.privkey_file)
-        .map_err(|e| SamplyBeamError::ConfigurationFailed(*format!("Unable to load private key from file {}: {}", cli_args.privkey_file.to_string_lossy(), e)))?
+        .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to load private key from file {}: {}", cli_args.privkey_file.to_string_lossy(), e)))?
         .trim().to_string();
     let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
         .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
         .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
     let mut privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem)
         .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
-    if let Some(proxy_id) = cli_args.proxy_id {
+    if let Some(proxy_id) = &cli_args.proxy_id {
         privkey_rs256 = privkey_rs256.with_key_id(&proxy_id);
     }
     Ok((privkey_rsa, privkey_rs256))
