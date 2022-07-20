@@ -1,5 +1,5 @@
 **/target/
 **/Cargo.lock
-pki/*
-!pki/pki
 artifacts/
+tests/viadocker/pki/*
+!tests/viadocker/pki/pki

@@ -6,8 +6,8 @@ cd $SD
 
 source example_json.sh
 
-export PROXY1_ID=${PROXY1_ID:-proxy1.broker1.localhost}
-export PROXY2_ID=${PROXY2_ID:-proxy2.broker1.localhost}
+export PROXY1_ID=${PROXY1_ID:-proxy1.broker}
+export PROXY2_ID=${PROXY2_ID:-proxy2.broker}
 export PROXY1_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
 export PROXY2_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
 export BROKER_ID=$(echo $PROXY1_ID | cut -d '.' -f 2-)
@@ -17,23 +17,43 @@ export APP_KEY=App1Secret
 
 export VAULT_TOKEN=$(echo $RANDOM | md5sum | head -c 20; echo;)
 
-function build() {
+export P1="http://localhost:8081" # for scripts
+export P2="http://localhost:8082" # for scripts
+
+function check_prereqs() {
+     set +e
+     if [[ "$(curl --version)" != *" libcurl/"* ]]; then
+          echo "curl not found -- please install curl >= 7.7.0 and put into PATH."
+          exit 1
+     fi
+     if [[ "$(jq --version)" != *"jq-"* ]]; then
+          echo "jq not found -- please install and put into PATH."
+          exit 1
+     fi
+     set -e
+}
+
+function build_rust() {
+    BACK=$(pwd)
     cd $SD/../..
     BUILD=$(cargo build --message-format=json)
     BROKER=$(echo $BUILD |jq -r 'select(.target.name == "broker")' | jq -r .executable)
     PROXY=$(echo $BUILD |jq -r 'select(.target.name == "proxy")' | jq -r .executable)
-
     mkdir -p artifacts/binaries-amd64
     rsync $BROKER $PROXY artifacts/binaries-amd64/
+    cd $BACK
+}
 
+function build_docker() {
+    BACK=$(pwd)
     cd $SD
-    docker-compose build
-    rm -rf ../../artifacts
+    docker-compose build --build-arg TARGETARCH=amd64
+    cd $BACK
 }
 
 function clean() {
     docker-compose down
-    rm -vf pki/*.pem pki/*.json
+    rm -f pki/*.pem pki/*.json pki/pki.secret
 }
 
 function start {
@@ -58,53 +78,48 @@ function clean {
     pki/pki clean
 }
 
+COL_NONE='\033[0m'
+COL_RED='\033[0;31m'
+COL_GREEN='\033[0;32m'
+COL_BLUE='\033[0;34m'
+
 function testing {
-    echo "TEST \"$@\""
+    echo -e "${COL_BLUE}TEST \"$@\"${COL_NONE}"
 }
 
 function fail {
-    echo "FAIL $@"
-    exit 1
+    JSON="$1"
+    shift
+    echo -e "${COL_RED}FAIL $@${COL_NONE}"
+    echo -e "Failed Response: $JSON"
+    (exit 1)
 }
 
 function success {
-    echo "  OK"
+    echo -e "  ${COL_GREEN}OK${COL_NONE}"
 }
 
 function curl_get {
-    curl -H "content-type: application/json" -H "Authorization: ApiKey $APP_0_ID.$PROXY_ID $APP_0_KEY" $@
+    BODY_FILE=$(mktemp)
+    JSON=$(curl -s -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID_SHORT.$PROXY1_ID $APP_KEY" -w %{json} -o $BODY_FILE $@)
+    BODY=$(cat $BODY_FILE | sed 's/\"/\\\"/g')
+    JSON=$(echo "$JSON" | jq ". + {\"body\": \"${BODY}\" }")
+    rm $BODY_FILE
+    echo "$JSON"
 }
-
-function curl_get_out {
-    out="$1"
-    shift
-    curl_get -s -w %{"$out"} "$@"
-}
-
-function curl_get_noout {
-    out="$1"
-    shift
-    curl_get_out "$out" -o /dev/null "$@"
-}
-
 
 function curl_post {
-    curl -H "content-type: application/json" -H "Authorization: ClientApiKey $APP_0_ID.$PROXY_ID $APP_0_KEY" -d @- $@
+    BODY_FILE=$(mktemp)
+    JSON=$(curl -s -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID_SHORT.$PROXY1_ID $APP_KEY" -d @- -w %{json} -o $BODY_FILE $@)
+    BODY=$(cat $BODY_FILE | sed 's/\"/\\\"/g')
+    JSON=$(echo "$JSON" | jq ". + {\"body\": \"${BODY}\" }")
+    rm $BODY_FILE
+    echo "$JSON"
 }
 
-function curl_post_out {
-    out="$1"
-    shift
-    curl_post -s -w %{"$out"} "$@"
-}
+export -f curl_get curl_post start stop clean testing fail success
 
-function curl_post_noout {
-    out="$1"
-    shift
-    curl_post_out "$out" -o /dev/null "$@"
-}
-
-export -f curl_get curl_get_out curl_get_noout curl_post curl_post_out curl_post_noout start stop clean testing fail success
+check_prereqs
 
 case "$1" in
   build)

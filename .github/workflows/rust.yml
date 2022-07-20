@@ -61,8 +61,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Not implemented
-        run: echo "This will be implemented soon"
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v3
+        with:
+          name: binaries-amd64
+          path: artifacts/binaries-amd64/
+      - run: ./tests/viadocker/test.sh ci
 
   docker-broker:
     needs: [ build-rust, pre-check, test ]

@@ -17,13 +17,15 @@ services:
       context: ../..
       dockerfile: Dockerfile.ci.broker
     ports:
-      - 8081:8080
+      - 8080:8080
     environment:
-      BROKER_URL: ${BROKER_URL}
+      BROKER_URL: http://broker:8080
+#      BROKER_URL: ${BROKER_URL}
       PKI_ADDRESS: http://vault:8200
       no_proxy: vault
       NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/dummy.pem
+      BIND_ADDR: 0.0.0.0:8080
     secrets:
       - pki.secret
       - dummy.pem
@@ -33,9 +35,10 @@ services:
       context: ../..
       dockerfile: Dockerfile.ci.proxy
     ports:
-      - 8082:8081
+      - 8081:8081
     environment:
-      BROKER_URL: ${BROKER_URL}
+      BROKER_URL: http://broker:8080
+#      BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY1_ID}
       PKI_ADDRESS: http://vault:8200
       APP_0_ID: ${APP_ID_SHORT}
@@ -43,6 +46,7 @@ services:
       no_proxy: vault
       NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/proxy1.pem
+      BIND_ADDR: 0.0.0.0:8081
     secrets:
       - pki.secret
       - proxy1.pem
@@ -52,9 +56,10 @@ services:
       context: ../..
       dockerfile: Dockerfile.ci.proxy
     ports:
-      - 8083:8081
+      - 8082:8082
     environment:
-      BROKER_URL: ${BROKER_URL}
+      BROKER_URL: http://broker:8080
+#      BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY2_ID}
       PKI_ADDRESS: http://vault:8200
       APP_0_ID: ${APP_ID_SHORT}
@@ -63,6 +68,7 @@ services:
       NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       VAULT_TOKEN: ${VAULT_TOKEN}
+      BIND_ADDR: 0.0.0.0:8082
     secrets:
       - pki.secret
       - proxy2.pem
