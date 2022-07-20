@@ -2,7 +2,7 @@ use std::time::SystemTime;
 
 use axum::{Router, Extension, routing::any, response::Response, http::HeaderValue};
 use httpdate::fmt_http_date;
-use hyper::{Client, client::HttpConnector, StatusCode, Request, Body, Uri, body, header};
+use hyper::{Client, client::{HttpConnector, connect::Connect}, StatusCode, Request, Body, Uri, body, header};
 use hyper_proxy::ProxyConnector;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -11,7 +11,7 @@ use tracing::{warn, debug, error};
 
 use crate::auth::AuthenticatedApp;
 
-pub(crate) fn router(client: &Client<ProxyConnector<HttpConnector>>) -> Router {
+pub(crate) fn router(client: &Client<impl Connect + Clone + Send + Sync + 'static>) -> Router {
     let config = config::CONFIG_PROXY.clone();
     Router::new()
         // We need both path variants so the server won't send us into a redirect loop (/tasks, /tasks/, ...)
