@@ -6,7 +6,7 @@ use tracing::{debug, info};
 
 use crate::{config, errors::SamplyBeamError, BeamId};
 
-pub fn build_hyper_client(proxy_uri: Option<Uri>) -> Result<Client<impl Connect + Clone + Send + Sync + 'static>, std::io::Error> {
+pub fn build_hyper_client(proxy_uri: Option<Uri>) -> Result<Client<ProxyConnector<HttpsConnector<HttpConnector>>>, std::io::Error> {
     let proxy = if let Some(proxy_uri) = proxy_uri {
         info!("Using proxy {}", proxy_uri);
         Proxy::new(Intercept::All, proxy_uri)

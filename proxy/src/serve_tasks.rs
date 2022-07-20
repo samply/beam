@@ -4,6 +4,7 @@ use axum::{Router, Extension, routing::any, response::Response, http::HeaderValu
 use httpdate::fmt_http_date;
 use hyper::{Client, client::{HttpConnector, connect::Connect}, StatusCode, Request, Body, Uri, body, header};
 use hyper_proxy::ProxyConnector;
+use hyper_tls::HttpsConnector;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use shared::{config, config_proxy, crypto_jwt, MsgTaskRequest, MsgTaskResult, MsgEmpty, Msg, MsgSigned, beam_id::AppId, MsgId};
@@ -11,7 +12,7 @@ use tracing::{warn, debug, error};
 
 use crate::auth::AuthenticatedApp;
 
-pub(crate) fn router(client: &Client<impl Connect + Clone + Send + Sync + 'static>) -> Router {
+pub(crate) fn router(client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Router {
     let config = config::CONFIG_PROXY.clone();
     Router::new()
         // We need both path variants so the server won't send us into a redirect loop (/tasks, /tasks/, ...)
@@ -28,7 +29,7 @@ const ERR_VALIDATION: (StatusCode, &str) = (StatusCode::BAD_GATEWAY, "Unable to 
 const ERR_FAKED_FROM: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "You are not authorized to send on behalf of this app.");
 
 async fn handler_tasks(
-    Extension(client): Extension<Client<ProxyConnector<HttpConnector>>>,
+    Extension(client): Extension<Client<ProxyConnector<HttpsConnector<HttpConnector>>>>,
     Extension(config): Extension<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
     req: Request<Body>,

@@ -46,7 +46,7 @@ pub(crate) fn router() -> Router {
 }
 
 async fn info(
-    // Extension(client): Extension<Client<HttpsConnector<HttpConnector>>>,
+    // Extension(client): Extension<Client<ProxyConnector<HttpsConnector<HttpConnector>>>>,
     // Extension(config): Extension<config_proxy::Config>,
     // req: Request<Body>,
     Extension(pki_info): Extension<PkiInfo>
