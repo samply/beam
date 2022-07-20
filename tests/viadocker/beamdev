@@ -1,0 +1,130 @@
+#!/bin/bash -e
+
+SD=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+cd $SD
+
+source example_json.sh
+
+export PROXY1_ID=${PROXY1_ID:-proxy1.broker1.localhost}
+export PROXY2_ID=${PROXY2_ID:-proxy2.broker1.localhost}
+export PROXY1_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
+export PROXY2_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
+export BROKER_ID=$(echo $PROXY1_ID | cut -d '.' -f 2-)
+export BROKER_URL="https://${BROKER_ID}"
+export APP_ID_SHORT=app1
+export APP_KEY=App1Secret
+
+export VAULT_TOKEN=$(echo $RANDOM | md5sum | head -c 20; echo;)
+
+function build() {
+    cd $SD/../..
+    BUILD=$(cargo build --message-format=json)
+    BROKER=$(echo $BUILD |jq -r 'select(.target.name == "broker")' | jq -r .executable)
+    PROXY=$(echo $BUILD |jq -r 'select(.target.name == "proxy")' | jq -r .executable)
+
+    mkdir -p artifacts/binaries-amd64
+    rsync $BROKER $PROXY artifacts/binaries-amd64/
+
+    cd $SD
+    docker-compose build
+    rm -rf ../../artifacts
+}
+
+function clean() {
+    docker-compose down
+    rm -vf pki/*.pem pki/*.json
+}
+
+function start {
+    clean
+    pki/pki devsetup
+    echo "$VAULT_TOKEN" > ./pki/pki.secret
+    docker-compose up --abort-on-container-exit
+}
+
+function start_bg {
+    clean
+    pki/pki devsetup
+    echo "$VAULT_TOKEN" > ./pki/pki.secret
+    docker-compose up -d
+}
+
+function stop {
+    clean
+}
+
+function clean {
+    pki/pki clean
+}
+
+function testing {
+    echo "TEST \"$@\""
+}
+
+function fail {
+    echo "FAIL $@"
+    exit 1
+}
+
+function success {
+    echo "  OK"
+}
+
+function curl_get {
+    curl -H "content-type: application/json" -H "Authorization: ApiKey $APP_0_ID.$PROXY_ID $APP_0_KEY" $@
+}
+
+function curl_get_out {
+    out="$1"
+    shift
+    curl_get -s -w %{"$out"} "$@"
+}
+
+function curl_get_noout {
+    out="$1"
+    shift
+    curl_get_out "$out" -o /dev/null "$@"
+}
+
+
+function curl_post {
+    curl -H "content-type: application/json" -H "Authorization: ClientApiKey $APP_0_ID.$PROXY_ID $APP_0_KEY" -d @- $@
+}
+
+function curl_post_out {
+    out="$1"
+    shift
+    curl_post -s -w %{"$out"} "$@"
+}
+
+function curl_post_noout {
+    out="$1"
+    shift
+    curl_post_out "$out" -o /dev/null "$@"
+}
+
+export -f curl_get curl_get_out curl_get_noout curl_post curl_post_out curl_post_noout start stop clean testing fail success
+
+case "$1" in
+  build)
+    build
+    ;;
+  start)
+    start
+    ;;
+  start_bg)
+    start_bg
+    ;;
+  clean)
+    clean
+    ;;
+  stop)
+    clean
+    ;;
+  noop)
+    ;;
+  *)
+    echo "Usage: $0 start|stop|clean"
+    ;;
+esac

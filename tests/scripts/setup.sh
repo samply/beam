@@ -1,12 +1,5 @@
 #/bin/bash
 
-eval $(cargo run --bin broker -- examples 2>/dev/null)
-
-if [ "$?" != "0" ]; then
-    echo -e "Failed to fetch examples; try running the following command and checking for errors:\n\ncargo run --bin central -- examples"
-    exit 1
-fi
-
 SD=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 export WORKSPACE=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && cd ../../ && pwd )
 
@@ -27,6 +20,8 @@ export APP_2_ID="pusher2"
 export APP_2_KEY="Pusher2Secret"
 
 export P="http://localhost:8081" # for scripts
+
+source $SD/example_json.sh
 
 TARGET_DIR=$(cat ~/.cargo/config.toml | grep "^target-dir" |sed 's;.*\"\(.*\)\".*;\1;g')
 if [ -z $TARGET_DIR ]; then
