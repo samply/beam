@@ -64,18 +64,7 @@ impl crate::config::Config for Config {
         let cli_args = CliArgs::parse();
         BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
 
-        // Private key
-        let privkey_pem = read_to_string(&cli_args.privkey_file)
-            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to load private key from file {}: {}", cli_args.privkey_file.to_string_lossy(), e)))?
-            .trim().to_string();
-        let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
-            .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
-            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
-        let mut privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem)
-            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
-        if let Some(proxy_id) = cli_args.proxy_id {
-            privkey_rs256 = privkey_rs256.with_key_id(&proxy_id);
-        }
+        let (privkey_rsa, privkey_rs256) = load_crypto(&cli_args)?;
     
         // API Key
         let pki_apikey = read_to_string(cli_args.pki_apikey_file)
@@ -89,4 +78,19 @@ impl crate::config::Config for Config {
         let broker_domain = broker_domain.unwrap().to_string();
         Ok(Config { pki_address: cli_args.pki_address, pki_realm: cli_args.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy: cli_args.http_proxy, broker_domain })
     }    
+}
+
+fn load_crypto(cli_args: &CliArgs) -> Result<(RsaPrivateKey, RS256KeyPair), SamplyBeamError> {
+    let privkey_pem = read_to_string(&cli_args.privkey_file)
+        .map_err(|e| SamplyBeamError::ConfigurationFailed(*format!("Unable to load private key from file {}: {}", cli_args.privkey_file.to_string_lossy(), e)))?
+        .trim().to_string();
+    let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
+        .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
+        .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
+    let mut privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem)
+        .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
+    if let Some(proxy_id) = cli_args.proxy_id {
+        privkey_rs256 = privkey_rs256.with_key_id(&proxy_id);
+    }
+    Ok((privkey_rsa, privkey_rs256))
 }
