@@ -22,6 +22,7 @@ pub async fn main() -> anyhow::Result<()> {
     banner::print_banner();
 
     let _ = config::CONFIG_CENTRAL.bind_addr; // Initialize config
+    let _ = shared::crypto_jwt::sign_to_jwt("Init config").await?; // Initialize config
 
     serve::serve().await?;
 
