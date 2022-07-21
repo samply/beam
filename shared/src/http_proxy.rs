@@ -1,7 +1,10 @@
+use std::time::Duration;
+
 use http::Uri;
 use hyper::{Client, client::{HttpConnector, connect::Connect}, service::Service};
-use hyper_proxy::{Intercept, Proxy, ProxyConnector};
+use hyper_proxy::{Intercept, Proxy, ProxyConnector, Custom};
 use hyper_tls::HttpsConnector;
+use once_cell::sync::OnceCell;
 use tracing::{debug, info};
 
 use crate::{config, errors::SamplyBeamError, BeamId};
@@ -13,7 +16,9 @@ pub fn build_hyper_client(proxy_uri: Option<Uri>) -> Result<Client<ProxyConnecto
     } else {
         Proxy::new(Intercept::None, "http://bogusproxy:4223".parse().unwrap())
     };
-    let proxy_connector = ProxyConnector::from_proxy(HttpsConnector::new(), proxy)?;
+    let mut http = HttpConnector::new();
+    http.set_connect_timeout(Some(Duration::from_secs(1)));
+    let proxy_connector = ProxyConnector::from_proxy(HttpsConnector::new_with_connector(http), proxy)?;
     
     Ok(Client::builder().build(proxy_connector))
 }
