@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 
-#[cfg(test)]
+#[cfg(dontbuild)]
 mod tests {
     use std::{process::{Command, Child, Stdio}, thread, time::{Duration, Instant}, io::{ErrorKind, BufReader, BufRead}, collections::{HashSet, HashMap}, iter::Map, path::Path, mem::take};
 
