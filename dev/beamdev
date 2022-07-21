@@ -49,7 +49,7 @@ function check_prereqs() {
 function build_rust() {
     BACK=$(pwd)
     cd $SD/..
-    BUILD=$(cargo build --message-format=json)
+    BUILD=$(cargo build --target=x86_64-unknown-linux-gnu --message-format=json)
     BROKER=$(echo $BUILD | jq 'select(.executable != null)' |jq -r 'select(.target.name == "broker")' | jq -r .executable)
     PROXY=$(echo $BUILD | jq 'select(.executable != null)' | jq -r 'select(.target.name == "proxy")' | jq -r .executable)
     mkdir -p artifacts/binaries-$ARCH
