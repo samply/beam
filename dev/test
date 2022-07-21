@@ -1,0 +1,36 @@
+#!/bin/bash -e
+
+SD=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+
+cd $SD
+
+source beamdev noop
+
+function start() {
+  trap "echo; echo; clean" EXIT
+  start_bg
+}
+
+function test() {
+  for test in test_*.sh; do
+    echo "======="
+    echo "=> $(basename $test) ..."
+    source $test
+  done
+  echo "All tests have completed successfully."
+}
+
+case "$1" in
+  noci)
+    test
+    ;;
+  ci)
+    build_docker
+    start
+    test
+    ;;
+  *)
+    echo "Usage: $0 noci|ci"
+    exit 1
+    ;;
+esac

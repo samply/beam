@@ -84,7 +84,10 @@ async fn handler_tasks(
 async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_uri: &Uri, sender: &AppId) -> Result<Request<Body>, (StatusCode, &'static str)> {
     let (mut parts, body) = req.into_parts();
     let body = body::to_bytes(body).await
-        .map_err(|_| ERR_BODY)?;
+        .map_err(|e|{
+            warn!("Unable to read message body: {e}");
+            ERR_BODY
+        })?;
 
     let mut body = if body.is_empty() {
         debug!("Body is empty, substituting MsgEmpty.");
@@ -107,7 +110,10 @@ async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_
     };
     // Sanity/security checks: From address sane?
     let msg = serde_json::from_value::<MsgEmpty>(body.clone())
-        .map_err(|_| ERR_BODY)?;
+        .map_err(|e| {
+            warn!("Received body did not deserialize into MsgEmpty: {e}");
+            ERR_BODY
+        })?;
     if msg.get_from() != sender {
         return Err(ERR_FAKED_FROM);
     }
@@ -121,7 +127,10 @@ async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_
     let digest = crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut)
         .map_err(|_| ERR_INTERNALCRYPTO)?;
     body.as_object_mut()
-        .ok_or(ERR_BODY)?
+        .ok_or_else(|| {
+            warn!("Unable to read body as JSON map");
+            ERR_BODY
+        })?
         .insert("extra_fields_digest".to_string(), Value::String(digest));
     let token_with_extended_signature = crypto_jwt::sign_to_jwt(&body).await
         .map_err(|e| {

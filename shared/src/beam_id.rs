@@ -295,7 +295,7 @@ impl<'de> Visitor<'de> for AppOrProxyIdVisitor {
         E: serde::de::Error,
     {
         let t = AppId::str_has_type(v)
-            .map_err(|_| serde::de::Error::custom(format!("Invalid Beam ID: {v}")))?;
+            .map_err(|e| serde::de::Error::custom(format!("Invalid Beam ID \"{v}\": {e}")))?;
         match t {
             BeamIdType::AppId => Ok(AppOrProxyId::AppId(AppId::new(v).unwrap())),
             BeamIdType::ProxyId => Ok(AppOrProxyId::ProxyId(ProxyId::new(v).unwrap())),

@@ -1,0 +1,89 @@
+version: "3.7"
+services:
+  vault:
+    image: vault
+    ports:
+      - 127.0.0.1:8200:8200
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: ${VAULT_TOKEN}
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    volumes:
+      - ./pki:/pki
+    networks:
+      - default
+  broker:
+    depends_on: [vault]
+    build:
+      context: ../
+      dockerfile: Dockerfile.ci.broker
+    image: samply/beam-broker:${TAG}
+    ports:
+      - 8080:8080
+    environment:
+      BROKER_URL: http://broker:8080
+#      BROKER_URL: ${BROKER_URL}
+      PKI_ADDRESS: http://vault:8200
+      no_proxy: vault
+      NO_PROXY: vault
+      PRIVKEY_FILE: /run/secrets/dummy.pem
+      BIND_ADDR: 0.0.0.0:8080
+    secrets:
+      - pki.secret
+      - dummy.pem
+  proxy1:
+    depends_on: [vault]
+    build:
+      context: ../
+      dockerfile: Dockerfile.ci.proxy
+    image: samply/beam-proxy:${TAG}
+    ports:
+      - 8081:8081
+    environment:
+      BROKER_URL: http://broker:8080
+#      BROKER_URL: ${BROKER_URL}
+      PROXY_ID: ${PROXY1_ID}
+      PKI_ADDRESS: http://vault:8200
+      APP_0_ID: ${APP1_ID_SHORT}
+      APP_0_KEY: ${APP_KEY}
+      APP_1_ID: ${APP2_ID_SHORT}
+      APP_1_KEY: ${APP_KEY}
+      no_proxy: vault
+      NO_PROXY: vault
+      PRIVKEY_FILE: /run/secrets/proxy1.pem
+      BIND_ADDR: 0.0.0.0:8081
+    secrets:
+      - pki.secret
+      - proxy1.pem
+  proxy2:
+    depends_on: [vault]
+    build:
+      context: ../
+      dockerfile: Dockerfile.ci.proxy
+    image: samply/beam-proxy:${TAG}
+    ports:
+      - 8082:8082
+    environment:
+      BROKER_URL: http://broker:8080
+#      BROKER_URL: ${BROKER_URL}
+      PROXY_ID: ${PROXY2_ID}
+      PKI_ADDRESS: http://vault:8200
+      APP_0_ID: ${APP1_ID_SHORT}
+      APP_0_KEY: ${APP_KEY}
+      APP_1_ID: ${APP2_ID_SHORT}
+      APP_1_KEY: ${APP_KEY}
+      no_proxy: vault
+      NO_PROXY: vault
+      PRIVKEY_FILE: /run/secrets/proxy2.pem
+      BIND_ADDR: 0.0.0.0:8082
+    secrets:
+      - pki.secret
+      - proxy2.pem
+secrets:
+  pki.secret:
+    file: ./pki/pki.secret
+  proxy1.pem:
+    file: ./pki/${PROXY1_ID_SHORT}.priv.pem
+  proxy2.pem:
+    file: ./pki/${PROXY2_ID_SHORT}.priv.pem
+  dummy.pem:
+    file: ./pki/dummy.priv.pem

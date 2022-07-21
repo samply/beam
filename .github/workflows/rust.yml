@@ -58,11 +58,15 @@ jobs:
   test:
     name: Run tests
     needs: [ build-rust ]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Not implemented
-        run: echo "This will be implemented soon"
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v3
+        with:
+          name: binaries-amd64
+          path: artifacts/binaries-amd64/
+      - run: ./dev/test ci
 
   docker-broker:
     needs: [ build-rust, pre-check, test ]

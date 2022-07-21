@@ -15,9 +15,9 @@ mod tests {
 
     const BROKER_URL: &str = "http://localhost:8080";
     const PROXY_URL: &str = "http://localhost:8081";
-    const PROXY_ID_SHORT: &str = "proxy23";
+    const PROXY_ID_SHORT: &str = "proxy1";
     const APP_ID_SHORT: &str = "app1";
-    const APP_KEY: &str = "MySecret";
+    const APP_KEY: &str = "App1Secret";
     const VAULT_BASE: &str = "http://localhost:8200";
     const VAULT_HEALTH: &str = "http://localhost:8200/v1/sys/health";
     const PROXY_HEALTH: &str = "http://localhost:8081/v1/health";
