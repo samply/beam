@@ -1,10 +1,17 @@
 #!/bin/bash -e
 
-SD=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+# https://stackoverflow.com/questions/59895/
+SOURCE=${BASH_SOURCE[0]}
+while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+  SOURCE=$(readlink "$SOURCE")
+  [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+SD=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
 
 cd $SD
 
-source example_json.sh
+source $SD/example_json.sh
 
 export PROXY1_ID=${PROXY1_ID:-proxy1.broker}
 export PROXY2_ID=${PROXY2_ID:-proxy2.broker}
@@ -35,7 +42,7 @@ function check_prereqs() {
 
 function build_rust() {
     BACK=$(pwd)
-    cd $SD/../..
+    cd $SD/..
     BUILD=$(cargo build --message-format=json)
     BROKER=$(echo $BUILD |jq -r 'select(.target.name == "broker")' | jq -r .executable)
     PROXY=$(echo $BUILD |jq -r 'select(.target.name == "proxy")' | jq -r .executable)
@@ -60,6 +67,7 @@ function start {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
+    [ -x artifacts/binaries-amd64 ] || build_rust
     docker-compose up --abort-on-container-exit
 }
 
@@ -67,6 +75,7 @@ function start_bg {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
+    [ -x artifacts/binaries-amd64 ] || build_rust
     docker-compose up -d
 }
 
