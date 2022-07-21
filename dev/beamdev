@@ -37,6 +37,10 @@ function check_prereqs() {
           echo "jq not found -- please install and put into PATH."
           exit 1
      fi
+     if [[ "$(rsync --version)" != *"rsync  version"* ]]; then
+          echo "rsync not found -- please install and put into PATH."
+          exit 1
+     fi
      set -e
 }
 
@@ -58,6 +62,13 @@ function build_docker() {
     cd $BACK
 }
 
+function build() {
+  if [ ! -e $SD/../../artifacts/binaries-amd64/proxy ]; then
+    build_rust
+  fi
+  build_docker
+}
+
 function clean() {
     stop
     rm -rfv artifacts/
@@ -67,7 +78,7 @@ function start {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    [ -x artifacts/binaries-amd64 ] || build_rust
+    [ -x ../artifacts/binaries-amd64 ] || build_rust
     docker-compose up --abort-on-container-exit
 }
 
@@ -75,16 +86,32 @@ function start_bg {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    [ -x artifacts/binaries-amd64 ] || build_rust
+    [ -x ../artifacts/binaries-amd64 ] || build_rust
     docker-compose up -d
+    for ADDR in $P1 $P2; do
+        while [ "$(curl -s -o /dev/null -w '%{response_code}' $ADDR/v1/health)" != "200" ]; do
+            echo "Waiting for $P1 ..."
+            sleep 0.1
+        done
+    done
+    echo "Services are up:"
+    defaults
+}
+
+function defaults {
+    echo "Broker $BROKER_ID at http://localhost:8080 (this would not be valid in production)"
+    echo "$PROXY1_ID at $P1"
+    echo "$PROXY2_ID at $P2"
+    echo "Authenticate via header: [ Authorization: ApiKey $APP_ID_SHORT.$PROXY1_ID $APP_KEY ]"
 }
 
 function stop {
-    docker-compose down
-    rm -fv pki/*.pem pki/*.json pki/pki.secret
+    clean
 }
 
 function clean {
+    docker-compose down
+    rm -fv pki/*.pem pki/*.json pki/pki.secret
     pki/pki clean
 }
 
@@ -149,7 +176,10 @@ case "$1" in
     ;;
   noop)
     ;;
+  defaults)
+    defaults
+    ;;
   *)
-    echo "Usage: $0 start|stop|clean"
+    echo "Usage: $0 build|start|start_bg|stop|clean|urls|noop"
     ;;
 esac

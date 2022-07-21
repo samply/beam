@@ -227,6 +227,27 @@ HTTP/1.1 200 OK
 content-length: 0
 date: Mon, 27 Jun 2022 14:26:45 GMT
 ```
+
+## Development Environment
+
+A dev environment is provided consisting of one broker and two proxies. 
+
+To start the dev setup:
+```shell
+./dev/beamdev start
+```
+
+Alternatively, you can run the services in the background and get the logs as follows:
+
+```shell
+./dev/beamdev start_bg
+docker-compose 
+```
+
+Confirm that your setup works by running `./dev/test noci`, which runs the tests against your instances.
+
+To work with the environment, you may run `./dev/beamdev defaults` to see some helpful values, including the dev default URLs and a working authentication header.
+
 ## Roadmap
 - [X] API Key authentication of local applications
 - [X] Certificate management
@@ -237,3 +258,4 @@ date: Mon, 27 Jun 2022 14:26:45 GMT
 - [X] Broker-side filtering using pre-defined criteria
 - [ ] Broker-side filtering of the unencrypted fields with JSON queries
 - [ ] Integration of OAuth2 (in discussion)
+- [x] Helpful dev environment

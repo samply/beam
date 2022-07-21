@@ -17,13 +17,7 @@ function test() {
     echo "=> $(basename $test) ..."
     source $test
   done
-}
-
-function build() {
-  if [ ! -e $SD/../../artifacts/binaries-amd64/proxy ]; then
-    build_rust
-  fi
-  build_docker
+  echo "All tests have completed successfully."
 }
 
 case "$1" in
@@ -31,7 +25,7 @@ case "$1" in
     test
     ;;
   ci)
-    build
+    build_docker
     start
     test
     ;;

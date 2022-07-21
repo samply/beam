@@ -17,7 +17,7 @@ function start() {
 }
 
 function clean() {
-     rm -vf *.pem *.json
+     rm -vf *.pem *.json *.secret
      docker-compose down
 }
 
