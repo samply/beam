@@ -237,6 +237,8 @@ To start the dev setup:
 ./dev/beamdev start
 ```
 
+Steps may fail and ask you to install tools. In particular, note that you need a current (>= 7.7.0) curl version.
+
 Alternatively, you can run the services in the background and get the logs as follows:
 
 ```shell
