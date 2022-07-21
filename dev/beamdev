@@ -19,7 +19,12 @@ export PROXY1_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
 export PROXY2_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
 export BROKER_ID=$(echo $PROXY1_ID | cut -d '.' -f 2-)
 export BROKER_URL="https://${BROKER_ID}"
-export APP_ID_SHORT=app1
+export APP1_ID_SHORT=app1
+export APP2_ID_SHORT=app2
+export APP1_P1=${APP1_ID_SHORT}.$PROXY1_ID
+export APP2_P1=${APP2_ID_SHORT}.$PROXY1_ID
+export APP1_P2=${APP1_ID_SHORT}.$PROXY2_ID
+export APP2_P2=${APP2_ID_SHORT}.$PROXY2_ID
 export APP_KEY=App1Secret
 
 export VAULT_TOKEN=$(echo $RANDOM | md5sum | head -c 20; echo;)
@@ -139,8 +144,10 @@ function success {
 }
 
 function curl_get {
+    APP_ID="$1"
+    shift
     BODY_FILE=$(mktemp)
-    JSON=$(curl -s -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID_SHORT.$PROXY1_ID $APP_KEY" -w %{json} -o $BODY_FILE $@)
+    JSON=$(curl -s -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID $APP_KEY" -w %{json} -o $BODY_FILE $@)
     BODY=$(cat $BODY_FILE | sed 's/\"/\\\"/g')
     JSON=$(echo "$JSON" | jq ". + {\"body\": \"${BODY}\" }")
     rm $BODY_FILE
@@ -148,8 +155,10 @@ function curl_get {
 }
 
 function curl_post {
+    APP_ID="$1"
+    shift
     BODY_FILE=$(mktemp)
-    JSON=$(curl -s -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID_SHORT.$PROXY1_ID $APP_KEY" -d @- -w %{json} -o $BODY_FILE $@)
+    JSON=$(curl -s -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID $APP_KEY" -d @- -w %{json} -o $BODY_FILE $@)
     BODY=$(cat $BODY_FILE | sed 's/\"/\\\"/g')
     JSON=$(echo "$JSON" | jq ". + {\"body\": \"${BODY}\" }")
     rm $BODY_FILE

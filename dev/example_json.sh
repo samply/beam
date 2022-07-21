@@ -47,3 +47,20 @@ export RESULT_BY_APP2='
     "complex": "A map (key 'complex') is possible, too"
   }
 }'
+
+export TASK_BY_A1P1_FOR_A1P2='
+{
+  "id": "dfa0dbe1-46f7-42da-b3f5-7b13dc92caae",
+  "from": "app1.proxy1.broker",
+  "to": [
+    "app1.proxy2.broker"
+  ],
+  "body": "So much work!",
+  "failure_strategy": {
+    "retry": {
+      "backoff_millisecs": 1000,
+      "max_tries": 5
+    }
+  },
+  "metadata": null
+}'
