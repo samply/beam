@@ -17,6 +17,7 @@ pub fn build_hyper_client(proxy_uri: Option<Uri>) -> Result<Client<ProxyConnecto
         Proxy::new(Intercept::None, "http://bogusproxy:4223".parse().unwrap())
     };
     let mut http = HttpConnector::new();
+    http.enforce_http(false);
     http.set_connect_timeout(Some(Duration::from_secs(1)));
     let proxy_connector = ProxyConnector::from_proxy(HttpsConnector::new_with_connector(http), proxy)?;
     
