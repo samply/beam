@@ -67,8 +67,10 @@ services:
 #      BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY2_ID}
       PKI_ADDRESS: http://vault:8200
-      APP_0_ID: ${APP_ID_SHORT}
+      APP_0_ID: ${APP1_ID_SHORT}
       APP_0_KEY: ${APP_KEY}
+      APP_1_ID: ${APP2_ID_SHORT}
+      APP_1_KEY: ${APP_KEY}
       no_proxy: vault
       NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/proxy2.pem
