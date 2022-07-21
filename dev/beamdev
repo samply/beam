@@ -16,7 +16,7 @@ source $SD/example_json.sh
 export PROXY1_ID=${PROXY1_ID:-proxy1.broker}
 export PROXY2_ID=${PROXY2_ID:-proxy2.broker}
 export PROXY1_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
-export PROXY2_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
+export PROXY2_ID_SHORT=$(echo $PROXY2_ID | cut -d '.' -f 1)
 export BROKER_ID=$(echo $PROXY1_ID | cut -d '.' -f 2-)
 export BROKER_URL="https://${BROKER_ID}"
 export APP1_ID_SHORT=app1

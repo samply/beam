@@ -74,7 +74,6 @@ services:
       no_proxy: vault
       NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/proxy2.pem
-      VAULT_TOKEN: ${VAULT_TOKEN}
       BIND_ADDR: 0.0.0.0:8082
     secrets:
       - pki.secret
