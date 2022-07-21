@@ -16,6 +16,7 @@ services:
     build:
       context: ../
       dockerfile: Dockerfile.ci.broker
+    image: samply/beam-broker:${TAG}
     ports:
       - 8080:8080
     environment:
@@ -34,6 +35,7 @@ services:
     build:
       context: ../
       dockerfile: Dockerfile.ci.proxy
+    image: samply/beam-proxy:${TAG}
     ports:
       - 8081:8081
     environment:
@@ -57,6 +59,7 @@ services:
     build:
       context: ../
       dockerfile: Dockerfile.ci.proxy
+    image: samply/beam-proxy:${TAG}
     ports:
       - 8082:8082
     environment:

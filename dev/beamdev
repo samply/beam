@@ -54,7 +54,7 @@ function check_prereqs() {
 function build_rust() {
     BACK=$(pwd)
     cd $SD/..
-    BUILD=$(cargo build --target=x86_64-unknown-linux-gnu --message-format=json)
+    BUILD=$(cargo build --message-format=json)
     BROKER=$(echo $BUILD | jq 'select(.executable != null)' |jq -r 'select(.target.name == "broker")' | jq -r .executable)
     PROXY=$(echo $BUILD | jq 'select(.executable != null)' | jq -r 'select(.target.name == "proxy")' | jq -r .executable)
     mkdir -p artifacts/binaries-$ARCH
@@ -86,7 +86,7 @@ function start {
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     [ -x ../artifacts/binaries-$ARCH ] || build_rust
-    docker-compose up --abort-on-container-exit
+    docker-compose up --no-recreate --abort-on-container-exit
 }
 
 function start_bg {
@@ -94,7 +94,7 @@ function start_bg {
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     [ -x ../artifacts/binaries-$ARCH ] || build_rust
-    docker-compose up -d
+    docker-compose up --no-recreate -d
     for ADDR in $P1 $P2; do
         while [ "$(curl -s -o /dev/null -w '%{response_code}' $ADDR/v1/health)" != "200" ]; do
             echo "Waiting for $P1 ..."
@@ -169,6 +169,13 @@ export -f curl_get curl_post start stop clean testing fail success
 
 check_prereqs
 
+if [ "$1" == "--tag" ]; then
+    TAG="$2"
+    shift 2
+fi
+
+export TAG=${TAG:-localbuild}
+
 case "$1" in
   build)
     build
@@ -191,6 +198,6 @@ case "$1" in
     defaults
     ;;
   *)
-    echo "Usage: $0 build|start|start_bg|stop|clean|urls|noop"
+    echo "Usage: $0 [--tag SOMETAG, e.g. develop, to use an existing image] build|start|start_bg|stop|clean|defaults|noop"
     ;;
 esac
