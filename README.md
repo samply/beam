@@ -76,7 +76,7 @@ In the example, `app1` uses the ApiKey `App1Key` for both parties.
 ### Creating a task
 `app1` at party 1 creates a new task at `proxy1.broker.example.de`:
 ```
-curl -k -X POST -v -d "" -H "Authorization: ApiKey app1.proxy1.broker.example.de App1Key" -H "Content-Type: application/json" https://proxy1.broker.example.de/v1/tasks
+curl -k -X POST -v -d '{"body":"Much work to do","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app1.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app1.proxy2.broker.example.de"]}' -H "Authorization: ApiKey app1.proxy1.broker.example.de App1Key" -H "Content-Type: application/json" https://proxy1.broker.example.de/v1/tasks
 ```
 This results in the reply:
 ```
@@ -90,10 +90,15 @@ where the `location` header field is the id of the newly created task.
 ### Listening for relevant tasks
 `app1` at Party 2 is now able to fetch all tasks adressed to them, namely the created task:
 ```
-curl -k -X GET -v -H "Authorization: ApiKey app1.proxy2.broker.example.de App1Key" https://proxy2.broker.example.de/v1/tasks&to=app1.proxy2.broker.example.de
+curl -k -X GET -v -H "Authorization: ApiKey app1.proxy2.broker.example.de App1Key" https://proxy2.broker.example.de/v1/tasks?filter=todo
 ```
+The `filter=todo` parameter instructs the Broker to only send unfinished tasks
+adressed to the querying party.
+The query returns the task, and we as `app1` at party 2 inform the broker that
+we are working on this important task by creating a bare-bones result with
+`"status": "Claimed"`:
 
-TODO: Acknowledge and `PUT` status=processing result.
+TODO: Create Claimed result
 
 ### Returning a Result
 With the task at hand, party 2 processes the task. No doubt, important work is
