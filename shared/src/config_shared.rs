@@ -11,7 +11,7 @@ use static_init::dynamic;
 struct CliArgs {
     /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
     #[clap(long, env, value_parser)]
-    pub http_proxy: Option<Uri>,
+    pub http_proxy: Option<String>,
 
     /// samply.pki: URL to HTTPS endpoint
     #[clap(long, env, value_parser)]
@@ -76,7 +76,15 @@ impl crate::config::Config for Config {
             todo!() // TODO Tobias: Check if matches certificate, and fail
         }
         let broker_domain = broker_domain.unwrap().to_string();
-        Ok(Config { pki_address: cli_args.pki_address, pki_realm: cli_args.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy: cli_args.http_proxy, broker_domain })
+        let http_proxy: Option<Uri> = if let Some(proxy) = cli_args.http_proxy {
+            if proxy.is_empty() {
+                None
+            } else {
+                Some(proxy.parse()
+                    .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Not a valid proxy URL: {proxy}. Reason: {e}")))?)
+            }
+        } else { None };
+        Ok(Config { pki_address: cli_args.pki_address, pki_realm: cli_args.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy, broker_domain })
     }    
 }
 
