@@ -27,10 +27,7 @@ function build() {
 }
 
 case "$1" in
-  start)
-    start
-    ;;
-  test)
+  noci)
     test
     ;;
   ci)
@@ -39,7 +36,7 @@ case "$1" in
     test
     ;;
   *)
-    echo "Usage: $0 start|test|ci"
+    echo "Usage: $0 noci|ci"
     exit 1
     ;;
 esac

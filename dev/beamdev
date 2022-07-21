@@ -44,10 +44,10 @@ function build_rust() {
     BACK=$(pwd)
     cd $SD/..
     BUILD=$(cargo build --message-format=json)
-    BROKER=$(echo $BUILD |jq -r 'select(.target.name == "broker")' | jq -r .executable)
-    PROXY=$(echo $BUILD |jq -r 'select(.target.name == "proxy")' | jq -r .executable)
+    BROKER=$(echo $BUILD | jq 'select(.executable != null)' |jq -r 'select(.target.name == "broker")' | jq -r .executable)
+    PROXY=$(echo $BUILD | jq 'select(.executable != null)' | jq -r 'select(.target.name == "proxy")' | jq -r .executable)
     mkdir -p artifacts/binaries-amd64
-    rsync $BROKER $PROXY artifacts/binaries-amd64/
+    rsync "$BROKER" "$PROXY" artifacts/binaries-amd64/
     cd $BACK
 }
 
@@ -59,8 +59,8 @@ function build_docker() {
 }
 
 function clean() {
-    docker-compose down
-    rm -f pki/*.pem pki/*.json pki/pki.secret
+    stop
+    rm -rfv artifacts/
 }
 
 function start {
@@ -80,7 +80,8 @@ function start_bg {
 }
 
 function stop {
-    clean
+    docker-compose down
+    rm -fv pki/*.pem pki/*.json pki/pki.secret
 }
 
 function clean {
@@ -144,7 +145,7 @@ case "$1" in
     clean
     ;;
   stop)
-    clean
+    stop
     ;;
   noop)
     ;;

@@ -66,7 +66,7 @@ jobs:
         with:
           name: binaries-amd64
           path: artifacts/binaries-amd64/
-      - run: ./tests/viadocker/test.sh ci
+      - run: ./dev/test ci
 
   docker-broker:
     needs: [ build-rust, pre-check, test ]
