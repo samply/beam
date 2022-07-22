@@ -293,8 +293,21 @@ pub struct MsgTaskResult {
 }
 
 impl MsgTaskResult {
-    pub fn get_status(&self) -> &WorkStatus {
+    pub fn new(from: AppOrProxyId, to: Vec<AppOrProxyId>, task: MsgId, status: WorkStatus, metadata: Value) -> Self {
+        Self {
+            id: MsgId::new(),
+            from,
+            to,
+            task,
+            status,
+            metadata,
+        }
+    }
+    pub fn status(&self) -> &WorkStatus {
         &self.status
+    }
+    pub fn status_mut(&mut self) -> &mut WorkStatus {
+        &mut self.status
     }
 }
 
