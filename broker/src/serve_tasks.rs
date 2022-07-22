@@ -70,11 +70,11 @@ async fn get_results_for_task(
 }
 
 fn would_wait_for_elements<S>(vec: &Vec<S>, block: &HowLongToBlock) -> bool {
-    usize::from(block.poll_count.unwrap_or(0)) > vec.len()
+    usize::from(block.wait_count.unwrap_or(0)) > vec.len()
 }
 
 fn wait_get_statuscode<S>(vec: &Vec<S>, block: &HowLongToBlock) -> StatusCode {
-    if usize::from(block.poll_count.unwrap_or(0)) > vec.len() {
+    if usize::from(block.wait_count.unwrap_or(0)) > vec.len() {
         StatusCode::PARTIAL_CONTENT
     } else {
         StatusCode::OK
@@ -86,13 +86,13 @@ async fn wait_for_elements_notask<'a, K,M: Msg>(vec: &mut Vec<M>, block: &HowLon
 where M: Clone + HasWaitId<K>, K: PartialEq
 {
     let wait_until =
-        time::Instant::now() + block.poll_timeout.unwrap_or(time::Duration::from_secs(31536000));
+        time::Instant::now() + block.wait_time.unwrap_or(time::Duration::from_secs(31536000));
     trace!(
         "Now is {:?}. Will wait until {:?}",
         time::Instant::now(),
         wait_until
     );
-    while usize::from(block.poll_count.unwrap_or(0)) > vec.len()
+    while usize::from(block.wait_count.unwrap_or(0)) > vec.len()
         && time::Instant::now() < wait_until {
         trace!(
             "Items in vec: {}, time remaining: {:?}",
@@ -122,13 +122,13 @@ where M: Clone + HasWaitId<K>, K: PartialEq
 async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, block: &HowLongToBlock, mut new_element_rx: Receiver<MsgSigned<MsgTaskRequest>>, filter: &MsgFilterForTask<'a>)
 {
     let wait_until =
-        time::Instant::now() + block.poll_timeout.unwrap_or(time::Duration::from_secs(31536000));
+        time::Instant::now() + block.wait_time.unwrap_or(time::Duration::from_secs(31536000));
     trace!(
         "Now is {:?}. Will wait until {:?}",
         time::Instant::now(),
         wait_until
     );
-    while usize::from(block.poll_count.unwrap_or(0)) > vec.len()
+    while usize::from(block.wait_count.unwrap_or(0)) > vec.len()
         && time::Instant::now() < wait_until {
         trace!(
             "Items in vec: {}, time remaining: {:?}",

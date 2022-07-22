@@ -205,13 +205,13 @@ date: Mon, 27 Jun 2022 14:26:45 GMT
 
 ### Long-polling API access
 As part of making this API performant, all reading endpoints support long-polling as an efficient alternative to regular (repeated) polling. Using this function requires the following parameters:
-- `poll_count`: The API call will block until this many results are available ...
-- `poll_timeout`: ... or this many milliseconds have passed, whichever comes first.
+- `wait_count`: The API call will block until this many results are available ...
+- `wait_time`: ... or this many milliseconds have passed, whichever comes first.
 
 For example, retrieving a task's results:
 - `GET /v1/tasks/<task_id>/results` will return immediately with however many results are available,
-- `GET /v1/tasks/<task_id>/results?poll_count=5` will block forever until 5 results are available,
-- `GET /v1/tasks/<task_id>/results?poll_count=5&poll_timeout=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code `206 (Partial Content)` is returned to indicate that the result is incomplete.
+- `GET /v1/tasks/<task_id>/results?wait_count=5` will block forever until 5 results are available,
+- `GET /v1/tasks/<task_id>/results?wait_count=5&wait_time=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code `206 (Partial Content)` is returned to indicate that the result is incomplete.
 
 ### Health Check
 To monitor the operational status of Samply.Beam, each component implements a specific health check endpoint.
