@@ -109,8 +109,8 @@ pub enum FailureStrategy {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HowLongToBlock {
-    pub poll_timeout: Option<Duration>,
-    pub poll_count: Option<u16>,
+    pub wait_time: Option<Duration>,
+    pub wait_count: Option<u16>,
 }
 
 #[derive(Clone,Debug,Serialize,Deserialize, PartialEq)]
