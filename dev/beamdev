@@ -7,11 +7,12 @@ while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symli
   SOURCE=$(readlink "$SOURCE")
   [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
-SD=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+export BD=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
 
-cd $SD
+BEFORE=$(pwd)
+cd $BD
 
-source $SD/example_json.sh
+source $BD/example_json.sh
 
 export PROXY1_ID=${PROXY1_ID:-proxy1.broker}
 export PROXY2_ID=${PROXY2_ID:-proxy2.broker}
@@ -34,8 +35,17 @@ export P2="http://localhost:8082" # for scripts
 
 export ARCH=$(docker version --format "{{.Server.Arch}}")
 
+function dcompose() {
+    templer $BD/docker-compose.j2 | docker-compose -f - -p beam --project-directory $BD "$@"
+}
+export -f dcompose
+
 function check_prereqs() {
      set +e
+     if [[ "$(cargo --version)" != *"cargo 1."* ]]; then
+          echo "cargo not found -- please install rust."
+          exit 1
+     fi
      if [[ "$(curl --version)" != *" libcurl/"* ]]; then
           echo "curl not found -- please install curl >= 7.7.0 and put into PATH."
           exit 1
@@ -48,12 +58,16 @@ function check_prereqs() {
           echo "rsync not found -- please install and put into PATH."
           exit 1
      fi
+     if [[ $(templer 2>&1) != *"Usage: "* ]]; then
+          echo "templer templating engine not found -- installing ..."
+          cargo install --git=https://github.com/samply/templer
+     fi
      set -e
 }
 
 function build_rust() {
     BACK=$(pwd)
-    cd $SD/..
+    cd $BD/..
     BUILD=$(cargo build --message-format=json)
     BROKER=$(echo $BUILD | jq 'select(.executable != null)' |jq -r 'select(.target.name == "broker")' | jq -r .executable)
     PROXY=$(echo $BUILD | jq 'select(.executable != null)' | jq -r 'select(.target.name == "proxy")' | jq -r .executable)
@@ -64,13 +78,13 @@ function build_rust() {
 
 function build_docker() {
     BACK=$(pwd)
-    cd $SD
-    docker-compose build --build-arg TARGETARCH=$ARCH
+    cd $BD
+    dcompose build --build-arg TARGETARCH=$ARCH
     cd $BACK
 }
 
 function build() {
-  if [ ! -e $SD/../../artifacts/binaries-$ARCH/proxy ]; then
+  if [ ! -e $BD/../../artifacts/binaries-$ARCH/proxy ]; then
     build_rust
   fi
   build_docker
@@ -86,7 +100,7 @@ function start {
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     [ -x ../artifacts/binaries-$ARCH ] || build_rust
-    docker-compose up --no-recreate --abort-on-container-exit
+    dcompose up --no-recreate --abort-on-container-exit
 }
 
 function start_bg {
@@ -94,7 +108,7 @@ function start_bg {
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     [ -x ../artifacts/binaries-$ARCH ] || build_rust
-    docker-compose up --no-recreate -d
+    dcompose up --no-recreate -d
     for ADDR in $P1 $P2; do
         while [ "$(curl -s -o /dev/null -w '%{response_code}' $ADDR/v1/health)" != "200" ]; do
             echo "Waiting for $P1 ..."
@@ -117,7 +131,7 @@ function stop {
 }
 
 function clean {
-    docker-compose down
+    dcompose down
     rm -fv pki/*.pem pki/*.json pki/pki.secret
     pki/pki clean
 }
@@ -201,3 +215,5 @@ case "$1" in
     echo "Usage: $0 [--tag SOMETAG, e.g. develop, to use an existing image] build|start|start_bg|stop|clean|defaults|noop"
     ;;
 esac
+
+cd $BEFORE

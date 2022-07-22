@@ -1,5 +1,31 @@
 version: "3.7"
+{% if traefik and not traefik_own %}
+networks:
+  traefik:
+    external: true
+{% endif %}
 services:
+{% if traefik_own %}
+  traefik:
+    container_name: traefik
+    image: traefik:latest
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --providers.docker=true
+      - --api.dashboard=true
+      - --accesslog=true # print access-logs
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - ./certs:/certs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik
+{% endif %}
   vault:
     image: vault
     ports:
@@ -26,15 +52,27 @@ services:
       NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/dummy.pem
       BIND_ADDR: 0.0.0.0:8080
+{% if traefik %}
+    labels:
+      - "traefik.enable=true"
+  {% if traefik_v1 %}
+      - "traefik.frontend.rule=Host:${BROKER_ID}"
+  {% else %}
+      - "traefik.http.routers.beam-proxy2.rule=Host=Host(`${BROKER_ID}`)"
+  {% endif %}
+    networks:
+      - traefik
+      - default
+{% endif %}
     secrets:
       - pki.secret
       - dummy.pem
   proxy1:
     depends_on: [vault]
+    image: samply/beam-proxy:${TAG}
     build:
       context: ../
       dockerfile: Dockerfile.ci.proxy
-    image: samply/beam-proxy:${TAG}
     ports:
       - 8081:8081
     environment:
@@ -49,15 +87,27 @@ services:
       NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
+{% if traefik %}
+    labels:
+      - "traefik.enable=true"
+  {% if traefik_v1 %}
+      - "traefik.frontend.rule=Host:${PROXY1_ID}"
+  {% else %}
+      - "traefik.http.routers.beam-proxy1.rule=Host=Host(`${PROXY1_ID}`)"
+  {% endif %}
+    networks:
+      - traefik
+      - default
+{% endif %}
     secrets:
       - pki.secret
       - proxy1.pem
   proxy2:
     depends_on: [vault]
+    image: samply/beam-proxy:${TAG}
     build:
       context: ../
       dockerfile: Dockerfile.ci.proxy
-    image: samply/beam-proxy:${TAG}
     ports:
       - 8082:8082
     environment:
@@ -72,6 +122,18 @@ services:
       NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
+{% if traefik %}
+    labels:
+      - "traefik.enable=true"
+  {% if traefik_v1 %}
+      - "traefik.frontend.rule=Host:${PROXY2_ID}"
+  {% else %}
+      - "traefik.http.routers.beam-proxy2.rule=Host=Host(`${PROXY2_ID}`)"
+  {% endif %}
+    networks:
+      - traefik
+      - default
+{% endif %}
     secrets:
       - pki.secret
       - proxy2.pem
