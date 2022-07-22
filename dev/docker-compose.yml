@@ -20,8 +20,7 @@ services:
     ports:
       - 8080:8080
     environment:
-      BROKER_URL: http://broker:8080
-#      BROKER_URL: ${BROKER_URL}
+      BROKER_URL: ${BROKER_URL}
       PKI_ADDRESS: http://vault:8200
       no_proxy: vault
       NO_PROXY: vault
@@ -39,8 +38,7 @@ services:
     ports:
       - 8081:8081
     environment:
-      BROKER_URL: http://broker:8080
-#      BROKER_URL: ${BROKER_URL}
+      BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY1_ID}
       PKI_ADDRESS: http://vault:8200
       APP_0_ID: ${APP1_ID_SHORT}
@@ -63,8 +61,7 @@ services:
     ports:
       - 8082:8082
     environment:
-      BROKER_URL: http://broker:8080
-#      BROKER_URL: ${BROKER_URL}
+      BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY2_ID}
       PKI_ADDRESS: http://vault:8200
       APP_0_ID: ${APP1_ID_SHORT}
