@@ -296,7 +296,7 @@ impl<'a> MsgFilterForTask<'a> {
         }
         let unanswered = self.unanswered_by.unwrap();
         for res in msg.results.values() {
-            if res.get_from() == unanswered && ! self.workstatus_is_not.contains(&std::mem::discriminant(res.msg.get_status())) {
+            if res.get_from() == unanswered && self.workstatus_is_not.contains(&std::mem::discriminant(res.msg.status())) {
                 debug!("Is {} unanswered? No, answer found.", msg.get_id());
                 return false;
             }
