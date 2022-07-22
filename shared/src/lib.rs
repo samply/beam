@@ -292,6 +292,12 @@ pub struct MsgTaskResult {
     pub metadata: Value,
 }
 
+impl MsgTaskResult {
+    pub fn get_status(&self) -> WorkStatus {
+        self.status
+    }
+}
+
 pub trait HasWaitId<T> {
     fn get_wait_id(&self) -> T;
 }

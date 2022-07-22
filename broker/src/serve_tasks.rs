@@ -6,7 +6,7 @@ use axum::{
     Extension, Json, Router, extract::{Query, Path}, response::IntoResponse
 };
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId, WorkStatus};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace};
 
@@ -289,7 +289,9 @@ impl<'a> MsgFilterForTask<'a> {
         }
         let unanswered = self.unanswered_by.unwrap();
         for res in msg.results.values() {
-            if res.get_from() == unanswered {
+            if res.get_from() == unanswered 
+            && res.msg.get_status() != WorkStatus::Claimed
+            && res.msg.get_status() != WorkStatus::TempFailed(_) {
                 debug!("Is {} unanswered? No, answer found.", msg.get_id());
                 return false;
             }
