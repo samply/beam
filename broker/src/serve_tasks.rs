@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, mem::Discriminant};
 
 use axum::{
     http::{StatusCode, header},
@@ -197,8 +197,14 @@ async fn get_tasks(
         return Err((StatusCode::UNAUTHORIZED, "You can only list messages created by you (from) or directed to you (to)."));
     }
     // Step 1: Get initial vector fill from HashMap + receiver for new elements
-    let normal = MsgFilterNoTask { from: from.as_ref(), to: to.as_ref(), mode: MsgFilterMode::Or };
-    let filter = MsgFilterForTask { normal, unanswered_by: unanswered_by.as_ref() };
+    let filter = MsgFilterNoTask { from: from.as_ref(), to: to.as_ref(), mode: MsgFilterMode::Or };
+    let filter = MsgFilterForTask { 
+        normal: filter,
+        unanswered_by: unanswered_by.as_ref(),
+        workstatus_is_not: 
+            [WorkStatus::Succeeded(String::new()), WorkStatus::PermFailed(String::new())]
+            .iter().map(std::mem::discriminant).collect()
+    };
     let (mut vec, new_task_rx) = {
         let map = state.tasks.read().await;
         let vec: Vec<MsgSigned<MsgTaskRequest>> = map
@@ -279,6 +285,7 @@ struct MsgFilterNoTask<'a> {
 struct MsgFilterForTask<'a> {
     normal: MsgFilterNoTask<'a>,
     unanswered_by: Option<&'a AppOrProxyId>,
+    workstatus_is_not: Vec<Discriminant<WorkStatus>>
 }
 
 impl<'a> MsgFilterForTask<'a> {
@@ -289,9 +296,7 @@ impl<'a> MsgFilterForTask<'a> {
         }
         let unanswered = self.unanswered_by.unwrap();
         for res in msg.results.values() {
-            if res.get_from() == unanswered 
-            && res.msg.get_status() != WorkStatus::Claimed
-            && res.msg.get_status() != WorkStatus::TempFailed(_) {
+            if res.get_from() == unanswered && ! self.workstatus_is_not.contains(&std::mem::discriminant(res.msg.get_status())) {
                 debug!("Is {} unanswered? No, answer found.", msg.get_id());
                 return false;
             }

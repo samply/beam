@@ -293,8 +293,8 @@ pub struct MsgTaskResult {
 }
 
 impl MsgTaskResult {
-    pub fn get_status(&self) -> WorkStatus {
-        self.status
+    pub fn get_status(&self) -> &WorkStatus {
+        &self.status
     }
 }
 
