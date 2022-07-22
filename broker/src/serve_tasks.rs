@@ -106,7 +106,7 @@ where M: Clone + HasWaitId<K>, K: PartialEq
             result = new_element_rx.recv() => {
                 match result {
                     Ok(req) => {
-                        if filter.filter(&req) {
+                        if filter.matches(&req) {
                             vec.retain(|el| el.get_wait_id() != req.get_wait_id());
                             vec.push(req);
                         }
@@ -142,7 +142,7 @@ async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, bl
             result = new_element_rx.recv() => {
                 match result {
                     Ok(req) => {
-                        if filter.filter(&req) {
+                        if filter.matches(&req) {
                             vec.retain(|el| el.get_wait_id() != req.get_wait_id());
                             vec.push(req);
                         }
@@ -210,7 +210,7 @@ async fn get_tasks(
         let vec: Vec<MsgSigned<MsgTaskRequest>> = map
             .iter()
             .filter_map(|(_,v)|
-                if filter.filter(v) {
+                if filter.matches(v) {
                     Some(v.clone()) 
                 } else { 
                     None 
@@ -230,7 +230,7 @@ trait MsgFilterTrait<M: Msg> {
     fn to(&self) -> Option<&AppOrProxyId>;
     fn mode(&self) -> &MsgFilterMode;
 
-    fn filter(&self, msg: &M) -> bool {
+    fn matches(&self, msg: &M) -> bool {
         match self.mode() {
             MsgFilterMode::Or => self.filter_or(msg),
             MsgFilterMode::And => self.filter_and(msg)
@@ -315,8 +315,8 @@ impl<'a> MsgFilterTrait<MsgSigned<MsgTaskRequest>> for MsgFilterForTask<'a> {
         self.normal.to
     }
 
-    fn filter(&self, msg: &MsgSigned<MsgTaskRequest>) -> bool {
-        MsgFilterNoTask::filter(&self.normal, msg)
+    fn matches(&self, msg: &MsgSigned<MsgTaskRequest>) -> bool {
+        MsgFilterNoTask::matches(&self.normal, msg)
             && self.unanswered(&msg.msg)
     }
 
