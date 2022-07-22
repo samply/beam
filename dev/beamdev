@@ -154,6 +154,17 @@ function curl_get {
     echo "$JSON"
 }
 
+function curl_put {
+    APP_ID="$1"
+    shift
+    BODY_FILE=$(mktemp)
+    JSON=$(curl -X PUT -s -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID $APP_KEY" -d @- -w %{json} -o $BODY_FILE $@)
+    BODY=$(cat $BODY_FILE | sed 's/\"/\\\"/g')
+    JSON=$(echo "$JSON" | jq ". + {\"body\": \"${BODY}\" }")
+    rm $BODY_FILE
+    echo "$JSON"
+}
+
 function curl_post {
     APP_ID="$1"
     shift
@@ -165,7 +176,7 @@ function curl_post {
     echo "$JSON"
 }
 
-export -f curl_get curl_post start stop clean testing fail success
+export -f curl_get curl_post curl_put start stop clean testing fail success
 
 check_prereqs
 

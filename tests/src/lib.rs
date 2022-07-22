@@ -239,12 +239,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn c_post_results() -> anyhow::Result<()> {
+    async fn c_put_results() -> anyhow::Result<()> {
         for result in &EXAMPLES.fast_read().unwrap().1 {
             // result.msg.task = task.id;
             // result.msg.from = APP_ID.clone().into();
             let resp = CLIENT
-                .post(format!("http://localhost:8081/v1/tasks/{}/results", result.task))
+                .put(format!("http://localhost:8081/v1/tasks/{}/results", result.task))
                 .json(&result)
                 .send().await?;
             if result.from == APP_ID.value() {

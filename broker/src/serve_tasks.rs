@@ -20,7 +20,7 @@ struct State {
 pub(crate) fn router() -> Router {
     Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
-        .route("/v1/tasks/:task_id/results", get(get_results_for_task).post(post_result))
+        .route("/v1/tasks/:task_id/results", get(get_results_for_task).put(put_result))
         .layer(Extension(State::default()))
 }
 
@@ -360,8 +360,8 @@ async fn post_task(
     ))
 }
 
-// POST /v1/tasks/:task_id/results
-async fn post_result(
+// PUT /v1/tasks/:task_id/results
+async fn put_result(
     Path(task_id): Path<MsgId>,
     result: MsgSigned<MsgTaskResult>,
     Extension(state): Extension<State>
@@ -386,8 +386,6 @@ async fn post_result(
     }
 
     // Step 2: Insert.
-    // result.msg.id = MsgId::new();
-    // TODO: Check if ID exists
     let statuscode = match task.results.insert(worker_id.clone(), result.clone()) {
         Some(_) => StatusCode::NO_CONTENT,
         None => StatusCode::CREATED,
