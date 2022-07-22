@@ -412,3 +412,62 @@ async fn put_result(
         [(header::LOCATION, format!("/v1/tasks/{}/results/{}", task_id, worker_id))]
     ))
 }
+
+#[cfg(test)]
+mod test {
+    use serde_json::Value;
+    use shared::{MsgTaskRequest, beam_id::{AppId, ProxyId, BrokerId, BeamId, AppOrProxyId}, MsgTaskResult, Msg, WorkStatus, MsgSigned};
+
+    use super::{MsgFilterForTask, MsgFilterNoTask, MsgFilterMode, MsgFilterTrait};
+
+    #[test]
+    fn filter_task() {
+        const broker_id: &str = "broker";
+        BrokerId::set_broker_id(broker_id.into());
+        let broker = BrokerId::new(broker_id).unwrap();
+        let proxy = ProxyId::random(&broker);
+        let app1: AppOrProxyId = AppId::new(&format!("app1.{}", proxy)).unwrap().into();
+        let app2: AppOrProxyId = AppId::new(&format!("app2.{}", proxy)).unwrap().into();
+        let task = MsgTaskRequest::new(
+            app1.clone(),
+            vec![app2.clone()],
+            "Important task".into(),
+            shared::FailureStrategy::Retry { backoff_millisecs: 1000, max_tries: 5 },
+            Value::Null
+        );
+        let result_by_app2 = MsgTaskResult::new(
+            app2.clone(),
+            vec![task.get_from().clone()],
+            *task.get_id(),
+            WorkStatus::TempFailed("I'd like to retry, please re-send this task".into()),
+            Value::Null
+        );
+        let result_by_app2 = MsgSigned {
+            msg: result_by_app2,
+            sig: "Certainly valid".into(),
+        };
+        let mut task = MsgSigned {
+            msg: task,
+            sig: "Certainly valid".into(),
+        };
+        // let a = app1.clone();
+        let filter = MsgFilterNoTask {
+            from: None,
+            to: Some(&app2),
+            mode: MsgFilterMode::Or,
+        };
+        let filter = MsgFilterForTask {
+            normal: filter,
+            unanswered_by: Some(&app2),
+            workstatus_is_not: [WorkStatus::Succeeded(String::new()), WorkStatus::PermFailed(String::new())]
+            .iter().map(std::mem::discriminant).collect(),
+        };
+        assert_eq!(filter.matches(&task), true, "There are no results yet, so I should get the task: {:?}", task);
+        task.msg.results.insert(result_by_app2.get_from().clone(), result_by_app2);
+        assert_eq!(filter.matches(&task), true, "The only result is TempFailed, so I should still get it: {:?}", task);
+
+        let result_by_app2 = task.msg.results.get_mut(&app2).unwrap();
+        *result_by_app2.msg.status_mut() = WorkStatus::Succeeded("I'm done!".into());
+        assert_eq!(filter.matches(&task), false, "It's done, so I shouldn't get it");
+    }
+}
