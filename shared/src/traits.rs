@@ -4,8 +4,8 @@ use crate::*;
 
 #[derive(Deserialize)]
 struct HowLongToBlockAsIntegers {
-    poll_timeout: Option<u64>,
-    poll_count: Option<u16>,
+    wait_time: Option<u64>,
+    wait_count: Option<u16>,
 }
 
 #[async_trait]
@@ -20,10 +20,10 @@ B::Error: Into<BoxError>
     async fn from_request(req: &mut axum::extract::RequestParts<B>) -> Result<Self, Self::Rejection> {
         match req.extract::<Query<HowLongToBlockAsIntegers>>().await {
             Ok(value) => {
-                let poll_timeout = value.0.poll_timeout.map(Duration::from_millis);
-                Ok(Self { poll_timeout, poll_count: value.0.poll_count })
+                let wait_time = value.0.wait_time.map(Duration::from_millis);
+                Ok(Self { wait_time, wait_count: value.0.wait_count })
             },
-            Err(_) => Err((StatusCode::BAD_REQUEST, "For long-polling, please define &timeout=<millisecs> and &resultcount=<count>.")),
+            Err(_) => Err((StatusCode::BAD_REQUEST, "For long-polling, please define &wait_time=<millisecs> and &wait_count=<count>.")),
         }
     }
 }

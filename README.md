@@ -56,7 +56,66 @@ In practice,
 This design ensures that each component, mainly applications but Proxies and Brokers as well, can be addressed in tasks. Should the need arise in the future, this network could be federated by federating the brokers (not unsimilar to E-Mail/SMTP, XMPP, etc.)
 
 ## Getting started
-Running the `broker` binary will open a central broker instance listening on `0.0.0.0:8080` (default, see CLI args for options). The instance can be queried via the API (see next section).
+The following paragraph simulates the creation and the completion of a task
+using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
+connected via a central broker. Each party runs an application, called `app`.
+We will simulate this application.
+
+The used BeamIds are the following:
+
+| System             | BeamID                       |
+|--------------------|------------------------------|
+| Broker             | broker.example.de            |
+| Proxy1             | proxy1.broker.example.de     |
+| App behind Proxy 1 | app.proxy1.broker.example.de |
+| Proxy2             | proxy2.broker.example.de     |
+| App behind Proxy 2 | app.proxy2.broker.example.de |
+
+In this example, we use the same ApiKey `AppKey` for both parties.
+
+### Creating a task
+`app` at party 1 has some important work to distribute. It knows, that `app`
+at party 2 is capable of solving it, so it asks `proxy1.broker.example.de` to
+create that new task:
+```
+curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"]}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
+```
+`Proxy1` replies:
+```
+HTTP/1.1 201 Created
+location: /tasks/ 70c0aa90-bfcf-4312-a6af-42cbd57dc0b8
+content-length: 0
+date: Mon, 27 Jun 2022 13:58:35 GMT
+```
+where the `location` header field is the id of the newly created task. With that
+the task is registered and will be distributed to the appropriate locations.
+
+### Listening for relevant tasks
+`app` at Party 2 is now able to fetch all tasks addressed to them, especially the task created before:
+```
+curl -k -X GET -v -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks?filter=todo
+```
+The `filter=todo` parameter instructs the Broker to only send unfinished tasks
+addressed to the querying party.
+The query returns the task, and as `app` at Proxy 2, we inform the broker that
+we are working on this important task by creating a preliminary "result" with
+`"status": "claimed"`:
+```
+curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":"claimed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results
+```
+
+### Returning a Result
+Party 2 processes the received task. After succeeding, `app` at party 2 returns the result to party 1:
+```
+curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":{"succeeded":"The answer is 42"},"task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results
+```
+
+### Waiting for tasks to complete
+Meanwhile, `app` at party 1 waits on the completion of its task. But not wanting to check for results every couple seconds, it asks Proxy 1 to be informed if the expected number of `1` result is present:
+```
+curl -k -X GET -v -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results?wait_count=1
+```
+This *long polling* opens the connection and sleeps until a reply is recieved. For more information, see the API documentation.
 
 ## Data objects (JSON)
 ### Task
@@ -81,7 +140,7 @@ Tasks are represented in the following structure:
 }
 ```
 
-- `id`: UUID to identify the task. Note that when the task is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Callers must check the reply's `Location` header for the actual ID.
+- `id`: UUID to identify the task. Note that when the task is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Callers must assume the submission's `id` property is ignored and check the reply's `Location` header for the actual URL to the task.
 - `from`: BeamID of the submitting applications. Is automatically set by the Proxy according to the authentication info.
 - `to`: BeamIDs of *workers* allowed to retrieve the task and submit results.
 - `body`: Description of work to be done. Not interpreted by the Broker.
@@ -126,12 +185,12 @@ A failed task:
 }
 ```
 
-- `id`: UUID identifying the result. Note that when the result is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Currently, since there can be only 0..1 results per client (= `from` field), a result's URL has the form `/v1/tasks/<task_id>/results/<id_in_from_field>` and the `id` field is only used internally, e.g. for filtering. However, for future compatibility, callers must check the reply's `Location` header for the actual URL to the task.
+- `id`: UUID identifying the result. Note that when the result is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Currently, since there can be only 0..1 results per client (= `from` field), a result's URL has the form `/v1/tasks/<task_id>/results/<id_in_from_field>` and the `id` field is only used internally, e.g. for filtering. However, for future compatibility, Callers must assume the submission's `id` property is ignored and check the reply's `Location` header for the actual URL to the task.
 - `from`: BeamID identifying the client submitting this result. This needs to match an entry the `to` field in the task.
 - `to`: BeamIDs the intended recipients of the result. Used for encrypted payloads.
 - `task`: UUID identifying the task this result belongs to.
-- `status`: Defines status of this work result. Possible values `claimed`, `tempfailed(body)`, `permfailed(body)`, `succeeded(body)`. It is up to the application how these statuses are used. For example, some application might require workers to acknowledge the receipt of tasks by setting `status=claimed`, whereas others have only short-running tasks and skip this step.
-- `status.body`: Either carries the actual result payload of the task (`succeeded`) or an error message.
+- `status`: Defines status of this work result. Possible values `claimed`, `tempfailed(<body>)`, `permfailed(<body>)`, `succeeded(<body>)`. It is up to the application how these statuses are used. For example, some application might require workers to acknowledge the receipt of tasks by setting `status=claimed`, whereas others have only short-running tasks and skip this step.
+- `status.body`: Required for `status`es listed above with `(<body>)`. Either carries the actual result payload of the task (`succeeded`) or an error message.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Task](#task)) and is not encrypted.
 
 ## API
@@ -205,13 +264,13 @@ date: Mon, 27 Jun 2022 14:26:45 GMT
 
 ### Long-polling API access
 As part of making this API performant, all reading endpoints support long-polling as an efficient alternative to regular (repeated) polling. Using this function requires the following parameters:
-- `poll_count`: The API call will block until this many results are available ...
-- `poll_timeout`: ... or this many milliseconds have passed, whichever comes first.
+- `wait_count`: The API call will block until this many results are available ...
+- `wait_time`: ... or this many milliseconds have passed, whichever comes first.
 
 For example, retrieving a task's results:
 - `GET /v1/tasks/<task_id>/results` will return immediately with however many results are available,
-- `GET /v1/tasks/<task_id>/results?poll_count=5` will block forever until 5 results are available,
-- `GET /v1/tasks/<task_id>/results?poll_count=5&poll_timeout=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code `206 (Partial Content)` is returned to indicate that the result is incomplete.
+- `GET /v1/tasks/<task_id>/results?wait_count=5` will block forever until 5 results are available,
+- `GET /v1/tasks/<task_id>/results?wait_count=5&wait_time=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code `206 (Partial Content)` is returned to indicate that the result is incomplete.
 
 ### Health Check
 To monitor the operational status of Samply.Beam, each component implements a specific health check endpoint.
@@ -227,6 +286,29 @@ HTTP/1.1 200 OK
 content-length: 0
 date: Mon, 27 Jun 2022 14:26:45 GMT
 ```
+
+## Development Environment
+
+A dev environment is provided consisting of one broker and two proxies. 
+
+To start the dev setup:
+```shell
+./dev/beamdev start
+```
+
+Steps may fail and ask you to install tools. In particular, note that you need a current (>= 7.7.0) curl version.
+
+Alternatively, you can run the services in the background and get the logs as follows:
+
+```shell
+./dev/beamdev start_bg
+docker-compose logs -f
+```
+
+Confirm that your setup works by running `./dev/test noci`, which runs the tests against your instances.
+
+To work with the environment, you may run `./dev/beamdev defaults` to see some helpful values, including the dev default URLs and a working authentication header.
+
 ## Roadmap
 - [X] API Key authentication of local applications
 - [X] Certificate management
@@ -234,5 +316,7 @@ date: Mon, 27 Jun 2022 14:26:45 GMT
 - [ ] End-to-End encryption
 - [X] Docker deployment packages: CI/CD
 - [ ] Docker deployment packages: Documentation
+- [X] Broker-side filtering using pre-defined criteria
 - [ ] Broker-side filtering of the unencrypted fields with JSON queries
 - [ ] Integration of OAuth2 (in discussion)
+- [x] Helpful dev environment

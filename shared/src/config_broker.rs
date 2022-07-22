@@ -16,7 +16,7 @@ struct CliArgs {
 
     /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
     #[clap(long, env, value_parser)]
-    http_proxy: Option<Uri>,
+    http_proxy: Option<String>,
 
     /// The broker's base URL, e.g. https://beam.samply.de
     #[clap(long, env, value_parser)]

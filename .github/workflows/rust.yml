@@ -58,17 +58,21 @@ jobs:
   test:
     name: Run tests
     needs: [ build-rust ]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Not implemented
-        run: echo "This will be implemented soon"
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v3
+        with:
+          name: binaries-amd64
+          path: artifacts/binaries-amd64/
+      - run: ./dev/test ci
 
   docker-broker:
     needs: [ build-rust, pre-check, test ]
     # This workflow defines how a maven package is built, tested and published.
     # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
-    uses: samply/github-workflows/.github/workflows/docker-ci.yml@get-all-artifacts
+    uses: samply/github-workflows/.github/workflows/docker-ci.yml@main
     with:
       # The Docker Hub Repository you want eventually push to, e.g samply/share-client
       image-name: "samply/beam-broker"
@@ -97,7 +101,7 @@ jobs:
     needs: [ build-rust, pre-check, test ]
     # This workflow defines how a maven package is built, tested and published.
     # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
-    uses: samply/github-workflows/.github/workflows/docker-ci.yml@get-all-artifacts
+    uses: samply/github-workflows/.github/workflows/docker-ci.yml@main
     with:
       # The Docker Hub Repository you want eventually push to, e.g samply/share-client
       image-name: "samply/beam-proxy"

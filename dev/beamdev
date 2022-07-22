@@ -1,0 +1,214 @@
+#!/bin/bash -e
+
+# https://stackoverflow.com/questions/59895/
+SOURCE=${BASH_SOURCE[0]}
+while [ -L "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+  SOURCE=$(readlink "$SOURCE")
+  [[ $SOURCE != /* ]] && SOURCE=$DIR/$SOURCE # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+SD=$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )
+
+cd $SD
+
+source $SD/example_json.sh
+
+export PROXY1_ID=${PROXY1_ID:-proxy1.broker}
+export PROXY2_ID=${PROXY2_ID:-proxy2.broker}
+export PROXY1_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
+export PROXY2_ID_SHORT=$(echo $PROXY2_ID | cut -d '.' -f 1)
+export BROKER_ID=$(echo $PROXY1_ID | cut -d '.' -f 2-)
+export BROKER_URL=http://broker:8080
+export APP1_ID_SHORT=app1
+export APP2_ID_SHORT=app2
+export APP1_P1=${APP1_ID_SHORT}.$PROXY1_ID
+export APP2_P1=${APP2_ID_SHORT}.$PROXY1_ID
+export APP1_P2=${APP1_ID_SHORT}.$PROXY2_ID
+export APP2_P2=${APP2_ID_SHORT}.$PROXY2_ID
+export APP_KEY=App1Secret
+
+export VAULT_TOKEN=$(echo $RANDOM | md5sum | head -c 20; echo;)
+
+export P1="http://localhost:8081" # for scripts
+export P2="http://localhost:8082" # for scripts
+
+export ARCH=$(docker version --format "{{.Server.Arch}}")
+
+function check_prereqs() {
+     set +e
+     if [[ "$(curl --version)" != *" libcurl/"* ]]; then
+          echo "curl not found -- please install curl >= 7.7.0 and put into PATH."
+          exit 1
+     fi
+     if [[ "$(jq --version)" != *"jq-"* ]]; then
+          echo "jq not found -- please install and put into PATH."
+          exit 1
+     fi
+     if [[ "$(rsync --version)" != *"rsync  version"* ]]; then
+          echo "rsync not found -- please install and put into PATH."
+          exit 1
+     fi
+     set -e
+}
+
+function build_rust() {
+    BACK=$(pwd)
+    cd $SD/..
+    BUILD=$(cargo build --message-format=json)
+    BROKER=$(echo $BUILD | jq 'select(.executable != null)' |jq -r 'select(.target.name == "broker")' | jq -r .executable)
+    PROXY=$(echo $BUILD | jq 'select(.executable != null)' | jq -r 'select(.target.name == "proxy")' | jq -r .executable)
+    mkdir -p artifacts/binaries-$ARCH
+    rsync "$BROKER" "$PROXY" artifacts/binaries-$ARCH/
+    cd $BACK
+}
+
+function build_docker() {
+    BACK=$(pwd)
+    cd $SD
+    docker-compose build --build-arg TARGETARCH=$ARCH
+    cd $BACK
+}
+
+function build() {
+  if [ ! -e $SD/../../artifacts/binaries-$ARCH/proxy ]; then
+    build_rust
+  fi
+  build_docker
+}
+
+function clean() {
+    stop
+    rm -rfv artifacts/
+}
+
+function start {
+    clean
+    pki/pki devsetup
+    echo "$VAULT_TOKEN" > ./pki/pki.secret
+    [ -x ../artifacts/binaries-$ARCH ] || build_rust
+    docker-compose up --no-recreate --abort-on-container-exit
+}
+
+function start_bg {
+    clean
+    pki/pki devsetup
+    echo "$VAULT_TOKEN" > ./pki/pki.secret
+    [ -x ../artifacts/binaries-$ARCH ] || build_rust
+    docker-compose up --no-recreate -d
+    for ADDR in $P1 $P2; do
+        while [ "$(curl -s -o /dev/null -w '%{response_code}' $ADDR/v1/health)" != "200" ]; do
+            echo "Waiting for $P1 ..."
+            sleep 0.1
+        done
+    done
+    echo "Services are up:"
+    defaults
+}
+
+function defaults {
+    echo "Broker $BROKER_ID at http://localhost:8080 (this would not be valid in production)"
+    echo "$PROXY1_ID at $P1"
+    echo "$PROXY2_ID at $P2"
+    echo "Authenticate via header: [ Authorization: ApiKey $APP_ID_SHORT.$PROXY1_ID $APP_KEY ]"
+}
+
+function stop {
+    clean
+}
+
+function clean {
+    docker-compose down
+    rm -fv pki/*.pem pki/*.json pki/pki.secret
+    pki/pki clean
+}
+
+COL_NONE='\033[0m'
+COL_RED='\033[0;31m'
+COL_GREEN='\033[0;32m'
+COL_BLUE='\033[0;34m'
+
+function testing {
+    echo -e "${COL_BLUE}TEST \"$@\"${COL_NONE}"
+}
+
+function fail {
+    JSON="$1"
+    shift
+    echo -e "${COL_RED}FAIL $@${COL_NONE}"
+    echo -e "Failed Response: $JSON"
+    (exit 1)
+}
+
+function success {
+    echo -e "  ${COL_GREEN}OK${COL_NONE}"
+}
+
+function curl_get {
+    APP_ID="$1"
+    shift
+    BODY_FILE=$(mktemp)
+    JSON=$(curl -s -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID $APP_KEY" -w %{json} -o $BODY_FILE $@)
+    BODY=$(cat $BODY_FILE | sed 's/\"/\\\"/g')
+    JSON=$(echo "$JSON" | jq ". + {\"body\": \"${BODY}\" }")
+    rm $BODY_FILE
+    echo "$JSON"
+}
+
+function curl_put {
+    APP_ID="$1"
+    shift
+    BODY_FILE=$(mktemp)
+    JSON=$(curl -X PUT -s -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID $APP_KEY" -d @- -w %{json} -o $BODY_FILE $@)
+    BODY=$(cat $BODY_FILE | sed 's/\"/\\\"/g')
+    JSON=$(echo "$JSON" | jq ". + {\"body\": \"${BODY}\" }")
+    rm $BODY_FILE
+    echo "$JSON"
+}
+
+function curl_post {
+    APP_ID="$1"
+    shift
+    BODY_FILE=$(mktemp)
+    JSON=$(curl -s -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID $APP_KEY" -d @- -w %{json} -o $BODY_FILE $@)
+    BODY=$(cat $BODY_FILE | sed 's/\"/\\\"/g')
+    JSON=$(echo "$JSON" | jq ". + {\"body\": \"${BODY}\" }")
+    rm $BODY_FILE
+    echo "$JSON"
+}
+
+export -f curl_get curl_post curl_put start stop clean testing fail success
+
+check_prereqs
+
+if [ "$1" == "--tag" ]; then
+    TAG="$2"
+    shift 2
+fi
+
+export TAG=${TAG:-localbuild}
+
+case "$1" in
+  build)
+    build
+    ;;
+  start)
+    start
+    ;;
+  start_bg)
+    start_bg
+    ;;
+  clean)
+    clean
+    ;;
+  stop)
+    stop
+    ;;
+  noop)
+    ;;
+  defaults)
+    defaults
+    ;;
+  *)
+    echo "Usage: $0 [--tag SOMETAG, e.g. develop, to use an existing image] build|start|start_bg|stop|clean|defaults|noop"
+    ;;
+esac

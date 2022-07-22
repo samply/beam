@@ -20,7 +20,7 @@ struct State {
 pub(crate) fn router() -> Router {
     Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
-        .route("/v1/tasks/:task_id/results", get(get_results_for_task).post(post_result))
+        .route("/v1/tasks/:task_id/results", get(get_results_for_task).put(put_result))
         .layer(Extension(State::default()))
 }
 
@@ -70,11 +70,11 @@ async fn get_results_for_task(
 }
 
 fn would_wait_for_elements<S>(vec: &Vec<S>, block: &HowLongToBlock) -> bool {
-    usize::from(block.poll_count.unwrap_or(0)) > vec.len()
+    usize::from(block.wait_count.unwrap_or(0)) > vec.len()
 }
 
 fn wait_get_statuscode<S>(vec: &Vec<S>, block: &HowLongToBlock) -> StatusCode {
-    if usize::from(block.poll_count.unwrap_or(0)) > vec.len() {
+    if usize::from(block.wait_count.unwrap_or(0)) > vec.len() {
         StatusCode::PARTIAL_CONTENT
     } else {
         StatusCode::OK
@@ -86,13 +86,13 @@ async fn wait_for_elements_notask<'a, K,M: Msg>(vec: &mut Vec<M>, block: &HowLon
 where M: Clone + HasWaitId<K>, K: PartialEq
 {
     let wait_until =
-        time::Instant::now() + block.poll_timeout.unwrap_or(time::Duration::from_secs(31536000));
+        time::Instant::now() + block.wait_time.unwrap_or(time::Duration::from_secs(31536000));
     trace!(
         "Now is {:?}. Will wait until {:?}",
         time::Instant::now(),
         wait_until
     );
-    while usize::from(block.poll_count.unwrap_or(0)) > vec.len()
+    while usize::from(block.wait_count.unwrap_or(0)) > vec.len()
         && time::Instant::now() < wait_until {
         trace!(
             "Items in vec: {}, time remaining: {:?}",
@@ -122,13 +122,13 @@ where M: Clone + HasWaitId<K>, K: PartialEq
 async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, block: &HowLongToBlock, mut new_element_rx: Receiver<MsgSigned<MsgTaskRequest>>, filter: &MsgFilterForTask<'a>)
 {
     let wait_until =
-        time::Instant::now() + block.poll_timeout.unwrap_or(time::Duration::from_secs(31536000));
+        time::Instant::now() + block.wait_time.unwrap_or(time::Duration::from_secs(31536000));
     trace!(
         "Now is {:?}. Will wait until {:?}",
         time::Instant::now(),
         wait_until
     );
-    while usize::from(block.poll_count.unwrap_or(0)) > vec.len()
+    while usize::from(block.wait_count.unwrap_or(0)) > vec.len()
         && time::Instant::now() < wait_until {
         trace!(
             "Items in vec: {}, time remaining: {:?}",
@@ -158,7 +158,13 @@ async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, bl
 struct TaskFilter {
     from: Option<AppOrProxyId>,
     to: Option<AppOrProxyId>,
-    unanswered: Option<bool>,
+    filter: Option<FilterParam>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum FilterParam {
+    Todo
 }
 
 /// GET /v1/tasks
@@ -170,18 +176,22 @@ async fn get_tasks(
     Extension(state): Extension<State>,
 ) -> Result<(StatusCode, impl IntoResponse),(StatusCode, impl IntoResponse)> {
     let from = taskfilter.from;
-    let to = taskfilter.to;
+    let mut to = taskfilter.to;
+    let unanswered_by = match taskfilter.filter {
+        Some(FilterParam::Todo) => {
+            if to.is_none() {
+                to = Some(msg.get_from().clone());
+            }
+            Some(msg.get_from().clone())
+        },
+        None => None,
+    };
     if from.is_none() && to.is_none() {
         return Err((StatusCode::BAD_REQUEST, "Please supply either \"from\" or \"to\" query parameter."));
     }
     debug!(?from);
     debug!(?to);
     debug!(?msg);
-    let unanswered_by = if taskfilter.unanswered.is_some() && taskfilter.unanswered.unwrap() && to.is_some() {
-        Some(to.clone().unwrap())
-    } else {
-        None
-    };
     if (from.is_some() && *from.as_ref().unwrap() != msg.msg.from) 
     || (to.is_some() && *to.as_ref().unwrap() != msg.msg.from) { // Rewrite in Rust 1.64: https://github.com/rust-lang/rust/pull/94927
         return Err((StatusCode::UNAUTHORIZED, "You can only list messages created by you (from) or directed to you (to)."));
@@ -350,8 +360,8 @@ async fn post_task(
     ))
 }
 
-// POST /v1/tasks/:task_id/results
-async fn post_result(
+// PUT /v1/tasks/:task_id/results
+async fn put_result(
     Path(task_id): Path<MsgId>,
     result: MsgSigned<MsgTaskResult>,
     Extension(state): Extension<State>
@@ -376,8 +386,6 @@ async fn post_result(
     }
 
     // Step 2: Insert.
-    // result.msg.id = MsgId::new();
-    // TODO: Check if ID exists
     let statuscode = match task.results.insert(worker_id.clone(), result.clone()) {
         Some(_) => StatusCode::NO_CONTENT,
         None => StatusCode::CREATED,

@@ -17,7 +17,8 @@ pub struct Config {
     pub pki_address: Uri,
     pub pki_realm: String,
     pub proxy_id: ProxyId,
-    pub api_keys: HashMap<AppId,ApiKey>
+    pub api_keys: HashMap<AppId,ApiKey>,
+    pub http_proxy: Option<Uri>
 }
 
 pub type ApiKey = String;
@@ -31,7 +32,7 @@ pub struct CliArgs {
 
     /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
     #[clap(long, env, value_parser)]
-    pub http_proxy: Option<Uri>,
+    pub http_proxy: Option<String>,
     
     /// The broker's base URL, e.g. https://broker23.beam.samply.de
     #[clap(long, env, value_parser)]
@@ -96,6 +97,14 @@ impl crate::config::Config for Config {
         if api_keys.is_empty() {
             return Err(SamplyBeamError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {0}_0_ID=<clientname>, {0}_0_KEY=<key>", APP_PREFIX)));
         }
+        let http_proxy: Option<Uri> = if let Some(proxy) = cli_args.http_proxy {
+            if proxy.is_empty() {
+                None
+            } else {
+                Some(proxy.parse()
+                    .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Not a valid proxy URL: {proxy}. Reason: {e}")))?)
+            }
+        } else { None };
         let config = Config {
             broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
             broker_uri: cli_args.broker_url,
@@ -103,7 +112,8 @@ impl crate::config::Config for Config {
             bind_addr: cli_args.bind_addr,
             pki_realm: cli_args.pki_realm,
             proxy_id,
-            api_keys
+            api_keys,
+            http_proxy
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)

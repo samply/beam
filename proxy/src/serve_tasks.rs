@@ -2,8 +2,9 @@ use std::time::SystemTime;
 
 use axum::{Router, Extension, routing::any, response::Response, http::HeaderValue};
 use httpdate::fmt_http_date;
-use hyper::{Client, client::HttpConnector, StatusCode, Request, Body, Uri, body, header};
+use hyper::{Client, client::{HttpConnector, connect::Connect}, StatusCode, Request, Body, Uri, body, header};
 use hyper_proxy::ProxyConnector;
+use hyper_tls::HttpsConnector;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use shared::{config, config_proxy, crypto_jwt, MsgTaskRequest, MsgTaskResult, MsgEmpty, Msg, MsgSigned, beam_id::AppId, MsgId};
@@ -11,7 +12,7 @@ use tracing::{warn, debug, error};
 
 use crate::auth::AuthenticatedApp;
 
-pub(crate) fn router(client: &Client<ProxyConnector<HttpConnector>>) -> Router {
+pub(crate) fn router(client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Router {
     let config = config::CONFIG_PROXY.clone();
     Router::new()
         // We need both path variants so the server won't send us into a redirect loop (/tasks, /tasks/, ...)
@@ -28,7 +29,7 @@ const ERR_VALIDATION: (StatusCode, &str) = (StatusCode::BAD_GATEWAY, "Unable to 
 const ERR_FAKED_FROM: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "You are not authorized to send on behalf of this app.");
 
 async fn handler_tasks(
-    Extension(client): Extension<Client<ProxyConnector<HttpConnector>>>,
+    Extension(client): Extension<Client<ProxyConnector<HttpsConnector<HttpConnector>>>>,
     Extension(config): Extension<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
     req: Request<Body>,
@@ -83,7 +84,10 @@ async fn handler_tasks(
 async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_uri: &Uri, sender: &AppId) -> Result<Request<Body>, (StatusCode, &'static str)> {
     let (mut parts, body) = req.into_parts();
     let body = body::to_bytes(body).await
-        .map_err(|_| ERR_BODY)?;
+        .map_err(|e|{
+            warn!("Unable to read message body: {e}");
+            ERR_BODY
+        })?;
 
     let mut body = if body.is_empty() {
         debug!("Body is empty, substituting MsgEmpty.");
@@ -106,7 +110,10 @@ async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_
     };
     // Sanity/security checks: From address sane?
     let msg = serde_json::from_value::<MsgEmpty>(body.clone())
-        .map_err(|_| ERR_BODY)?;
+        .map_err(|e| {
+            warn!("Received body did not deserialize into MsgEmpty: {e}");
+            ERR_BODY
+        })?;
     if msg.get_from() != sender {
         return Err(ERR_FAKED_FROM);
     }
@@ -120,7 +127,10 @@ async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_
     let digest = crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut)
         .map_err(|_| ERR_INTERNALCRYPTO)?;
     body.as_object_mut()
-        .ok_or(ERR_BODY)?
+        .ok_or_else(|| {
+            warn!("Unable to read body as JSON map");
+            ERR_BODY
+        })?
         .insert("extra_fields_digest".to_string(), Value::String(digest));
     let token_with_extended_signature = crypto_jwt::sign_to_jwt(&body).await
         .map_err(|e| {

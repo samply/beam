@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 
-#[cfg(test)]
+#[cfg(dontbuild)]
 mod tests {
     use std::{process::{Command, Child, Stdio}, thread, time::{Duration, Instant}, io::{ErrorKind, BufReader, BufRead}, collections::{HashSet, HashMap}, iter::Map, path::Path, mem::take};
 
@@ -15,9 +15,9 @@ mod tests {
 
     const BROKER_URL: &str = "http://localhost:8080";
     const PROXY_URL: &str = "http://localhost:8081";
-    const PROXY_ID_SHORT: &str = "proxy23";
+    const PROXY_ID_SHORT: &str = "proxy1";
     const APP_ID_SHORT: &str = "app1";
-    const APP_KEY: &str = "MySecret";
+    const APP_KEY: &str = "App1Secret";
     const VAULT_BASE: &str = "http://localhost:8200";
     const VAULT_HEALTH: &str = "http://localhost:8200/v1/sys/health";
     const PROXY_HEALTH: &str = "http://localhost:8081/v1/health";
@@ -239,12 +239,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn c_post_results() -> anyhow::Result<()> {
+    async fn c_put_results() -> anyhow::Result<()> {
         for result in &EXAMPLES.fast_read().unwrap().1 {
             // result.msg.task = task.id;
             // result.msg.from = APP_ID.clone().into();
             let resp = CLIENT
-                .post(format!("http://localhost:8081/v1/tasks/{}/results", result.task))
+                .put(format!("http://localhost:8081/v1/tasks/{}/results", result.task))
                 .json(&result)
                 .send().await?;
             if result.from == APP_ID.value() {
