@@ -58,26 +58,27 @@ This design ensures that each component, mainly applications but Proxies and Bro
 ## Getting started
 The following paragraph simulates the creation and the completion of a task
 using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
-connected via a central broker. Each party runs an application, called `app1`.
+connected via a central broker. Each party runs an application, called `app`.
 We will simulate this application.
 
 The used BeamIds are the following:
 
-| System        | BeamID                        |
-|---------------|-------------------------------|
-| Broker        | broker.example.de             |
-| Proxy1        | proxy1.broker.example.de      |
-| App1, Party 1 | app1.proxy1.broker.example.de |
-| Proxy2        | proxy2.broker.example.de      |
-| App1, Party 2 | app1.proxy2.broker.example.de |
+| System             | BeamID                       |
+|--------------------|------------------------------|
+| Broker             | broker.example.de            |
+| Proxy1             | proxy1.broker.example.de     |
+| App behind Proxy 1 | app.proxy1.broker.example.de |
+| Proxy2             | proxy2.broker.example.de     |
+| App behind Proxy 2 | app.proxy2.broker.example.de |
 
-In the example, `app1` uses the ApiKey `App1Key` for both parties.
+In this example, we use the same ApiKey `AppKey` for both parties.
 
 ### Creating a task
-`app1` at party 1 has some important work to distribute. It knows, that `app1`
-at party 2 is brilliantly capable of solving the work at hand, so it creates a new task at `proxy1.broker.example.de`:
+`app` at party 1 has some important work to distribute. It knows, that `app`
+at party 2 is capable of solving it, so it asks `proxy1.broker.example.de` to
+create that new task:
 ```
-curl -k -X POST -v -d '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app1.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app1.proxy2.broker.example.de"]}' -H "Authorization: ApiKey app1.proxy1.broker.example.de App1Key" -H "Content-Type: application/json" https://proxy1.broker.example.de/v1/tasks
+curl -k -X POST -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"]}' -H "Authorization: ApiKey app.proxy1.broker.example.de App1Key" https://proxy1.broker.example.de/v1/tasks
 ```
 `Proxy1` replies:
 ```
@@ -90,39 +91,31 @@ where the `location` header field is the id of the newly created task. With that
 the task is registered and will be distributed to the appropriate locations.
 
 ### Listening for relevant tasks
-`app1` at Party 2 is now able to fetch all tasks addressed to them, especially the task created before:
+`app` at Party 2 is now able to fetch all tasks addressed to them, especially the task created before:
 ```
-curl -k -X GET -v -H "Authorization: ApiKey app1.proxy2.broker.example.de App1Key" https://proxy2.broker.example.de/v1/tasks?filter=todo
+curl -k -X GET -v -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks?filter=todo
 ```
 The `filter=todo` parameter instructs the Broker to only send unfinished tasks
 addressed to the querying party.
-The query returns the task, and we as `app1` at party 2 inform the broker that
-we are working on this important task by creating a bare-bones result with
+The query returns the task, and as `app` at Proxy 2, we inform the broker that
+we are working on this important task by creating a preliminary "result" with
 `"status": "Claimed"`:
 ```
-curl -k -X POST -v -d "{"from":"app1.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":"claimed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app1.proxy1.broker.example.de"]}" -H "Authorization: ApiKey app1.proxy2.broker.example.de App1Key" -H "Content-Type: application/json" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results
+curl -k -X POST -v --json "{"from":"app.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":"claimed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}" -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results
 ```
 
 ### Returning a Result
-With the task at hand, party 2 processes the task. No doubt, important work is
-done here. After succeeding, `app1` at party 2 wants to return the fruit of its
-labor to party 1 and publishes the successful result:
+Party 2 processes the received task. After succeeding, `app` at party 2 returns the result to party 1:
 ```
-curl -k -X POST -v -d "{"from":"app1.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":{"succeeded":"The answer is 42"},"task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app1.proxy1.broker.example.de"]}" -H "Authorization: ApiKey app1.proxy2.broker.example.de App1Key" -H "Content-Type: application/json" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results
+curl -k -X POST -v --json "{"from":"app.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":{"succeeded":"The answer is 42"},"task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}" -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results
 ```
 
 ### Waiting for tasks to complete
-Meanwhile, `app1` at party 1 waits on the completion of its task. But not
-wanting to check for results every couple seconds (we're not a postage tracker,
-after all), it asks Proxy1 to be informed if the expected number of `1` result
-is present:
+Meanwhile, `app` at party 1 waits on the completion of its task. But not wanting to check for results every couple seconds, it asks Proxy 1 to be informed if the expected number of `1` result is present:
 ```
-curl -k -X GET -v -H "Authorization: ApiKey app1.proxy1.broker.example.de App1Key" https://proxy1.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results?poll_count=1
+curl -k -X GET -v -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results?poll_count=1
 ```
-This *long polling* opens the connection and sleeps, until a reply is sent.
-Note, that at the moment *claiming* the task counts as a regular result and
-would cause the long-polling to reply. This behavior might change in the near
-future.
+This *long polling* opens the connection and sleeps until a reply is recieved. For more information, see the API documentation.
 
 ## Data objects (JSON)
 ### Task
