@@ -289,6 +289,8 @@ date: Mon, 27 Jun 2022 14:26:45 GMT
 
 ## Development Environment
 
+> NOTE: The commands in this section will build the beam proxy and broker locally. To build beam, you need to install libssl-dev.
+
 A dev environment is provided consisting of one broker and two proxies. 
 
 To start the dev setup:
