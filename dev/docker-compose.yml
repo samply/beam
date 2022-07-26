@@ -26,6 +26,7 @@ services:
       NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/dummy.pem
       BIND_ADDR: 0.0.0.0:8080
+      RUST_LOG: ${RUST_LOG}
     secrets:
       - pki.secret
       - dummy.pem
@@ -49,6 +50,7 @@ services:
       NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
+      RUST_LOG: ${RUST_LOG}
     secrets:
       - pki.secret
       - proxy1.pem
@@ -72,6 +74,7 @@ services:
       NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
+      RUST_LOG: ${RUST_LOG}
     secrets:
       - pki.secret
       - proxy2.pem
