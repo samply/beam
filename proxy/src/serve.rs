@@ -30,9 +30,9 @@ pub(crate) async fn serve() -> anyhow::Result<()> {
         })
         .expect("Error setting handler for graceful shutdown.");
 
-    let mut api_keys_joined = String::new();
-    config.api_keys.keys().for_each(|k| write!(api_keys_joined, "{} ", k.to_string().split('.').next().unwrap()).unwrap());
-    info!("This is Proxy {} listening on {}. {} apps are known: {}", config.proxy_id, config.bind_addr, config.api_keys.len(), api_keys_joined);
+    let mut apps_joined = String::new();
+    config.api_keys.keys().for_each(|k| write!(apps_joined, "{} ", k.to_string().split('.').next().unwrap()).unwrap());
+    info!("This is Proxy {} listening on {}. {} apps are known: {}", config.proxy_id, config.bind_addr, config.api_keys.len(), apps_joined);
     
     axum::Server::bind(&config.bind_addr)
         .serve(app.into_make_service())
