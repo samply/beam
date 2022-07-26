@@ -1,9 +1,11 @@
 {% if include_docs %}
 # This is a jinja2 template, which allows you to deploy a dev environment for samply beam.
-# To parse the template, we recommend the cli tool samply/templer (visit: https://github.com/samply/templer).
+# In our bridgeheads, we use a tiny cli tool (https://github.com/samply/templer) built on
+# minijinja to avoid dependencies; however, you can use any jinja2 implementation for
+# parsing, such as https://pypi.org/project/Jinja2/
 # You can generate a deployable docker-compose with the following command:
 #   templer dev/docker-compose.j2 traefik=true traefik_own=true
-# Alternativly, you can pipe the output directly to the docker-compose command:
+# Alternatively, you can pipe the output directly to the docker-compose command:
 #   templer dev/docker-compose.j2 traefik=true traefik_own=true | docker-compose -f - up -d
 {% endif %}
 version: "3.7"
