@@ -18,7 +18,8 @@ const SIGNATURE_LENGTH: u16 = 256;
 pub(crate) struct CertificateCache{
     serial_to_x509: HashMap<Serial, X509>,
     cn_to_serial: HashMap<ProxyId, Serial>,
-    update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>
+    update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>,
+    root_cert: Option<X509> // Might not be available at initialization time
 }
 
 #[async_trait]
@@ -33,7 +34,8 @@ impl CertificateCache {
         Ok(Self{
             serial_to_x509: HashMap::new(),
             cn_to_serial: HashMap::new(),
-            update_trigger
+            update_trigger,
+            root_cert: None
         })
     }
 
@@ -47,7 +49,7 @@ impl CertificateCache {
                 None => None
             };
             match cert { // why is this not done in the second try?
-                Some(certificate) => if x509_date_valid(&certificate).unwrap_or(false) { return cert.cloned(); },
+                Some(certificate) => if x509_date_valid(&certificate).unwrap_or(false) { return cert.cloned(); }, // Validity of the certificate gets checked at fetching time.
                 None => ()
             }
         } // Drop Read Locks
@@ -126,16 +128,17 @@ impl CertificateCache {
                         .expect(&format!("Internal error: Vault returned certificate with invalid common name: {}", x))
                 })
                 .collect();
-            
-            if commonnames.is_empty() || x509_date_valid(&opensslcert).is_err() {
-                warn!("Certificate with serial {} invalid (no cname or invalid date).", serial);
-            } else { // TODO: Check against CA
+
+            if commonnames.is_empty() || verify_cert(&opensslcert, &self.root_cert.as_ref().expect("No root CA certificate found!")).is_err() {
+                warn!("Certificate with serial {} invalid (no cname or invalid certificate).", serial);
+            } else {
                 self.serial_to_x509.insert(serial.clone(), opensslcert);
                 self.cn_to_serial.insert(commonnames.first()
                     .expect("Internal error: common names empty; this should not happen")
                     .clone(), serial.clone()); //Emptyness is already checked
                 debug!("Added certificate {} for cname {}", serial, commonnames.first().unwrap());
             }
+
         }
     Ok(())
 
@@ -155,6 +158,11 @@ impl CertificateCache {
         }
         result
     }
+
+/// Sets the root certificate, which is usually not avaelable at static time. Must be called before validation
+pub fn set_root_cert(&mut self, root_certificate: &X509) {
+    self.root_cert = Some(root_certificate.clone());
+}
 }
 
 static CERT_GETTER: OnceCell<Box<dyn GetCerts>> = OnceCell::new();
@@ -267,6 +275,16 @@ fn extract_x509(cert: Option<X509>) -> Option<CryptoPublicPortion> {
         pubkey,
     })
 }
+
+/// Verify whether the certificate is signed by root_ca_cert and the dates are valid
+pub fn verify_cert(certificate: &X509, root_ca_cert: &X509) -> Result<bool,SamplyBeamError> {
+    if certificate.verify(root_ca_cert.public_key()?.as_ref())? && x509_date_valid(&certificate)? {
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 
 pub(crate) fn hash(data: &[u8]) -> Result<[u8; 32],SamplyBeamError> {
     let mut hasher = Sha256::new();
@@ -404,14 +422,20 @@ fn x509_date_valid(cert: &X509) -> Result<bool, ErrorStack> {
     return Ok(expirydate > now && now > startdate);
 }
 
-pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, std::io::Error> {
+pub fn load_certificates_from_file(ca_file: PathBuf) -> Result<X509,SamplyBeamError> {
+    let file = ca_file.as_path();
+    let content = std::fs::read(file)
+        .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Can not load certificate {}: {}",file.to_string_lossy(), e)))?;
+    let cert = X509::from_pem(&content)
+        .map_err(|e| SamplyBeamError::ConfigurationFailed( format!("Unable to read certificate from file {}: {}", file.to_string_lossy(), e)));
+    cert
+}
+
+pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, SamplyBeamError> {
     let mut result = Vec::new();
     if let Some(ca_dir) = ca_dir {
-        for file in ca_dir.read_dir()? { //.map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory {}: {}", ca_dir.to_string_lossy(), e)))
-            let path = file?.path();
-            let content = std::fs::read(&path)?;
-            let cert = X509::from_pem(&content)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Unable to read certificate from file {}: {}", path.to_string_lossy(), e)))?;
+        for file in ca_dir.read_dir().map_err(|e|SamplyBeamError::ConfigurationFailed(format!("Error reacint file directory {}: {}", ca_dir.to_string_lossy(), e)))? { //.map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory {}: {}", ca_dir.to_string_lossy(), e)))
+            let cert = load_certificates_from_file(file.unwrap().path())?;
             result.push(cert);
         }
     }

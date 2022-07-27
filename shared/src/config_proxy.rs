@@ -49,6 +49,10 @@ pub struct CliArgs {
     #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
     pub privkey_file: PathBuf,
 
+    /// samply.pki: Path to CA Root certificate
+    #[clap(long, env, value_parser, default_value = "/usr/share/beam/root-ca.crt")]
+    rootcert_file: PathBuf,
+
     /// (included for technical reasons)
     #[clap(long,hide(true))]
     test_threads: Option<String>
