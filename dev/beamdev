@@ -13,6 +13,10 @@ cd $SD
 
 source $SD/example_json.sh
 
+if [ -z "$RUST_LOG" ]; then
+     export RUST_LOG=""
+fi
+
 export PROXY1_ID=${PROXY1_ID:-proxy1.broker}
 export PROXY2_ID=${PROXY2_ID:-proxy2.broker}
 export PROXY1_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
