@@ -10,6 +10,8 @@ use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, Ms
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace};
 
+use crate::expire;
+
 #[derive(Clone)]
 struct State {
     tasks: Arc<RwLock<HashMap<MsgId, MsgSigned<MsgTaskRequest>>>>,
@@ -18,10 +20,15 @@ struct State {
 }
 
 pub(crate) fn router() -> Router {
-    Router::new()
+    let state = State::default();
+    let router = Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
         .route("/v1/tasks/:task_id/results", get(get_results_for_task).put(put_result))
-        .layer(Extension(State::default()))
+        .layer(Extension(state.clone()));
+
+    tokio::task::spawn(expire::watch(state.tasks, state.new_task_tx.subscribe()));
+
+    router
 }
 
 impl Default for State {

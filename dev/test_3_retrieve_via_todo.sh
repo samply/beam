@@ -2,6 +2,7 @@
 
 testing Create task TASK_BY_A1P1_FOR_A1P2
 
+TASK_BY_A1P1_FOR_A1P2="$(task_in_seconds 3 "$TASK_BY_A1P1_FOR_A1P2")"
 RET=$(echo $TASK_BY_A1P1_FOR_A1P2 | curl_post $APP1_P1 -v $P1/v1/tasks)
 CODE=$(echo $RET | jq -r .response_code)
 
@@ -31,3 +32,18 @@ fi
 
 success
 
+sleep 3
+
+testing Check that the task has correctly expired
+
+RET=$(curl_get $APP1_P2 -v $P2/v1/tasks?filter=todo)
+CODE=$(echo $RET | jq -r .response_code)
+BODY=$(echo $RET | jq -r .body)
+
+if [ "$CODE" != "200" ]; then
+    fail "$RET" The task has not correctly expired. Expected 200, got $CODE and body \"$BODY\".
+fi
+
+if [ "$BODY" != "[]" ]; then
+    fail "$RET" I got a task that should have been expird.I expected body \"[]\", got \"$BODY\"
+fi

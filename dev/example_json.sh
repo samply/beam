@@ -15,6 +15,7 @@ export TASK0='
       "max_tries": 5
     }
   },
+  "expire": [EXPIRE],
   "metadata": "The broker can read and use this field e.g., to apply filters on behalf of an app"
 }'
 
@@ -62,5 +63,6 @@ export TASK_BY_A1P1_FOR_A1P2='
       "max_tries": 5
     }
   },
+  "expire": [EXPIRE],
   "metadata": null
 }'

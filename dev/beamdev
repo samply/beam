@@ -180,7 +180,16 @@ function curl_post {
     echo "$JSON"
 }
 
-export -f curl_get curl_post curl_put start stop clean testing fail success
+function in_seconds {
+    ADD_SECS=${1-0}
+    echo $(( $(date +%s) + $ADD_SECS ))
+}
+
+function task_in_seconds {
+    echo "$2" | sed "s/\[EXPIRE\]/$(in_seconds $1)/g"
+}
+
+export -f curl_get curl_post curl_put start stop clean testing fail success in_seconds task_in_seconds
 
 check_prereqs
 

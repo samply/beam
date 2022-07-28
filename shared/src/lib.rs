@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use static_init::dynamic;
 use tracing::debug;
 
-use std::{time::Duration, ops::Deref, fmt::Display};
+use std::{time::{Duration, Instant, SystemTime}, ops::Deref, fmt::Display};
 
 use rand::Rng;
 use serde::{Deserialize, Serialize, de::Visitor};
@@ -255,17 +255,63 @@ impl Msg for MsgTaskResult {
 //     }
 // }
 
+mod serialize_time {
+    use std::{time::{SystemTime, UNIX_EPOCH, Duration}};
+
+    use serde::{self, Deserialize, Deserializer, Serializer};
+    use tracing::{warn, debug};
+
+    // #[derive(Debug)]
+    // struct Error(String);
+
+    // impl std::error::Error for Error {}
+
+    // impl std::fmt::Display for Error {
+    //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    //         write!(f, "{}", self.0)
+    //     }
+    // }
+
+    // impl serde::ser::Error for Error {
+    //     fn custom<T>(msg:T) -> Self where T:std::fmt::Display {
+    //         Error(msg.to_string())
+    //     }
+    // }
+
+    pub fn serialize<S>(time: &SystemTime, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let timestamp = time.duration_since(UNIX_EPOCH).unwrap(); // TODO: Correct error handling
+        s.serialize_u64(timestamp.as_secs())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        debug!("Trying to deserialize ...");
+        let timestamp: u64 = u64::deserialize(deserializer)?;
+        let time = SystemTime::UNIX_EPOCH + Duration::from_secs(timestamp);
+        debug!("Deserialized u64 {} to time {:?}", timestamp, time);
+        Ok(
+            time
+        )
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskRequest {
     pub id: MsgId,
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub body: String,
-    // pub expire: SystemTime,
+    #[serde(with="serialize_time")]
+    pub expire: SystemTime,
     pub failure_strategy: FailureStrategy,
     #[serde(skip)]
     pub results: HashMap<AppOrProxyId,MsgSigned<MsgTaskResult>>,
-    pub metadata: Value
+    pub metadata: Value,
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EncryptedMsgTaskRequest {
@@ -274,7 +320,7 @@ pub struct EncryptedMsgTaskRequest {
     pub to: Vec<AppOrProxyId>,
     //auth
     pub body: Option<String>,
-    // pub expire: SystemTime,
+    // pub expire: Instant,
     pub failure_strategy: Option<FailureStrategy>,
     pub encrypted: String,
     pub encryption_keys: Vec<Option<String>>,
@@ -329,7 +375,8 @@ impl MsgTaskRequest {
             body,
             failure_strategy,
             results: HashMap::new(),
-            metadata
+            metadata,
+            expire: SystemTime::now() + Duration::from_secs(3600)
         }
     }
 }

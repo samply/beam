@@ -4,6 +4,7 @@ mod serve;
 mod serve_tasks;
 mod serve_health;
 mod banner;
+mod expire;
 
 use std::{collections::HashMap, sync::Arc};
 
