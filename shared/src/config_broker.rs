@@ -18,6 +18,10 @@ struct CliArgs {
     #[clap(long, env, value_parser)]
     http_proxy: Option<String>,
 
+    /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
+    #[clap(long, env, value_parser)]
+    pub tls_ca_certificates_dir: Option<PathBuf>,
+
     /// The broker's base URL, e.g. https://beam.samply.de
     #[clap(long, env, value_parser)]
     broker_url: Uri,

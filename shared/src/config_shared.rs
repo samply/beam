@@ -1,10 +1,13 @@
-use crate::{SamplyBeamError, crypto, beam_id::{BrokerId, BeamId}};
+use crate::{SamplyBeamError, crypto::{self, load_certificates_from_dir}, beam_id::{BrokerId, BeamId}};
 use std::{path::PathBuf, rc::Rc, sync::Arc, fs::read_to_string};
 use hyper::Uri;
 use clap::Parser;
+use hyper_tls::native_tls::Certificate;
 use jwt_simple::prelude::RS256KeyPair;
+use openssl::x509::X509;
 use rsa::{RsaPrivateKey, pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
 use static_init::dynamic;
+use tracing::info;
 
 #[derive(Parser,Debug)]
 #[clap(name("Samply.Beam (shared library)"), version, arg_required_else_help(true))]
@@ -12,6 +15,10 @@ struct CliArgs {
     /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
     #[clap(long, env, value_parser)]
     pub http_proxy: Option<String>,
+
+    /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
+    #[clap(long, env, value_parser)]
+    tls_ca_certificates_dir: Option<PathBuf>,
 
     /// samply.pki: URL to HTTPS endpoint
     #[clap(long, env, value_parser)]
@@ -55,6 +62,7 @@ pub(crate) struct Config {
     pub(crate) privkey_rs256: RS256KeyPair,
     pub(crate) privkey_rsa: RsaPrivateKey,
     pub(crate) http_proxy: Option<Uri>,
+    pub(crate) tls_ca_certificates_dir: Option<PathBuf>,
     // pub(crate) broker_url: Uri,
     pub(crate) broker_domain: String,
 }
@@ -84,7 +92,8 @@ impl crate::config::Config for Config {
                     .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Not a valid proxy URL: {proxy}. Reason: {e}")))?)
             }
         } else { None };
-        Ok(Config { pki_address: cli_args.pki_address, pki_realm: cli_args.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy, broker_domain })
+        let tls_ca_certificates_dir = cli_args.tls_ca_certificates_dir;
+        Ok(Config { pki_address: cli_args.pki_address, pki_realm: cli_args.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy, broker_domain, tls_ca_certificates_dir })
     }    
 }
 

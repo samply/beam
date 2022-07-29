@@ -330,3 +330,4 @@ To work with the environment, you may run `./dev/beamdev defaults` to see some h
 - [ ] Broker-side filtering of the unencrypted fields with JSON queries
 - [ ] Integration of OAuth2 (in discussion)
 - [x] Helpful dev environment
+- [x] Support TLS-terminating proxies
