@@ -259,7 +259,7 @@ mod serialize_time {
     use std::{time::{SystemTime, UNIX_EPOCH, Duration}};
 
     use serde::{self, Deserialize, Deserializer, Serializer};
-    use tracing::{warn, debug};
+    use tracing::{warn, debug, error};
 
     // #[derive(Debug)]
     // struct Error(String);
@@ -282,20 +282,25 @@ mod serialize_time {
     where
         S: Serializer,
     {
-        let timestamp = time.duration_since(UNIX_EPOCH).unwrap(); // TODO: Correct error handling
-        s.serialize_u64(timestamp.as_secs())
+        let ttl = match time.duration_since(SystemTime::now()) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Internal Error: Tried to serialize a task which should have expired and expunged from memory {} seconds ago. Will return TTL=0. Cause: {}", e.duration().as_secs(), e);
+                Duration::ZERO
+            },
+        };
+        s.serialize_u64(ttl.as_secs())
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
     where
         D: Deserializer<'de>,
     {
-        debug!("Trying to deserialize ...");
-        let timestamp: u64 = u64::deserialize(deserializer)?;
-        let time = SystemTime::UNIX_EPOCH + Duration::from_secs(timestamp);
-        debug!("Deserialized u64 {} to time {:?}", timestamp, time);
+        let ttl: u64 = u64::deserialize(deserializer)?;
+        let expire = SystemTime::now() + Duration::from_secs(ttl);
+        debug!("Deserialized u64 {} to time {:?}", ttl, expire);
         Ok(
-            time
+            expire
         )
     }
 }
@@ -306,7 +311,7 @@ pub struct MsgTaskRequest {
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub body: String,
-    #[serde(with="serialize_time")]
+    #[serde(with="serialize_time", rename="ttl")]
     pub expire: SystemTime,
     pub failure_strategy: FailureStrategy,
     #[serde(skip)]

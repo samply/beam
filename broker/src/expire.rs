@@ -37,7 +37,7 @@ pub(crate) async fn watch(tasks: Arc<RwLock<HashMap<MyUuid, MsgSigned<MsgTaskReq
                     debug!("Next task will expire at {:?}", new.msg.expire);
                 }
             },
-            // Timer meet (=> task has expired)
+            // Timer met (=> task has expired)
             _ = tokio::time::sleep(until) => {
                 let mut tasks = tasks.write().await;
                 let removed = tasks.remove(&soonest.id.unwrap());
