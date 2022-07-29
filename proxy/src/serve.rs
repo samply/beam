@@ -9,7 +9,7 @@ use crate::{serve_health, serve_tasks};
 pub(crate) async fn serve() -> anyhow::Result<()> {
     let config = config::CONFIG_PROXY.clone();
     
-    let client = shared::http_proxy::build_hyper_client(config.http_proxy)
+    let client = shared::http_proxy::build_hyper_client(config.http_proxy, config.tls_ca_certificates)
         .map_err(SamplyBeamError::HttpProxyProblem)?;
 
     let router_tasks = serve_tasks::router(&client);

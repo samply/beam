@@ -4,7 +4,7 @@ use axum::{Json, http::Request, body::Body};
 use static_init::dynamic;
 use tokio::{sync::{RwLock, mpsc, oneshot}};
 use tracing::{debug, warn, info, error};
-use std::{path::Path, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string};
+use std::{path::{Path, PathBuf}, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string};
 use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PaddingScheme, pkcs1::DecodeRsaPublicKey};
 use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
@@ -25,6 +25,15 @@ pub(crate) struct CertificateCache{
 
 impl CertificateCache {
     pub fn new(update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>) -> Result<CertificateCache,SamplyBeamError> {
+        let mut certs = Vec::new();
+        if let Some(dir) = &config::CONFIG_SHARED.tls_ca_certificates_dir {
+            for file in std::fs::read_dir(dir).map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read CA certificates: {}", e)))? {
+                if let Ok(file) = file {
+                    certs.push(file.path().to_str().unwrap().into());
+                }
+            }
+            println!("{:?}", certs);
+        }
         Ok(Self{
         serial_to_x509: HashMap::new(),
         cn_to_serial: HashMap::new(),
@@ -32,6 +41,7 @@ impl CertificateCache {
             VaultClientSettingsBuilder::default()
                 .address(&config::CONFIG_SHARED.pki_address.to_string())
                 .token(&config::CONFIG_SHARED.pki_apikey)
+                .ca_certs(certs)
                 .build()?)?,
         pki_realm: config::CONFIG_SHARED.pki_realm.clone(),
         update_trigger
@@ -383,4 +393,19 @@ fn x509_date_valid(cert: &X509) -> Result<bool, ErrorStack> {
     let startdate = asn1_time_to_system_time(cert.not_before())?;
     let now = SystemTime::now();
     return Ok(expirydate > now && now > startdate);
+}
+
+pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, std::io::Error> {
+    let mut result = Vec::new();
+    if let Some(ca_dir) = ca_dir {
+        for file in ca_dir.read_dir()? { //.map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory {}: {}", ca_dir.to_string_lossy(), e)))
+            let path = file?.path();
+            let content = std::fs::read(&path)?;
+            let cert = X509::from_pem(&content)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Unable to read certificate from file {}: {}", path.to_string_lossy(), e)))?;
+            result.push(cert);
+        }
+    }
+    info!("Loaded {} trusted CA certificates for outgoing TLS connections.", result.len());
+    Ok(result)
 }
