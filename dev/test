@@ -25,7 +25,7 @@ case "$1" in
     test
     ;;
   ci)
-    build_docker
+    #build_docker
     start
     test
     ;;
