@@ -136,6 +136,7 @@ Tasks are represented in the following structure:
       "max_tries": 5
     }
   },
+  "ttl": 3600,
   "metadata": "The broker can read and use this field e.g., to apply filters on behalf of an app"
 }
 ```
@@ -146,6 +147,7 @@ Tasks are represented in the following structure:
 - `body`: Description of work to be done. Not interpreted by the Broker.
 - `failure_strategy`: Advises each client how to handle failures. Possible values `discard`, `retry`.
 - `failure_strategy.retry`: How often to retry (`max_tries`) a failed task and how long to wait in between each try (`backoff_millisecs`).
+- `ttl`: Time-to-live in seconds. Once this reaches zero, the broker will expunge the task along with its results.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Result](#result) for more examples) and can be handled by the broker (thus intentionally not encrypted).
 
 ### Result
@@ -320,3 +322,4 @@ To work with the environment, you may run `./dev/beamdev defaults` to see some h
 - [ ] Broker-side filtering of the unencrypted fields with JSON queries
 - [ ] Integration of OAuth2 (in discussion)
 - [x] Helpful dev environment
+- [x] Expiration of tasks and results
