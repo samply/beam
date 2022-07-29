@@ -132,7 +132,7 @@ COL_GREEN='\033[0;32m'
 COL_BLUE='\033[0;34m'
 
 function testing {
-    echo -e "${COL_BLUE}TEST \"$@\"${COL_NONE}"
+    echo -e "${COL_BLUE}TEST: $@${COL_NONE}"
 }
 
 function fail {
@@ -180,16 +180,11 @@ function curl_post {
     echo "$JSON"
 }
 
-function in_seconds {
-    ADD_SECS=${1-0}
-    echo $(( $(date +%s) + $ADD_SECS ))
+function task_with_ttl {
+    sed "s/\[TTL\]/$1/g"
 }
 
-function task_in_seconds {
-    echo "$2" | sed "s/\[EXPIRE\]/$(in_seconds $1)/g"
-}
-
-export -f curl_get curl_post curl_put start stop clean testing fail success in_seconds task_in_seconds
+export -f curl_get curl_post curl_put start stop clean testing fail success task_with_ttl
 
 check_prereqs
 

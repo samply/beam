@@ -2,7 +2,7 @@
 
 testing Create task TASK_BY_A1P1_FOR_A1P2
 
-TASK_BY_A1P1_FOR_A1P2="$(task_in_seconds 3 "$TASK_BY_A1P1_FOR_A1P2")"
+TASK_BY_A1P1_FOR_A1P2="$(echo "$TASK_BY_A1P1_FOR_A1P2" | task_with_ttl 3)"
 RET=$(echo $TASK_BY_A1P1_FOR_A1P2 | curl_post $APP1_P1 -v $P1/v1/tasks)
 CODE=$(echo $RET | jq -r .response_code)
 
@@ -22,7 +22,7 @@ if [ "$CODE" != "200" ]; then
     fail "$RET" Failed to fetch task. Expected 200, got $CODE
 fi
 
-if [ "$(echo $BODY | jq --sort-keys -c .[0])" != "$(echo $TASK_BY_A1P1_FOR_A1P2 | jq --sort-keys -c)" ]; then
+if [ "$(echo $BODY | jq --sort-keys -c '.[0] | del(.ttl)')" != "$(echo $TASK_BY_A1P1_FOR_A1P2 | jq --sort-keys -c 'del(.ttl)')" ]; then
     fail "$RET" I got a task but not the right one? I expected body \"$TASK_BY_A1P1_FOR_A1P2\", got \"$BODY\"
 fi
 
@@ -45,5 +45,19 @@ if [ "$CODE" != "200" ]; then
 fi
 
 if [ "$BODY" != "[]" ]; then
-    fail "$RET" I got a task that should have been expird.I expected body \"[]\", got \"$BODY\"
+    fail "$RET" I got a task that should have been expired. Expected body \"[]\", got \"$BODY\"
 fi
+
+success
+
+testing After expiration, we should be able to re-create the same task
+
+TASK_BY_A1P1_FOR_A1P2="$(echo "$TASK_BY_A1P1_FOR_A1P2" | task_with_ttl 3)"
+RET=$(echo $TASK_BY_A1P1_FOR_A1P2 | curl_post $APP1_P1 -v $P1/v1/tasks)
+CODE=$(echo $RET | jq -r .response_code)
+
+if [ "$CODE" != "201" ]; then
+    fail "$RET" Unable to create task. Expected 201, got $CODE
+fi
+
+success
