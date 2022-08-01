@@ -5,5 +5,5 @@ RUN cargo build --bin proxy --release
 
 FROM gcr.io/distroless/cc
 COPY --from=builder /usr/src/app/target/release/proxy /usr/local/bin/
-COPY --from=builder /usr/src/app/config /etc/samply/beam
+COPY /config/* /etc/samply/beam/
 ENTRYPOINT [ "/usr/local/bin/proxy" ]

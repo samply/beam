@@ -83,6 +83,7 @@ function build() {
 function clean() {
     stop
     rm -rfv artifacts/
+    rm -v ../config/root-ca.crt
 }
 
 function start {
