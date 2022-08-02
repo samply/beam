@@ -332,4 +332,19 @@ mod tests {
         assert!(BrokerId::str_has_type("roker.samply.de").is_err());
         assert!(BrokerId::str_has_type("moreString.app12.proxy23.broker.samply.de").is_err());
     }
+
+    #[test]
+    fn test_appid_brokerid() {
+        let app_id_str = "app.proxy1.broker.demo.beam.samply.de";
+        let actual_broker_id_from_str = app_to_broker_id(app_id_str).unwrap();
+        assert_eq!("broker.demo.beam.samply.de", actual_broker_id_from_str);
+
+        assert!(BROKER_ID.set(actual_broker_id_from_str.to_string()).is_ok());
+        let app_id = AppId::new(app_id_str).unwrap();
+        let actual_broker_id_str = app_to_broker_id(&app_id.to_string()).unwrap();
+        assert_eq!(actual_broker_id_str, actual_broker_id_from_str);
+
+        let actual_broker_id = BrokerId::new(&actual_broker_id_str).unwrap();
+        assert_eq!(actual_broker_id.to_string(), actual_broker_id_str);
+    }
 }
