@@ -83,11 +83,11 @@ curl -k -v --json '{"body":"What is the answer to the ultimate question of life,
 `Proxy1` replies:
 ```
 HTTP/1.1 201 Created
-location: /tasks/ 70c0aa90-bfcf-4312-a6af-42cbd57dc0b8
-content-length: 0
-date: Mon, 27 Jun 2022 13:58:35 GMT
+Location: /tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8
+Content-Length: 0
+Date: Mon, 27 Jun 2022 13:58:35 GMT
 ```
-where the `location` header field is the id of the newly created task. With that
+where the `Location` header field is the id of the newly created task. With that
 the task is registered and will be distributed to the appropriate locations.
 
 ### Listening for relevant tasks
@@ -101,13 +101,13 @@ The query returns the task, and as `app` at Proxy 2, we inform the broker that
 we are working on this important task by creating a preliminary "result" with
 `"status": "claimed"`:
 ```
-curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":"claimed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results
+curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":"claimed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/app.proxy2.broker.example.de
 ```
 
 ### Returning a Result
 Party 2 processes the received task. After succeeding, `app` at party 2 returns the result to party 1:
 ```
-curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":{"succeeded":"The answer is 42"},"task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results
+curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","metadata":["Arbitrary","types","are","possible"],"status":"succeeded","body":"The answer is 42","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/app.proxy2.broker.example.de
 ```
 
 ### Waiting for tasks to complete
@@ -154,15 +154,13 @@ Each task can hold 0...n results by each *worker* defined in the task's `to` fie
 A succeeded result for the above task:
 ```json
 {
-  "id": "8db76400-e2d9-4d9d-881f-f073336338c1",
   "from": "app1.proxy-hd.broker-project1.samply.de",
   "to": [
     "app7.proxy-hd.broker-project1.samply.de"
   ],
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
-  "status": {
-    "succeeded": "Successfully quenched 1.43e14 flux pulse devices"
-  },
+  "status": "succeeded",
+  "body": "Successfully quenched 1.43e14 flux pulse devices",
   "metadata": ["Arbitrary", "types", "are", "possible"]
 }
 ```
@@ -170,27 +168,24 @@ A succeeded result for the above task:
 A failed task:
 ```json
 {
-  "id": "24a49494-6a00-415f-80fc-b2ae34658b98",
   "from": "app5.proxy-ma.broker-project1.samply.de",
   "to": [
     "app7.proxy-hd.broker-project1.samply.de"
   ],
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
-  "status": {
-    "permfailed": "Unable to decrypt quantum state"
-  },
+  "status": "permfailed",
+  "body": "Unable to decrypt quantum state",
   "metadata": {
     "complex": "A map (key 'complex') is possible, too"
   }
 }
 ```
 
-- `id`: UUID identifying the result. Note that when the result is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Currently, since there can be only 0..1 results per client (= `from` field), a result's URL has the form `/v1/tasks/<task_id>/results/<id_in_from_field>` and the `id` field is only used internally, e.g. for filtering. However, for future compatibility, Callers must assume the submission's `id` property is ignored and check the reply's `Location` header for the actual URL to the task.
 - `from`: BeamID identifying the client submitting this result. This needs to match an entry the `to` field in the task.
 - `to`: BeamIDs the intended recipients of the result. Used for encrypted payloads.
 - `task`: UUID identifying the task this result belongs to.
-- `status`: Defines status of this work result. Possible values `claimed`, `tempfailed(<body>)`, `permfailed(<body>)`, `succeeded(<body>)`. It is up to the application how these statuses are used. For example, some application might require workers to acknowledge the receipt of tasks by setting `status=claimed`, whereas others have only short-running tasks and skip this step.
-- `status.body`: Required for `status`es listed above with `(<body>)`. Either carries the actual result payload of the task (`succeeded`) or an error message.
+- `status`: Defines status of this work result. Allowed values `claimed`, `tempfailed`, `permfailed`, `succeeded`. It is up to the application how these statuses are used. For example, some application might require workers to acknowledge the receipt of tasks by setting `status=claimed`, whereas others have only short-running tasks and skip this step.
+- `body`: Required for all `status`es except for `claimed`. Either carries the actual result payload of the task in case the status is `succeeded` or an error message.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Task](#task)) and is not encrypted.
 
 ## API
@@ -205,9 +200,9 @@ Parameters: none
 Returns:
 ```
 HTTP/1.1 201 Created
-location: /tasks/b999cf15-3c31-408f-a3e6-a47502308799
-content-length: 0
-date: Mon, 27 Jun 2022 13:58:35 GMT
+Location: /tasks/b999cf15-3c31-408f-a3e6-a47502308799
+Content-Length: 0
+Date: Mon, 27 Jun 2022 13:58:35 GMT
 ```
 
 In subsequent requests, use the URL defined in the `location` header to refer to the task (NOT the one you supplied in your POST body).
@@ -229,9 +224,9 @@ Parameters:
 Returns an array of tasks, cf. [here](#task)
 ```
 HTTP/1.1 200 OK
-content-type: application/json
-content-length: 220
-date: Mon, 27 Jun 2022 14:05:59 GMT
+Content-Type: application/json
+Content-Length: 220
+Date: Mon, 27 Jun 2022 14:05:59 GMT
 
 [
   {
@@ -251,9 +246,9 @@ Parameters:
 Returns an array of results, cf. [here](#result)
 ```
 HTTP/1.1 200 OK
-content-type: application/json
-content-length: 179
-date: Mon, 27 Jun 2022 14:26:45 GMT
+Content-Type: application/json
+Content-Length: 179
+Date: Mon, 27 Jun 2022 14:26:45 GMT
 
 [
   {
@@ -283,8 +278,8 @@ Parameters:
 In the current version only an appropriate status code is returned once/if initialization has succeeded. However, in the future more detailed health information might be returned in the reply body.
 ```
 HTTP/1.1 200 OK
-content-length: 0
-date: Mon, 27 Jun 2022 14:26:45 GMT
+Content-Length: 0
+Date: Mon, 27 Jun 2022 14:26:45 GMT
 ```
 
 ## Development Environment
