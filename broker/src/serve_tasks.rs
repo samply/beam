@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     http::{StatusCode, header},
-    routing::{get, post},
+    routing::{get, post, put},
     Extension, Json, Router, extract::{Query, Path}, response::IntoResponse
 };
 use serde::{Deserialize};
@@ -20,15 +20,11 @@ struct State {
 }
 
 pub(crate) fn router() -> Router {
-    let state = State::default();
-    let router = Router::new()
+    Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
-        .route("/v1/tasks/:task_id/results", get(get_results_for_task).put(put_result))
-        .layer(Extension(state.clone()));
-
-    tokio::task::spawn(expire::watch(state.tasks, state.new_task_tx.subscribe()));
-
-    router
+        .route("/v1/tasks/:task_id/results", get(get_results_for_task))
+        .route("/v1/tasks/:task_id/results/:app_id", put(put_result))
+        .layer(Extension(State::default()))
 }
 
 impl Default for State {
@@ -367,17 +363,20 @@ async fn post_task(
     ))
 }
 
-// PUT /v1/tasks/:task_id/results
+// PUT /v1/tasks/:task_id/results/:app_id
 async fn put_result(
-    Path(task_id): Path<MsgId>,
+    Path((task_id, app_id)): Path<(MsgId,AppOrProxyId)>,
     result: MsgSigned<MsgTaskResult>,
     Extension(state): Extension<State>
-) -> Result<(StatusCode, impl IntoResponse), (StatusCode, &'static str)> {
+) -> Result<StatusCode, (StatusCode, &'static str)> {
     debug!("Called: Task {:?}, {:?}", task_id, result);
     if task_id != result.msg.task {
         return Err((StatusCode::BAD_REQUEST, "Task IDs supplied in path and payload do not match."));
     }
     let worker_id = result.msg.from.clone();
+    if app_id != worker_id {
+        return Err((StatusCode::BAD_REQUEST, "AppID supplied in URL and signed message do not match."));
+    }
 
     // Step 1: Check prereqs.
     let mut tasks = state.tasks.write().await;
@@ -407,8 +406,5 @@ async fn put_result(
     if let Err(e) = sender.send(result) {
         debug!("Unable to send notification: {}. Ignoring since probably noone is currently waiting for tasks.", e);
     }
-    Ok((
-        statuscode,
-        [(header::LOCATION, format!("/v1/tasks/{}/results/{}", task_id, worker_id))]
-    ))
+    Ok(statuscode)
 }
