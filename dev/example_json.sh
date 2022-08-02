@@ -21,7 +21,6 @@ export TASK0='
 
 export RESULT_BY_APP1='
 {
-  "id": "8db76400-e2d9-4d9d-881f-f073336338c1",
   "from": "app1.proxy1.broker",
   "to": [
     "app1.proxy1.broker"
@@ -34,7 +33,6 @@ export RESULT_BY_APP1='
 
 export RESULT_BY_APP2='
 {
-  "id": "24a49494-6a00-415f-80fc-b2ae34658b98",
   "from": "app2.proxy1.broker",
   "to": [
     "app1.proxy1.broker"
