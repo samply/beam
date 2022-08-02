@@ -27,9 +27,8 @@ export RESULT_BY_APP1='
     "app1.proxy1.broker"
   ],
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
-  "status": {
-    "succeeded": "Successfully quenched 1.43e14 flux pulse devices"
-  },
+  "status": "succeeded",
+  "body": "Successfully quenched 1.43e14 flux pulse devices",
   "metadata": ["Arbitrary", "types", "are", "possible"]
 }'
 
@@ -41,9 +40,8 @@ export RESULT_BY_APP2='
     "app1.proxy1.broker"
   ],
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
-  "status": {
-    "permfailed": "Unable to decrypt quantum state"
-  },
+  "status": "permfailed",
+  "body": "Unable to decrypt quantum state",
   "metadata": {
     "complex": "A map (key 'complex') is possible, too"
   }
