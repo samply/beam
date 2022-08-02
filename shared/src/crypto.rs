@@ -32,7 +32,7 @@ impl CertificateCache {
                     certs.push(file.path().to_str().unwrap().into());
                 }
             }
-            debug!("Loaded local certificates: {}", certs);
+            debug!("Loaded local certificates: {}", certs.join(" "));
         }
         Ok(Self{
         serial_to_x509: HashMap::new(),
