@@ -115,7 +115,7 @@ Meanwhile, `app` at party 1 waits on the completion of its task. But not wanting
 ```
 curl -k -X GET -v -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results?wait_count=1
 ```
-This *long polling* opens the connection and sleeps until a reply is recieved. For more information, see the API documentation.
+This *long polling* opens the connection and sleeps until a reply is received. For more information, see the API documentation.
 
 ## Data objects (JSON)
 ### Task
@@ -220,7 +220,7 @@ URL: `/v1/tasks`
 Parameters:
 - `from` (optional): Fetch only tasks created by this ID.
 - `to` (optional): Fetch only tasks directed to this ID.
-- [long polling](#long-polling) is supported.
+- [long polling](#long-polling-api-access) is supported.
 - `filter` (optional): Fetch only tasks fulfilling the specified filter criterion. Generic queries are not yet implemented, but the following "convenience filters" reflecting common use cases exist:
   - `filter=todo`: Matches unfinished tasks to be worked on by the asking client. Is a combination of:
     - `to` contains me and
@@ -246,7 +246,7 @@ The submitter of the task (see [Create Task](#create-task)) calls this endpoint 
 Method: `GET`  
 URL: `/v1/tasks/<task_id>/results`  
 Parameters:
-- [long polling](#long-polling) is supported.
+- [long polling](#long-polling-api-access) is supported.
 
 Returns an array of results, cf. [here](#result)
 ```
