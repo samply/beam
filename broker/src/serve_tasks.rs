@@ -291,17 +291,17 @@ struct MsgFilterForTask<'a> {
 impl<'a> MsgFilterForTask<'a> {
     fn unanswered(&self, msg: &MsgTaskRequest) -> bool {
         if self.unanswered_by.is_none() {
-            debug!("Is {} unanswered? Yes, criterion not defined.", msg.get_id());
+            debug!("Is {} unanswered? Yes, criterion not defined.", msg.id());
             return true;
         }
         let unanswered = self.unanswered_by.unwrap();
         for res in msg.results.values() {
             if res.get_from() == unanswered && self.workstatus_is_not.contains(&std::mem::discriminant(res.msg.status())) {
-                debug!("Is {} unanswered? No, answer found.", msg.get_id());
+                debug!("Is {} unanswered? No, answer found.", msg.id());
                 return false;
             }
         }
-        debug!("Is {} unanswered? Yes, no matching answer found.", msg.get_id());
+        debug!("Is {} unanswered? Yes, no matching answer found.", msg.id());
         true
     }
 }

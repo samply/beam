@@ -124,7 +124,6 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
         let msg = serde_json::from_value::<M>(content_with.custom)
             .map_err(|_| ERR_SIG)?;
         let msg_empty = MsgEmpty {
-            id: *msg.get_id(),
             from: msg.get_from().clone(),
         };
         let serialized = serde_json::to_string(&msg_empty).unwrap(); // known input

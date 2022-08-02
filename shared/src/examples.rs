@@ -53,7 +53,6 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
     );
 
     let response_by_app1 = MsgTaskResult {
-        id: MsgId::new(),
         from: app1.clone().into(),
         to: vec![app1.clone().into()],
         task: task_for_apps_1_2.id,
@@ -61,7 +60,6 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
         metadata: json!("A normal string works, too!")
     };
     let response_by_app2 = MsgTaskResult {
-        id: MsgId::new(),
         from: app2.into(),
         to: vec![app1.into()],
         task: task_for_apps_1_2.id,
