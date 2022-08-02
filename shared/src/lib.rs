@@ -261,22 +261,6 @@ mod serialize_time {
     use serde::{self, Deserialize, Deserializer, Serializer};
     use tracing::{warn, debug, error};
 
-    // #[derive(Debug)]
-    // struct Error(String);
-
-    // impl std::error::Error for Error {}
-
-    // impl std::fmt::Display for Error {
-    //     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    //         write!(f, "{}", self.0)
-    //     }
-    // }
-
-    // impl serde::ser::Error for Error {
-    //     fn custom<T>(msg:T) -> Self where T:std::fmt::Display {
-    //         Error(msg.to_string())
-    //     }
-    // }
 
     pub fn serialize<S>(time: &SystemTime, s: S) -> Result<S::Ok, S::Error>
     where
