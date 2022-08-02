@@ -237,6 +237,21 @@ Date: Mon, 27 Jun 2022 14:05:59 GMT
 )
 ```
 
+### Create a result
+Create or update a result of a task. 
+
+Method: `PUT`  
+URL: `/v1/tasks/<task_id>/results/<app_id>`  
+Body: see [Result](#result)  
+Parameters: none
+
+Returns:
+```
+HTTP/1.1 204 No Content
+Content-Length: 0
+Date: Mon, 27 Jun 2022 13:58:35 GMT
+```
+
 ### Retrieve results
 The submitter of the task (see [Create Task](#create-task)) calls this endpoint to retrieve the results.
 
