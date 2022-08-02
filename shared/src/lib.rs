@@ -309,25 +309,25 @@ pub struct MsgTaskResult {
     pub metadata: Value,
 }
 
-pub trait HasWaitId<T> {
-    fn get_wait_id(&self) -> T;
+pub trait HasTaskId<MsgId> {
+    fn task_id(&self) -> MsgId;
 }
 
-impl HasWaitId<MsgId> for MsgTaskRequest {
-    fn get_wait_id(&self) -> MsgId {
+impl HasTaskId<MsgId> for MsgTaskRequest {
+    fn task_id(&self) -> MsgId {
         self.id
     }
 }
 
-impl HasWaitId<MsgId> for MsgTaskResult {
-    fn get_wait_id(&self) -> MsgId {
+impl HasTaskId<MsgId> for MsgTaskResult {
+    fn task_id(&self) -> MsgId {
         self.task
     }
 }
 
-impl<M> HasWaitId<MsgId> for MsgSigned<M> where M: HasWaitId<MsgId> + Msg {
-    fn get_wait_id(&self) -> MsgId {
-        self.msg.get_wait_id()
+impl<M> HasTaskId<MsgId> for MsgSigned<M> where M: HasTaskId<MsgId> + Msg {
+    fn task_id(&self) -> MsgId {
+        self.msg.task_id()
     }
 }
 
