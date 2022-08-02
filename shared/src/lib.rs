@@ -77,7 +77,7 @@ impl Display for MyUuid {
 }
 
 #[derive(PartialEq, Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", tag = "status", content = "body")]
 pub enum WorkStatus {
     Claimed,
     TempFailed(TaskResponse),
@@ -288,6 +288,7 @@ pub struct MsgTaskResult {
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub task: MsgId,
+    #[serde(flatten)]
     pub status: WorkStatus,
     pub metadata: Value,
 }
