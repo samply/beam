@@ -146,15 +146,10 @@ pub static EMPTY_VEC_APPORPROXYID: Vec<AppOrProxyId> = Vec::new();
 
 #[derive(Serialize,Deserialize,Debug)]
 pub struct MsgEmpty {
-    pub id: MsgId,
     pub from: AppOrProxyId,
 }
 
 impl Msg for MsgEmpty {
-    fn get_id(&self) -> &MsgId {
-        &self.id
-    }
-
     fn get_from(&self) -> &AppOrProxyId {
         &self.from
     }
@@ -169,7 +164,6 @@ impl Msg for MsgEmpty {
 }
 
 pub trait Msg: Serialize {
-    fn get_id(&self) -> &MsgId;
     fn get_from(&self) -> &AppOrProxyId;
     fn get_to(&self) -> &Vec<AppOrProxyId>;
     fn get_metadata(&self) -> &Value;
@@ -190,10 +184,6 @@ impl MsgWithBody for MsgTaskResult {
 }
 
 impl<M: Msg> Msg for MsgSigned<M> {
-    fn get_id(&self) -> &MsgId {
-        self.msg.get_id()
-    }
-
     fn get_from(&self) -> &AppOrProxyId {
         self.msg.get_from()
     }
@@ -208,10 +198,6 @@ impl<M: Msg> Msg for MsgSigned<M> {
 }
 
 impl Msg for MsgTaskRequest {
-    fn get_id(&self) -> &MsgId {
-        &self.id
-    }
-
     fn get_from(&self) -> &AppOrProxyId {
         &self.from
     }
@@ -226,10 +212,6 @@ impl Msg for MsgTaskRequest {
 }
 
 impl Msg for MsgTaskResult {
-    fn get_id(&self) -> &MsgId {
-        &self.id
-    }
-
     fn get_from(&self) -> &AppOrProxyId {
         &self.from
     }
@@ -284,7 +266,6 @@ pub struct EncryptedMsgTaskRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskResult {
-    pub id: MsgId,
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub task: MsgId,
@@ -316,6 +297,10 @@ impl<M> HasWaitId<MsgId> for MsgSigned<M> where M: HasWaitId<MsgId> + Msg {
 }
 
 impl MsgTaskRequest {
+    pub fn id(&self) -> &MsgId {
+        &self.id
+    }
+
     pub fn new(
         from: AppOrProxyId,
         to: Vec<AppOrProxyId>,
@@ -354,10 +339,6 @@ impl MsgPing {
 }
 
 impl Msg for MsgPing {
-    fn get_id(&self) -> &MsgId {
-        &self.id
-    }
-
     fn get_from(&self) -> &AppOrProxyId {
         &self.from
     }
