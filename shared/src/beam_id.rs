@@ -320,12 +320,19 @@ pub fn app_to_broker_id(app_id: &str) -> Result<String,SamplyBeamError> {
 
 #[cfg(test)]
 mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
+
+    fn init_broker_id(broker_id: &str) {
+        if let Err(prev) = BROKER_ID.set(broker_id.into()) {
+            if prev != broker_id {
+                panic!("Tried to initialize BROKER_ID with two different values.");
+            }
+        }
+    }
 
     #[test]
     fn test_str_has_type() {
-        assert!(BROKER_ID.set("broker.samply.de".to_string()).is_ok());
+        init_broker_id("broker.samply.de");
         assert_eq!(BrokerId::str_has_type("broker.samply.de").unwrap(), BeamIdType::BrokerId);
         assert_eq!(BrokerId::str_has_type("proxy23.broker.samply.de").unwrap(), BeamIdType::ProxyId);
         assert_eq!(BrokerId::str_has_type("app12.proxy23.broker.samply.de").unwrap(), BeamIdType::AppId);
@@ -335,11 +342,11 @@ mod tests {
 
     #[test]
     fn test_appid_brokerid() {
-        let app_id_str = "app.proxy1.broker.demo.beam.samply.de";
+        let app_id_str = "app.proxy1.broker.samply.de";
         let actual_broker_id_from_str = app_to_broker_id(app_id_str).unwrap();
-        assert_eq!("broker.demo.beam.samply.de", actual_broker_id_from_str);
+        assert_eq!("broker.samply.de", actual_broker_id_from_str);
 
-        assert!(BROKER_ID.set(actual_broker_id_from_str.to_string()).is_ok());
+        init_broker_id(&actual_broker_id_from_str);
         let app_id = AppId::new(app_id_str).unwrap();
         let actual_broker_id_str = app_to_broker_id(&app_id.to_string()).unwrap();
         assert_eq!(actual_broker_id_str, actual_broker_id_from_str);
