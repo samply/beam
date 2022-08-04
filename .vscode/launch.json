@@ -32,8 +32,8 @@
                 "PROXY_ID": "proxy2.broker",
                 "PRIVKEY_FILE": "dev/pki/proxy2.priv.pem",
                 "BIND_ADDR": "0.0.0.0:8082",
-                "http_proxy": "",
-                "HTTP_PROXY": "",
+                "all_proxy": "",
+                "ALL_PROXY": "",
             }
         },
         {

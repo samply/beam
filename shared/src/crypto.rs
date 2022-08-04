@@ -406,6 +406,5 @@ pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, 
             result.push(cert);
         }
     }
-    info!("Loaded {} trusted CA certificates for outgoing TLS connections.", result.len());
     Ok(result)
 }
