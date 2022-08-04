@@ -26,6 +26,9 @@ impl Display for BeamIdType {
 }
 
 pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
+    fn get_broker_id() -> Option<&'static String> {
+        BROKER_ID.get()
+    }
     fn set_broker_id(domain: &String) {
         let res = BROKER_ID.set(domain.clone());
         if let Err(value) = res {
