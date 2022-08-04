@@ -70,7 +70,7 @@ pub(crate) struct Config {
 impl crate::config::Config for Config {
     fn load() -> Result<Self,SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
+        BrokerId::set_broker_id(&cli_args.broker_url.host().unwrap().to_string());
 
         let (privkey_rsa, privkey_rs256) = load_crypto(&cli_args)?;
     

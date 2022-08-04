@@ -26,10 +26,10 @@ impl Display for BeamIdType {
 }
 
 pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
-    fn set_broker_id(domain: String) {
+    fn set_broker_id(domain: &String) {
         let res = BROKER_ID.set(domain.clone());
         if let Err(value) = res {
-            assert_eq!(domain, value, "Tried to initialize broker_id with two different values");
+            assert_eq!(*domain, value, "Tried to initialize broker_id with two different values");
         }
     }
     fn str_has_type(value: &str) -> Result<BeamIdType,SamplyBeamError> {

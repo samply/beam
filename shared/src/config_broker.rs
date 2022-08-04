@@ -57,7 +57,7 @@ pub struct Config {
 impl crate::config::Config for Config {
     fn load() -> Result<Self,SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
+        BrokerId::set_broker_id(&cli_args.broker_url.host().unwrap().to_string());
         let pki_token = read_to_string(&cli_args.pki_apikey_file)
             .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read PKI API key at {}: {}", &cli_args.pki_apikey_file.to_string_lossy(), e)))?.trim().to_string();
     
