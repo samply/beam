@@ -1,14 +1,12 @@
 use std::fmt::Write;
 
 use hyper::Client;
-use shared::{config, errors::SamplyBeamError};
+use shared::{config, errors::SamplyBeamError, config_shared, config_proxy};
 use tracing::{info, debug, warn, error};
 
 use crate::{serve_health, serve_tasks};
 
-pub(crate) async fn serve() -> anyhow::Result<()> {
-    let config = config::CONFIG_PROXY.clone();
-    
+pub(crate) async fn serve(config: config_proxy::Config) -> anyhow::Result<()> {
     let client = shared::http_proxy::build_hyper_client(config.tls_ca_certificates)
         .map_err(SamplyBeamError::HttpProxyProblem)?;
 

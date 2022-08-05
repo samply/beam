@@ -49,12 +49,12 @@ where
     }
 }
 
-pub async fn extract_jwt(token: &str) -> Result<(crypto::ProxyPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
+pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
     let metadata = Token::decode_metadata(token)
         .map_err(|_| SamplyBeamError::RequestValidationFailed)?;
-    let proxy_id = ProxyId::new(metadata.key_id().unwrap_or_default())
-        .map_err(|_| SamplyBeamError::RequestValidationFailed)?;
-    let public = crypto::get_cert_and_client_by_cname_as_pemstr(&proxy_id).await;
+    let serial = metadata.key_id().unwrap_or_default();
+        // .map_err(|_| SamplyBeamError::RequestValidationFailed)?;
+    let public = crypto::get_cert_and_client_by_serial_as_pemstr(serial).await;
     if public.is_none() {
         return Err(SamplyBeamError::VaultError("Unable to retrieve matching certificate".into()));
     }
@@ -150,10 +150,10 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
 pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBeamError> {
     let json = serde_json::to_value(input)
         .map_err(|e| SamplyBeamError::SignEncryptError(format!("Serialization failed: {}", e)))?;
-    let privkey = &config::CONFIG_SHARED.privkey_rs256;
+    let privkey = &config::CONFIG_SHARED_CRYPTO.get().unwrap().privkey_rs256;
     
     let claims = 
-        Claims::with_custom_claims::<Value>(json, Duration::from_hours(1));
+        Claims::with_custom_claims::<Value>(json, Duration::from_hours(1)); // TODO: Make variable
 
     let token = privkey.sign(claims)
         .map_err(|_| SamplyBeamError::SignEncryptError("Unable to sign JWT".into()))?;

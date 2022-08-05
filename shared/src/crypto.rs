@@ -10,7 +10,7 @@ use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 use vaultrs::{client::{VaultClient, VaultClientSettingsBuilder},pki};
 
-use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}};
+use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}, config_shared::ConfigCrypto};
 
 type Serial = String;
 const SIGNATURE_LENGTH: u16 = 256;
@@ -189,23 +189,23 @@ async fn get_cert_by_cname(cname: &ProxyId) -> Option<X509>{
 }
 
 #[derive(Debug)]
-pub struct ProxyPublicPortion {
+pub struct CryptoPublicPortion {
     pub beam_id: ProxyId,
-    pub cert: String,
+    pub cert: X509,
     pub pubkey: String,
 }
 
-pub async fn get_cert_and_client_by_cname_as_pemstr(cname: &ProxyId) -> Option<ProxyPublicPortion> {
+pub async fn get_cert_and_client_by_cname_as_pemstr(cname: &ProxyId) -> Option<CryptoPublicPortion> {
     let cert: Option<X509> = get_cert_by_cname(cname).await;
     extract_x509(cert)
 }
 
-// pub async fn get_cert_and_client_by_serial_as_pemstr(serial: &str) -> Option<CertAndClient> {
-//     let cert = get_cert_by_serial(serial).await;
-//     extract_cert_and_client(cert)
-// }
+pub async fn get_cert_and_client_by_serial_as_pemstr(serial: &str) -> Option<CryptoPublicPortion> {
+    let cert = get_cert_by_serial(serial).await;
+    extract_x509(cert)
+}
 
-fn extract_x509(cert: Option<X509>) -> Option<ProxyPublicPortion> {
+fn extract_x509(cert: Option<X509>) -> Option<CryptoPublicPortion> {
     if cert.is_none() {
         return None;
     }
@@ -244,18 +244,13 @@ fn extract_x509(cert: Option<X509>) -> Option<ProxyPublicPortion> {
             }
         }
     };
-    let cert = cert.to_pem();
-    if cert.is_err() {
-        return None;
-    }
-    let cert = cert.unwrap();
-    let cert = std::str::from_utf8(cert.as_slice());
-    if cert.is_err() {
-        return None;
-    }
-    Some(ProxyPublicPortion {
+    let cert = cert
+        .to_pem()
+        .ok()?;
+    let cert = X509::from_pem(&cert).ok()?;
+    Some(CryptoPublicPortion {
         beam_id: verified_sender,
-        cert: cert.unwrap().into(),
+        cert,
         pubkey,
     })
 }
@@ -317,6 +312,7 @@ async fn nop_encrypt(json: serde_json::Value, fields_: &Vec<&str>) -> Result<ser
 
 /// Entry point for web framework to encrypt and sing payload
 pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &Vec<&str>) -> Result<(),SamplyBeamError> {
+    let config_crypto = &config::CONFIG_SHARED_CRYPTO.get().unwrap();
 
     // Body -> JSON
     let body_json = serde_json::from_str(r#"{"to": ["recipeint1", "recipient2"],}"#)
@@ -328,7 +324,7 @@ pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &V
         .or_else(|e| Err(SamplyBeamError::SignEncryptError("Cannot encrypt message".into())))?;
 
     //Sign Message
-    let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &config::CONFIG_SHARED.privkey_rsa)?;
+    let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &config_crypto.privkey_rsa)?;
 
     // Place new Body in Request
     let new_body = Body::from(signed_message);
