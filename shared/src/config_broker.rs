@@ -8,15 +8,11 @@ use tracing::info;
 use std::str::FromStr;
 
 #[derive(Parser,Debug)]
-#[clap(name("Samply.Beam.Broker"), version, arg_required_else_help(true))]
+#[clap(name("🌈 Samply.Beam.Broker"), version, arg_required_else_help(true), after_help(crate::config_shared::CLAP_FOOTER))]
 struct CliArgs {
     /// Local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8080").unwrap())]
     bind_addr: SocketAddr,
-
-    /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
-    #[clap(long, env, value_parser)]
-    http_proxy: Option<String>,
 
     /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
     #[clap(long, env, value_parser)]

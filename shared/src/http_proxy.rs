@@ -1,29 +1,27 @@
-use std::time::Duration;
+use std::{time::Duration, collections::HashSet};
 
 use http::Uri;
-use hyper::{Client, client::{HttpConnector, connect::Connect}, service::Service};
+use hyper::{Client, client::{HttpConnector, connect::Connect, conn}, service::Service};
 use hyper_proxy::{Intercept, Proxy, ProxyConnector, Custom};
 use hyper_tls::{HttpsConnector, native_tls::{TlsConnector, Certificate}};
+use mz_http_proxy::hyper::connector;
 use once_cell::sync::OnceCell;
 use openssl::x509::X509;
 use tracing::{debug, info};
 
 use crate::{config, errors::SamplyBeamError, BeamId};
 
-pub fn build_hyper_client(proxy_uri: Option<Uri>, ca_certificates: Vec<X509>) -> Result<Client<ProxyConnector<HttpsConnector<HttpConnector>>>, std::io::Error> {
-    let proxy = if let Some(proxy_uri) = proxy_uri {
-        info!("Using proxy {}", proxy_uri);
-        Proxy::new(Intercept::All, proxy_uri)
-    } else {
-        Proxy::new(Intercept::None, "http://bogusproxy:4223".parse().unwrap())
-    };
+pub fn build_hyper_client(ca_certificates: Vec<X509>) -> Result<Client<ProxyConnector<HttpsConnector<HttpConnector>>>, std::io::Error> {
     let mut http = HttpConnector::new();
-    http.enforce_http(false);
     http.set_connect_timeout(Some(Duration::from_secs(1)));
-    let mut proxy_connector = ProxyConnector::from_proxy(HttpsConnector::new_with_connector(http), proxy)?;
+    http.enforce_http(false);
+    let https = HttpsConnector::new_with_connector(http);
+    let proxy_connector = connector()
+        .map_err(|e| panic!("Unable to build HTTP client: {}", e)).unwrap();
+    let mut proxy_connector = proxy_connector.with_connector(https);
     if ! ca_certificates.is_empty() {
         let mut tls = TlsConnector::builder();
-        for cert in ca_certificates {
+        for cert in &ca_certificates {
             const ERR: &str = "Internal Error: Unable to convert Certificate.";
             let cert = Certificate::from_pem(&cert.to_pem().expect(ERR)).expect(ERR);
             tls.add_root_certificate(cert);
@@ -33,6 +31,26 @@ pub fn build_hyper_client(proxy_uri: Option<Uri>, ca_certificates: Vec<X509>) ->
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Unable to build TLS Connector with custom CA certificates: {}", e)))?;
         proxy_connector.set_tls(Some(tls));
     }
+
+    let proxies = proxy_connector.proxies().iter()
+        .map(|p| p.uri().to_string())
+        .collect::<HashSet<_>>();
+
+    if proxies.len() == 0 && ca_certificates.len() > 0 {
+        return Err(std::io::Error::new(std::io::ErrorKind::Other, "Certificates for TLS termination were provided but no proxy to use. Please supply correct configuration."));
+    }
+
+    let proxies = match proxies.len() {
+        0 => "no proxy".to_string(),
+        1 => format!("proxy {}", proxies.iter().next().unwrap()),
+        num => format!("{num} proxies {:?}", proxies)
+    };
+    let certs = match ca_certificates.len() {
+        0 => "but no trusted certificate".to_string(),
+        1 => "with one trusted certificate".to_string(),
+        num => format!("with {num} trusted certificates")
+    };
+    info!("Using {proxies} {certs} for TLS termination.");
     
     Ok(Client::builder().build(proxy_connector))
 }
@@ -62,27 +80,15 @@ mod test {
     }
 
     #[tokio::test]
-    async fn https_without_proxy() {
-        let client = build_hyper_client(None, get_certs()).unwrap();
+    async fn https() {
+        let client = build_hyper_client(get_certs()).unwrap();
         run(HTTPS.parse().unwrap(), client).await;
     }
 
     #[tokio::test]
-    async fn http_without_proxy() {
-        let client = build_hyper_client(None, get_certs()).unwrap();
+    async fn http() {
+        let client = build_hyper_client(get_certs()).unwrap();
         run(HTTP.parse().unwrap(), client).await;
-    }
-
-    #[tokio::test]
-    async fn http_with_proxy() {
-        let client = build_hyper_client(Some("http://localhost:3128".parse().unwrap()), get_certs()).unwrap();
-        run(HTTP.parse().unwrap(), client).await;
-    }
-
-    #[tokio::test]
-    async fn https_with_proxy() {
-        let client = build_hyper_client(Some("http://localhost:3128".parse().unwrap()), get_certs()).unwrap();
-        run(HTTPS.parse().unwrap(), client).await;
     }
 
     async fn run(url: Uri, client: Client<impl Connect + Clone + Send + Sync + 'static>) {

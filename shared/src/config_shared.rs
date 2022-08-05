@@ -9,13 +9,11 @@ use rsa::{RsaPrivateKey, pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
 use static_init::dynamic;
 use tracing::info;
 
-#[derive(Parser,Debug)]
-#[clap(name("Samply.Beam (shared library)"), version, arg_required_else_help(true))]
-struct CliArgs {
-    /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
-    #[clap(long, env, value_parser)]
-    pub http_proxy: Option<String>,
+pub(crate) const CLAP_FOOTER: &str = "For proxy support, environment variables HTTP_PROXY, HTTPS_PROXY, ALL_PROXY and NO_PROXY (and their lower-case variants) are supported. Usually, you want to set HTTP_PROXY *and* HTTPS_PROXY or set ALL_PROXY if both values are the same.\n\nFor updates and detailed usage instructions, visit https://github.com/samply/beam";
 
+#[derive(Parser,Debug)]
+#[clap(name("🌈 Samply.Beam (shared library)"), version, arg_required_else_help(true), after_help(crate::config_shared::CLAP_FOOTER))]
+struct CliArgs {
     /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
     #[clap(long, env, value_parser)]
     tls_ca_certificates_dir: Option<PathBuf>,
@@ -61,7 +59,6 @@ pub(crate) struct Config {
     pub(crate) pki_apikey: String,
     pub(crate) privkey_rs256: RS256KeyPair,
     pub(crate) privkey_rsa: RsaPrivateKey,
-    pub(crate) http_proxy: Option<Uri>,
     pub(crate) tls_ca_certificates_dir: Option<PathBuf>,
     // pub(crate) broker_url: Uri,
     pub(crate) broker_domain: String,
@@ -84,16 +81,8 @@ impl crate::config::Config for Config {
             todo!() // TODO Tobias: Check if matches certificate, and fail
         }
         let broker_domain = broker_domain.unwrap().to_string();
-        let http_proxy: Option<Uri> = if let Some(proxy) = cli_args.http_proxy {
-            if proxy.is_empty() {
-                None
-            } else {
-                Some(proxy.parse()
-                    .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Not a valid proxy URL: {proxy}. Reason: {e}")))?)
-            }
-        } else { None };
         let tls_ca_certificates_dir = cli_args.tls_ca_certificates_dir;
-        Ok(Config { pki_address: cli_args.pki_address, pki_realm: cli_args.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, http_proxy, broker_domain, tls_ca_certificates_dir })
+        Ok(Config { pki_address: cli_args.pki_address, pki_realm: cli_args.pki_realm, pki_apikey, privkey_rs256, privkey_rsa, broker_domain, tls_ca_certificates_dir })
     }    
 }
 

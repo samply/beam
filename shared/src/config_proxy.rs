@@ -19,22 +19,17 @@ pub struct Config {
     pub pki_realm: String,
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId,ApiKey>,
-    pub http_proxy: Option<Uri>,
     pub tls_ca_certificates: Vec<X509>
 }
 
 pub type ApiKey = String;
 
 #[derive(Parser,Debug)]
-#[clap(name("Samply.Beam.Proxy"), version, arg_required_else_help(true))]
+#[clap(name("🌈 Samply.Beam.Proxy"), version, arg_required_else_help(true), after_help(crate::config_shared::CLAP_FOOTER))]
 pub struct CliArgs {
     /// Local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8081").unwrap())]
     pub bind_addr: SocketAddr,
-
-    /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
-    #[clap(long, env, value_parser)]
-    pub http_proxy: Option<String>,
 
     /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
     #[clap(long, env, value_parser)]
@@ -103,14 +98,6 @@ impl crate::config::Config for Config {
         if api_keys.is_empty() {
             return Err(SamplyBeamError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {0}_0_ID=<clientname>, {0}_0_KEY=<key>", APP_PREFIX)));
         }
-        let http_proxy: Option<Uri> = if let Some(proxy) = cli_args.http_proxy {
-            if proxy.is_empty() {
-                None
-            } else {
-                Some(proxy.parse()
-                    .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Not a valid proxy URL: {proxy}. Reason: {e}")))?)
-            }
-        } else { None };
         let tls_ca_certificates = crate::crypto::load_certificates_from_dir(cli_args.tls_ca_certificates_dir)
             .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory: {}", e)))?;
         let config = Config {
@@ -121,7 +108,6 @@ impl crate::config::Config for Config {
             pki_realm: cli_args.pki_realm,
             proxy_id,
             api_keys,
-            http_proxy,
             tls_ca_certificates
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
