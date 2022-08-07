@@ -42,6 +42,17 @@ jobs:
           else
             exit 1
           fi
+      - name: Set ${{ env.PROFILE }}
+        env:
+          PROFILE: ${{ env.PROFILE }}
+        run: |
+          if [ "${PROFILE}" == "release" ]; then
+            echo "profilestr=--release" >> $GITHUB_ENV
+          elif [ "${PROFILE}" == "debug" ]; then
+            echo "profilestr=" >> $GITHUB_ENV
+          else
+            echo "profilestr=--profile $PROFILE" >> $GITHUB_ENV
+          fi
       - uses: actions/checkout@v3
       - uses: Swatinem/rust-cache@v2
         with:
@@ -57,8 +68,7 @@ jobs:
         with:
           use-cross: true
           command: build
-          args: --target ${{ env.rustarch }}
-      - run: find .
+          args: --target ${{ env.rustarch }} ${{ env.profilestr }}
       - name: Upload Artifact
         uses: actions/upload-artifact@v3
         with:
