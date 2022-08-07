@@ -22,38 +22,50 @@ jobs:
 
   build-rust:
     name: Build (Rust)
-#    needs: [ pre-check ]
     runs-on: ubuntu-latest
 
     strategy:
       matrix:
         arch:
           - amd64
-#          - arm64
+          - arm64
 
     steps:
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-      - uses: actions/checkout@v3
-      - uses: actions/cache@v3
-        with:
-          path: /tmp/cache
-          key: ${{ runner.os }}-${{ matrix.arch }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-           ${{ runner.os }}-${{ matrix.arch }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.toml') }}-
-           ${{ runner.os }}-${{ matrix.arch }}-${{ env.PROFILE }}-
-      - name: Build (${{ matrix.arch }})
+      - name: Set arch ${{ matrix.arch }}
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
-          if [ "$PROFILE" != "debug" ]; then args="--profile $PROFILE"; fi
-          mkdir -p /tmp/cache/target /tmp/cache/cargo/registry
-          docker run --user $(id -u) --platform ${{ matrix.arch }} --rm -v $(pwd):/app -v /tmp/cache/target:/app/target -v /tmp/cache/cargo/registry:/usr/local/cargo/registry -w /app rust cargo build $args
+          if [ "${ARCH}" == "arm64" ]; then
+            echo "rustarch=aarch64-unknown-linux-gnu" >> $GITHUB_ENV
+          elif [ "${ARCH}" == "amd64" ]; then
+            echo "rustarch=x86_64-unknown-linux-gnu" >> $GITHUB_ENV
+          else
+            exit 1
+          fi
+      - uses: actions/checkout@v3
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.arch }}-${{ env.PROFILE }}
+      - uses: actions-rs/toolchain@v1
+        if: ${{ matrix.arch }} == 'arm64'
+        with:
+          toolchain: stable
+          override: true
+          target: ${{ env.rustarch }}
+      - name: Build (${{ matrix.arch }})
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: build
+          args: --target ${{ env.rustarch }}
+      - run: find .
       - name: Upload Artifact
         uses: actions/upload-artifact@v3
         with:
           name: binaries-${{ matrix.arch }}
           path: |
-            /tmp/cache/target/${{ env.PROFILE }}/proxy
-            /tmp/cache/target/${{ env.PROFILE }}/broker
+            target/${{ env.rustarch }}/${{ env.PROFILE }}/proxy
+            target/${{ env.rustarch }}/${{ env.PROFILE }}/broker
 
   test:
     name: Run tests
