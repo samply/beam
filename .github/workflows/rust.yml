@@ -37,8 +37,10 @@ jobs:
         run: |
           if [ "${ARCH}" == "arm64" ]; then
             echo "rustarch=aarch64-unknown-linux-gnu" >> $GITHUB_ENV
+            echo "is_cross=true" >> $GITHUB_ENV
           elif [ "${ARCH}" == "amd64" ]; then
             echo "rustarch=x86_64-unknown-linux-gnu" >> $GITHUB_ENV
+            echo "is_cross=false" >> $GITHUB_ENV
           else
             exit 1
           fi
@@ -65,7 +67,7 @@ jobs:
       - name: Build (${{ matrix.arch }})
         uses: actions-rs/cargo@v1
         with:
-          use-cross: true
+          use-cross: ${{ env.is_cross }}
           command: build
           args: --target ${{ env.rustarch }} ${{ env.profilestr }}
       - name: Upload Artifact
