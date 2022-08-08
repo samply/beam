@@ -85,6 +85,7 @@ jobs:
       - name: Test (amd64 only)
         if: ${{ matrix.arch == 'amd64' }}
         run: |
+          bash -c 'if ! [[ "$(./target/${{ env.rustarch }}/${{ env.PROFILE }}/broker -V)" =~ "Samply.Beam.Broker" ]]; then exit 1; fi'
           mkdir -p artifacts/binaries-amd64
           mv -v target/${{ env.rustarch }}/${{ env.PROFILE }}/proxy artifacts/binaries-amd64
           mv -v target/${{ env.rustarch }}/${{ env.PROFILE }}/broker artifacts/binaries-amd64
