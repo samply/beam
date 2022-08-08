@@ -22,7 +22,7 @@ jobs:
 
   build-rust:
     name: Build (Rust)
-    runs-on: [ self-hosted, linux ]
+    runs-on: [ self-hosted ]
 
     strategy:
       matrix:
