@@ -27,7 +27,7 @@ jobs:
     strategy:
       matrix:
         arch:
-          - amd64
+#          - amd64
           - arm64
 
     steps:
@@ -92,8 +92,8 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/download-artifact@v3
         with:
-          name: binaries-amd64
-          path: artifacts/binaries-amd64/
+          name: binaries-arm64
+          path: artifacts/binaries-arm64/
       - run: ./dev/test ci
 
   docker-broker:
@@ -116,7 +116,7 @@ jobs:
 #        PROFILE=${{ env.PROFILE }}
 #        COMPONENT=broker
       # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
-      # build-platforms: "linux/amd64"
+      build-platforms: "linux/arm64/v8"
       # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
       artifact-name: '*'
     # This passes the secrets from calling workflow to the called workflow
@@ -145,7 +145,7 @@ jobs:
 #        PROFILE=${{ env.PROFILE }}
 #        COMPONENT=broker
       # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
-      # build-platforms: "linux/amd64"
+      build-platforms: "linux/arm64/v8"
       # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
       artifact-name: '*'
     # This passes the secrets from calling workflow to the called workflow
