@@ -64,16 +64,12 @@ jobs:
           toolchain: stable
           override: true
           target: ${{ env.rustarch }}
-      - name: Before
-        run: find .
       - name: Build (${{ matrix.arch }})
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ env.is_cross }}
           command: build
           args: --target ${{ env.rustarch }} ${{ env.profilestr }}
-      - name: After
-        run: find .
       - name: Upload Artifact
         uses: actions/upload-artifact@v3
         with:
