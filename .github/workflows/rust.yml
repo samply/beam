@@ -14,14 +14,14 @@ env:
 jobs:
   pre-check:
     name: Security, License Check
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
     - uses: EmbarkStudios/cargo-deny-action@v1
 
-  build-test-rust:
-    name: Build and test
+  build-rust:
+    name: Build (Rust)
     runs-on: ubuntu-latest
 
     strategy:
@@ -82,17 +82,22 @@ jobs:
           path: |
             target/${{ env.rustarch }}/${{ env.PROFILE }}/proxy
             target/${{ env.rustarch }}/${{ env.PROFILE }}/broker
-      - name: Test (amd64 only)
-        if: ${{ matrix.arch == 'amd64' }}
-        run: |
-          mkdir -p artifacts/binaries-amd64
-          mv -v target/${{ env.rustarch }}/${{ env.PROFILE }}/proxy artifacts/binaries-amd64
-          mv -v target/${{ env.rustarch }}/${{ env.PROFILE }}/broker artifacts/binaries-amd64
-          ./dev/test ci
+
+  test:
+    name: Run tests
+    needs: [ build-rust ]
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v3
+        with:
+          name: binaries-amd64
+          path: artifacts/binaries-amd64/
+      - run: ./dev/test ci
 
   docker-broker:
-    name: Containerize Broker
-    needs: [ pre-check, build-test-rust ]
+    needs: [ build-rust, pre-check, test ]
     # This workflow defines how a maven package is built, tested and published.
     # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
     uses: samply/github-workflows/.github/workflows/docker-ci.yml@main
@@ -121,8 +126,7 @@ jobs:
 
   # NOTE: Repetition currently necessary. Reusable workflows are not runable with strategy matrix. See: https://stackoverflow.com/a/70173578, workaround could be later implemented: https://github.community/t/reusable-workflow-with-strategy-matrix/205676
   docker-proxy:
-    name: Containerize Proxy
-    needs: [ pre-check, build-test-rust ]
+    needs: [ build-rust, pre-check, test ]
     # This workflow defines how a maven package is built, tested and published.
     # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
     uses: samply/github-workflows/.github/workflows/docker-ci.yml@main
