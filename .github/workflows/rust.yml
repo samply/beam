@@ -22,31 +22,34 @@ jobs:
 
   build-rust:
     name: Build (Rust)
-    runs-on: [ self-hosted ]
+    runs-on: ${{ matrix.arch }}
 
     strategy:
       matrix:
         arch:
-#          - amd64
-          - arm64
+          - X64
+          - ARM64
 
     steps:
       - name: Set arch ${{ matrix.arch }}
         env:
           ARCH: ${{ matrix.arch }}
         run: |
-          if [ "${ARCH}" == "arm64" ]; then
+          if [ "${ARCH}" == "ARM64" ]; then
             echo "rustarch=aarch64-unknown-linux-gnu" >> $GITHUB_ENV
-          elif [ "${ARCH}" == "amd64" ]; then
+            DOCKERARCH=arm64
+          elif [ "${ARCH}" == "X64" ]; then
             echo "rustarch=x86_64-unknown-linux-gnu" >> $GITHUB_ENV
+            DOCKERARCH=amd64
           else
             exit 1
           fi
-          if [ "$(dpkg --print-architecture)" != "${ARCH}" ]; then
-            echo "Cross-compiling to ${ARCH}."
+          echo "dockerarch=$DOCKERARCH" >> $GITHUB_ENV
+          if [ "$(dpkg --print-architecture)" != "${DOCKERARCH}" ]; then
+            echo "Cross-compiling to ${DOCKERARCH}."
             echo "is_cross=true" >> $GITHUB_ENV
           else
-            echo "Natively compiling to ${ARCH}."
+            echo "Natively compiling to ${DOCKERARCH}."
             echo "is_cross=false" >> $GITHUB_ENV
           fi
       - name: Set profile ${{ env.PROFILE }}
@@ -68,8 +71,8 @@ jobs:
           target: ${{ env.rustarch }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.arch }}-${{ env.PROFILE }}
-      - name: Build (${{ matrix.arch }})
+          key: ${{ env.dockerarch }}-${{ env.PROFILE }}
+      - name: Build (${{ env.dockerarch }})
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ env.is_cross }}
@@ -78,7 +81,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: binaries-${{ matrix.arch }}
+          name: binaries-${{ env.dockerarch }}
           path: |
             target/${{ env.rustarch }}/${{ env.PROFILE }}/proxy
             target/${{ env.rustarch }}/${{ env.PROFILE }}/broker
