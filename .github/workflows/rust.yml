@@ -37,12 +37,17 @@ jobs:
         run: |
           if [ "${ARCH}" == "arm64" ]; then
             echo "rustarch=aarch64-unknown-linux-gnu" >> $GITHUB_ENV
-            echo "is_cross=true" >> $GITHUB_ENV
           elif [ "${ARCH}" == "amd64" ]; then
             echo "rustarch=x86_64-unknown-linux-gnu" >> $GITHUB_ENV
-            echo "is_cross=false" >> $GITHUB_ENV
           else
             exit 1
+          fi
+          if [ "$(dpkg --print-architecture)" != "${ARCH}" ]; then
+            echo "Cross-compiling to ${ARCH}."
+            echo "is_cross=true" >> $GITHUB_ENV
+          else
+            echo "Natively compiling to ${ARCH}."
+            echo "is_cross=false" >> $GITHUB_ENV
           fi
       - name: Set profile ${{ env.PROFILE }}
         env:
