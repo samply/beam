@@ -58,7 +58,7 @@ jobs:
         with:
           key: ${{ matrix.arch }}-${{ env.PROFILE }}
       - uses: actions-rs/toolchain@v1
-        if: ${{ matrix.arch }} == 'arm64'
+        if: ${{ matrix.arch != 'amd64' }}
         with:
           toolchain: stable
           override: true
