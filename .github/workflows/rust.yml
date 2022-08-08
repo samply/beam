@@ -21,8 +21,8 @@ jobs:
     - uses: EmbarkStudios/cargo-deny-action@v1
 
   build-test-rust:
-    name: Build and test
-    runs-on: ubuntu-latest
+    name: Build, Test
+    runs-on: ubuntu-22.04
 
     strategy:
       matrix:
