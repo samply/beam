@@ -54,9 +54,9 @@ jobs:
             echo "profilestr=--profile $PROFILE" >> $GITHUB_ENV
           fi
       - uses: actions/checkout@v3
-#      - uses: Swatinem/rust-cache@v2
-#        with:
-#          key: ${{ matrix.arch }}-${{ env.PROFILE }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.arch }}-${{ env.PROFILE }}
       - uses: actions-rs/toolchain@v1
         if: ${{ matrix.arch }} == 'arm64'
         with:
