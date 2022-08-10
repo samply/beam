@@ -218,6 +218,26 @@ impl BeamId for AppOrProxyId {
     }
 }
 
+impl TryFrom<AppOrProxyId> for AppId {
+    type Error = SamplyBeamError;
+
+    fn try_from(id: AppOrProxyId) -> Result<Self, Self::Error> {
+        match id {
+            AppOrProxyId::AppId(e) => AppId::new(e.value()),
+            AppOrProxyId::ProxyId(e) => Err(SamplyBeamError::InvalidBeamId(format!("Not an AppId: {}",e)))
+        }
+    }
+}
+impl TryFrom<AppOrProxyId> for ProxyId {
+    type Error = SamplyBeamError;
+    fn try_from(id: AppOrProxyId) -> Result<Self, Self::Error> {
+        match id {
+            AppOrProxyId::ProxyId(e) => ProxyId::new(e.value()),
+            AppOrProxyId::AppId(e) => Err(SamplyBeamError::InvalidBeamId(format!("Not a ProxyId: {}",e)))
+        }
+    }
+}
+
 impl From<ProxyId> for AppOrProxyId {
     fn from(id: ProxyId) -> Self {
         AppOrProxyId::ProxyId(id)
@@ -356,5 +376,22 @@ mod tests {
 
         let actual_broker_id = BrokerId::new(&actual_broker_id_str).unwrap();
         assert_eq!(actual_broker_id.to_string(), actual_broker_id_str);
+    }
+    #[test]
+    fn try_from_app_or_proxy_id() {
+        let app_id_str = "app.proxy1.broker.samply.de";
+        let broker_id = app_to_broker_id(app_id_str).unwrap();
+
+        AppId::set_broker_id(&broker_id);
+        let app_id = AppId::new(app_id_str).unwrap();
+        let aop_id_app: AppOrProxyId = app_id.clone().into();
+        let app_result = AppId::try_from(aop_id_app).unwrap();
+        assert_eq!(app_id, app_result);
+
+        ProxyId::set_broker_id(&broker_id);
+        let proxy_id = app_id.proxy_id();
+        let aop_id_proxy: AppOrProxyId = proxy_id.clone().into();
+        let proxy_result = ProxyId::try_from(aop_id_proxy).unwrap();
+        assert_eq!(proxy_id, proxy_result);
     }
 }
