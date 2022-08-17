@@ -1,6 +1,9 @@
 #![allow(unused_imports)]
 
-use shared::config;
+use hyper::{Client, client::HttpConnector};
+use hyper_proxy::ProxyConnector;
+use hyper_tls::HttpsConnector;
+use shared::{config, config_proxy::Config};
 use shared::errors::SamplyBeamError;
 use tracing::{warn, info, debug};
 
@@ -9,6 +12,7 @@ mod serve;
 mod serve_health;
 mod serve_tasks;
 mod banner;
+mod crypto;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
@@ -17,18 +21,22 @@ pub async fn main() -> anyhow::Result<()> {
     banner::print_banner();
 
     let config = config::CONFIG_PROXY.clone();
-    check_clientid().await?;
+    let client = shared::http_proxy::build_hyper_client(&config.tls_ca_certificates)
+        .map_err(SamplyBeamError::HttpProxyProblem)?;
 
-    serve::serve(config).await?;
+    init_crypto(config.clone(), client.clone()).await?;
+
+    serve::serve(config, client).await?;
     Ok(())
 }
 
-async fn check_clientid() -> Result<(),SamplyBeamError> {
-    let config = config::CONFIG_PROXY.clone();
+async fn init_crypto(config: Config, client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Result<(),SamplyBeamError> {
+    shared::crypto::init_cert_getter(crypto::build_cert_getter(config.clone(), client.clone())?);
+    
     let _public_info = shared::crypto::get_cert_and_client_by_cname_as_pemstr(&config.proxy_id).await
         .ok_or_else(|| SamplyBeamError::VaultError(format!("Unable to fetch your certificate from vault. Is your Proxy ID really {}?", config.proxy_id)))?;
 
-    let (serial, cname) = shared::config_shared::init_crypto().await?;
+    let (serial, cname) = shared::config_shared::init_crypto_for_proxy().await?;
     if cname != config.proxy_id.to_string() {
         return Err(SamplyBeamError::ConfigurationFailed(format!("Unable to retrieve a certificate matching your Proxy ID. Expected {}, got {}. Please check your configuration", cname, config.proxy_id.to_string())));
     }

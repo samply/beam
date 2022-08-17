@@ -11,7 +11,7 @@ use tracing::{debug, info};
 
 use crate::{config, errors::SamplyBeamError, BeamId};
 
-pub fn build_hyper_client(ca_certificates: Vec<X509>) -> Result<Client<ProxyConnector<HttpsConnector<HttpConnector>>>, std::io::Error> {
+pub fn build_hyper_client(ca_certificates: &Vec<X509>) -> Result<Client<ProxyConnector<HttpsConnector<HttpConnector>>>, std::io::Error> {
     let mut http = HttpConnector::new();
     http.set_connect_timeout(Some(Duration::from_secs(1)));
     http.enforce_http(false);
@@ -21,7 +21,7 @@ pub fn build_hyper_client(ca_certificates: Vec<X509>) -> Result<Client<ProxyConn
     let mut proxy_connector = proxy_connector.with_connector(https);
     if ! ca_certificates.is_empty() {
         let mut tls = TlsConnector::builder();
-        for cert in &ca_certificates {
+        for cert in ca_certificates {
             const ERR: &str = "Internal Error: Unable to convert Certificate.";
             let cert = Certificate::from_pem(&cert.to_pem().expect(ERR)).expect(ERR);
             tls.add_root_certificate(cert);
@@ -81,13 +81,13 @@ mod test {
 
     #[tokio::test]
     async fn https() {
-        let client = build_hyper_client(get_certs()).unwrap();
+        let client = build_hyper_client(&get_certs()).unwrap();
         run(HTTPS.parse().unwrap(), client).await;
     }
 
     #[tokio::test]
     async fn http() {
-        let client = build_hyper_client(get_certs()).unwrap();
+        let client = build_hyper_client(&get_certs()).unwrap();
         run(HTTP.parse().unwrap(), client).await;
     }
 

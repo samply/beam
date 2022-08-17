@@ -1,4 +1,4 @@
-use crate::{SamplyBeamError, crypto::{self, load_certificates_from_dir, get_cert_and_client_by_cname_as_pemstr, CryptoPublicPortion}, beam_id::{BrokerId, BeamId, ProxyId}, config::CONFIG_SHARED_CRYPTO};
+use crate::{SamplyBeamError, crypto::{self, load_certificates_from_dir, CryptoPublicPortion, GetCerts, get_cert_and_client_by_cname_as_pemstr}, beam_id::{BrokerId, BeamId, ProxyId}, config::CONFIG_SHARED_CRYPTO};
 use std::{path::PathBuf, rc::Rc, sync::Arc, fs::read_to_string};
 use axum::async_trait;
 use hyper::Uri;
@@ -18,18 +18,6 @@ struct CliArgs {
     /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
     #[clap(long, env, value_parser)]
     tls_ca_certificates_dir: Option<PathBuf>,
-
-    /// samply.pki: URL to HTTPS endpoint
-    #[clap(long, env, value_parser)]
-    pki_address: Uri,
-
-    /// samply.pki: Authentication realm
-    #[clap(long, env, value_parser, default_value = "samply_pki")]
-    pki_realm: String,
-
-    /// samply.pki: File containing the authentication token
-    #[clap(long, env, value_parser, default_value = "/run/secrets/pki.secret")]
-    pki_apikey_file: PathBuf,
 
     /// samply.pki: Path to own secret key
     #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
@@ -55,11 +43,7 @@ struct CliArgs {
 
 #[allow(dead_code)]
 pub(crate) struct Config {
-    pub(crate) pki_address: Uri,
-    pub(crate) pki_realm: String,
-    pub(crate) pki_apikey: String,
     pub(crate) tls_ca_certificates_dir: Option<PathBuf>,
-    // pub(crate) broker_url: Uri,
     pub(crate) broker_domain: String,
 }
 
@@ -74,24 +58,19 @@ impl crate::config::Config for Config {
         let cli_args = CliArgs::parse();
         BrokerId::set_broker_id(&cli_args.broker_url.host().unwrap().to_string());
     
-        // API Key
-        let pki_apikey = read_to_string(cli_args.pki_apikey_file)
-            .map_err(|_| SamplyBeamError::ConfigurationFailed("Failed to read PKI token.".into()))?
-            .trim().to_string();
-
         let broker_domain = cli_args.broker_url.host();
         if false {
             todo!() // TODO Tobias: Check if matches certificate, and fail
         }
         let broker_domain = broker_domain.unwrap().to_string();
         let tls_ca_certificates_dir = cli_args.tls_ca_certificates_dir;
-        Ok(Config { pki_address: cli_args.pki_address, pki_realm: cli_args.pki_realm, pki_apikey, broker_domain, tls_ca_certificates_dir })
+        Ok(Config { broker_domain, tls_ca_certificates_dir })
     }    
 }
 
-pub async fn init_crypto() -> Result<(String, String), SamplyBeamError>{
+pub async fn init_crypto_for_proxy() -> Result<(String, String), SamplyBeamError>{
     let cli_args = CliArgs::parse();
-    let crypto = load_crypto(&cli_args).await?;
+    let crypto = load_crypto_for_proxy(&cli_args).await?;
     let serial = crypto.public.cert.serial_number().to_bn().unwrap().to_hex_str().unwrap().to_string();
     let cname = crypto.public.cert.subject_name().entries().next().unwrap().data().as_utf8()?.to_string();
     if CONFIG_SHARED_CRYPTO.set(crypto).is_err() {
@@ -100,7 +79,7 @@ pub async fn init_crypto() -> Result<(String, String), SamplyBeamError>{
     Ok((serial, cname))
 }
 
-async fn load_crypto(cli_args: &CliArgs) -> Result<ConfigCrypto, SamplyBeamError> {
+async fn load_crypto_for_proxy(cli_args: &CliArgs) -> Result<ConfigCrypto, SamplyBeamError> {
     let privkey_pem = read_to_string(&cli_args.privkey_file)
         .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to load private key from file {}: {}", cli_args.privkey_file.to_string_lossy(), e)))?
         .trim().to_string();

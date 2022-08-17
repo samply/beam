@@ -1,6 +1,7 @@
 use aes_gcm::aead::generic_array::GenericArray;
-use axum::{Json, http::Request, body::Body};
+use axum::{Json, http::Request, body::Body, async_trait};
 
+use once_cell::sync::OnceCell;
 use static_init::dynamic;
 use tokio::{sync::{RwLock, mpsc, oneshot}};
 use tracing::{debug, warn, info, error};
@@ -8,7 +9,6 @@ use std::{path::{Path, PathBuf}, error::Error, time::{SystemTime, Duration}, col
 use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PaddingScheme, pkcs1::DecodeRsaPublicKey};
 use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
-use vaultrs::{client::{VaultClient, VaultClientSettingsBuilder},pki};
 
 use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}, config_shared::ConfigCrypto};
 
@@ -18,34 +18,23 @@ const SIGNATURE_LENGTH: u16 = 256;
 pub(crate) struct CertificateCache{
     serial_to_x509: HashMap<Serial, X509>,
     cn_to_serial: HashMap<ProxyId, Serial>,
-    vault_client: VaultClient,
-    pki_realm: String,
-    update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>,
+    update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>
+}
+
+#[async_trait]
+pub trait GetCerts: Sync + Send {
+    fn new() -> Result<Self, SamplyBeamError> where Self: Sized;
+    async fn certificate_list(&self) -> Result<Vec<String>,SamplyBeamError>;
+    async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String,SamplyBeamError>;
 }
 
 impl CertificateCache {
     pub fn new(update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>) -> Result<CertificateCache,SamplyBeamError> {
-        let mut certs = Vec::new();
-        if let Some(dir) = &config::CONFIG_SHARED.tls_ca_certificates_dir {
-            for file in std::fs::read_dir(dir).map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read CA certificates: {}", e)))? {
-                if let Ok(file) = file {
-                    certs.push(file.path().to_str().unwrap().into());
-                }
-            }
-            debug!("Loaded local certificates: {}", certs.join(" "));
-        }
         Ok(Self{
-        serial_to_x509: HashMap::new(),
-        cn_to_serial: HashMap::new(),
-        vault_client: VaultClient::new(
-            VaultClientSettingsBuilder::default()
-                .address(&config::CONFIG_SHARED.pki_address.to_string())
-                .token(&config::CONFIG_SHARED.pki_apikey)
-                .ca_certs(certs)
-                .build()?)?,
-        pki_realm: config::CONFIG_SHARED.pki_realm.clone(),
-        update_trigger
-    })
+            serial_to_x509: HashMap::new(),
+            cn_to_serial: HashMap::new(),
+            update_trigger
+        })
     }
 
     /// Searches cache for a certificate with the given ClientId. If not found, updates cache from central vault. If then still not found, return None
@@ -81,8 +70,10 @@ impl CertificateCache {
             let cache = CERT_CACHE.read().await;
             let cert = cache.serial_to_x509.get(serial);
             match cert { // why is this not done in the second try?
-                Some(certificate) => if x509_date_valid(&certificate).unwrap_or(false) { return cert.cloned(); },
-                None => ()
+                Some(certificate) if x509_date_valid(&certificate).unwrap_or(false) => { 
+                    return Some(certificate.clone());
+                },
+                _ => ()
             }
         }
         Self::update_certificates().await.unwrap_or(()); // requires write lock. We don't care about the result; cache lookup will just fail.
@@ -107,7 +98,7 @@ impl CertificateCache {
 
     async fn update_certificates_mut(&mut self) -> Result<(),SamplyBeamError> {
         info!("Updating certificates ...");
-        let certificate_list = pki::cert::list(&self.vault_client, &self.pki_realm).await?;
+        let certificate_list = CERT_GETTER.get().unwrap().certificate_list().await?;
         let new_certificate_serials: Vec<&String> = {
             certificate_list.iter()
                 .filter(|serial| !self.serial_to_x509.contains_key(*serial))
@@ -116,8 +107,14 @@ impl CertificateCache {
         debug!("Received {} certificates ({} of which were new).", certificate_list.len(), new_certificate_serials.len());
         //TODO Check for validity
         for serial in new_certificate_serials {
-            let certificate = pki::cert::read(&self.vault_client, &self.pki_realm, serial).await?;
-            let opensslcert = X509::from_pem(certificate.certificate.as_bytes())?;
+            debug!("Checking certificate with serial {serial}");
+            let certificate = CERT_GETTER.get().unwrap().certificate_by_serial_as_pem(serial).await;
+            if let Err(e) = certificate {
+                warn!("Could not retrieve certificate for serial {serial}: {}", e);
+                continue;
+            }
+            let certificate = certificate.unwrap();
+            let opensslcert = X509::from_pem(certificate.as_bytes())?;
             let commonnames: Vec<ProxyId> = 
                 opensslcert.subject_name()
                 .entries()
@@ -129,14 +126,17 @@ impl CertificateCache {
                         .expect(&format!("Internal error: Vault returned certificate with invalid common name: {}", x))
                 })
                 .collect();
-
-        if !commonnames.is_empty() && x509_date_valid(&opensslcert)? { // TODO: Check against CA
-            self.serial_to_x509.insert(serial.clone(), opensslcert);
-            self.cn_to_serial.insert(commonnames.first()
-                .expect("Internal error: common names empty; this should not happen")
-                .clone(), serial.clone()); //Emptyness is already checked
+            
+            if commonnames.is_empty() || x509_date_valid(&opensslcert).is_err() {
+                warn!("Certificate with serial {} invalid (no cname or invalid date).", serial);
+            } else { // TODO: Check against CA
+                self.serial_to_x509.insert(serial.clone(), opensslcert);
+                self.cn_to_serial.insert(commonnames.first()
+                    .expect("Internal error: common names empty; this should not happen")
+                    .clone(), serial.clone()); //Emptyness is already checked
+                debug!("Added certificate {} for cname {}", serial, commonnames.first().unwrap());
+            }
         }
-    }
     Ok(())
 
     }
@@ -155,6 +155,19 @@ impl CertificateCache {
         }
         result
     }
+}
+
+static CERT_GETTER: OnceCell<Box<dyn GetCerts>> = OnceCell::new();
+
+pub fn init_cert_getter<G: GetCerts + 'static>(getter: G) {
+    let res = CERT_GETTER.set(Box::new(getter));
+    if res.is_err() {
+        panic!("Internal error: Tried to initialize cert_getter twice");
+    }
+}
+
+pub async fn get_serial_list() -> Result<Vec<String>, SamplyBeamError> {
+    CERT_GETTER.get().unwrap().certificate_list().await
 }
 
 #[dynamic(lazy)]
