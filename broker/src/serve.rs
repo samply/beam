@@ -13,10 +13,8 @@ use tracing::{debug, info, trace};
 use crate::{serve_tasks, serve_health};
 
 pub(crate) async fn serve() -> anyhow::Result<()> {
-    let state = serve_tasks::init().await;
-
     let app = 
-        serve_tasks::router(state)
+        serve_tasks::router()
         // .merge(serve_pki::router())
         .merge(serve_health::router());
 
