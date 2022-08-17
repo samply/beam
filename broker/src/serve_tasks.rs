@@ -13,19 +13,25 @@ use tracing::{debug, info, trace};
 use crate::expire;
 
 #[derive(Clone)]
-struct State {
+pub(crate) struct State {
     tasks: Arc<RwLock<HashMap<MsgId, MsgSigned<MsgTaskRequest>>>>,
     new_task_tx: Arc<Sender<MsgSigned<MsgTaskRequest>>>,
     new_result_tx: Arc<RwLock<HashMap<MsgId, Sender<MsgSigned<MsgTaskResult>>>>>,
     removed_task_rx: Arc<Sender<MsgId>>
 }
 
-pub(crate) fn router() -> Router {
+pub(crate) fn router(state: State) -> Router {
     Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
         .route("/v1/tasks/:task_id/results", get(get_results_for_task))
         .route("/v1/tasks/:task_id/results/:app_id", put(put_result))
-        .layer(Extension(State::default()))
+        .layer(Extension(state))
+}
+
+pub(crate) async fn init() -> State {
+    let state = State::default();
+    tokio::task::spawn(expire::watch(state.tasks.clone(), state.new_task_tx.subscribe()));
+    state
 }
 
 impl Default for State {
