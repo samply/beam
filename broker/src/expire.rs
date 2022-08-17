@@ -29,12 +29,12 @@ pub(crate) async fn watch(tasks: Arc<RwLock<HashMap<MyUuid, MsgSigned<MsgTaskReq
                     if new.msg.expire < expire {
                         soonest.id = Some(new.msg.id);
                         soonest.expire = Some(new.msg.expire);
-                        debug!("Next task will expire at {:?}", new.msg.expire);
+                        debug!("Next task will expire in {} seconds", new.msg.expire.duration_since(SystemTime::now()).unwrap_or_default().as_secs());
                     }
                 } else {
                     soonest.id = Some(new.msg.id);
                     soonest.expire = Some(new.msg.expire);
-                    debug!("Next task will expire at {:?}", new.msg.expire);
+                    debug!("Next task will expire in {} seconds", new.msg.expire.duration_since(SystemTime::now()).unwrap_or_default().as_secs());
                 }
             },
             // Timer met (=> task has expired)
