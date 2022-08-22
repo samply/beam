@@ -61,3 +61,5 @@ if [ "$CODE" != "201" ]; then
 fi
 
 success
+
+sleep 4
