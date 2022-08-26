@@ -87,7 +87,7 @@ export RESULT_BY_APP1_P2='
   ],
   "task": "6f531223-3699-4f6e-b7bf-88d8064fea7e",
   "status": "claimed",
-  "body": "",
+  "body": "test",
   "metadata": {
     "complex": "A map (key 'complex') is possible, too"
   }
