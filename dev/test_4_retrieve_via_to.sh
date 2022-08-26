@@ -97,7 +97,7 @@ success
 
 testing Claim the newly created task
 
-RET=$(echo "${RESULT_BY_APP1_P2}" | curl_put $APP2_P1 -v $P2/v1/tasks/6f531223-3699-4f6e-b7bf-88d8064fea7e/results/app1.proxy2.broker)
+RET=$(echo "${RESULT_BY_APP1_P2}" | curl_put $APP1_P2 -v $P2/v1/tasks/6f531223-3699-4f6e-b7bf-88d8064fea7e/results/app1.proxy2.broker)
 CODE=$(echo $RET | jq -r .response_code)
 
 if [ "$CODE" != "201" ]; then
