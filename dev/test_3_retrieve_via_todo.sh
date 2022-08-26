@@ -63,3 +63,19 @@ fi
 success
 
 sleep 4
+
+testing Check that this task also has correctly expired
+
+RET=$(curl_get $APP1_P2 -v $P2/v1/tasks?filter=todo)
+CODE=$(echo $RET | jq -r .response_code)
+BODY=$(echo $RET | jq -r .body)
+
+if [ "$CODE" != "200" ]; then
+    fail "$RET" The task has not correctly expired. Expected 200, got $CODE and body \"$BODY\".
+fi
+
+if [ "$BODY" != "[]" ]; then
+    fail "$RET" I got a task that should have been expired. Expected body \"[]\", got \"$BODY\"
+fi
+
+success
