@@ -106,6 +106,8 @@ fi
 
 success
 
+sleep 4
+
 testing Check that the claimed task has correctly expired
 
 RET=$(curl_get $APP1_P2 -v $P2/v1/tasks?to=$APP1_P2)
