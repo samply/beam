@@ -3,7 +3,9 @@
 mod serve;
 mod serve_tasks;
 mod serve_health;
+mod serve_pki;
 mod banner;
+mod crypto;
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -14,6 +16,9 @@ use tracing::info;
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {    
     shared::config::prepare_env();
+
+    let cert_getter = crypto::build_cert_getter()?;
+    shared::crypto::init_cert_getter(cert_getter);
 
     #[cfg(debug_assertions)]
     if shared::examples::print_example_objects() { return Ok(()); }

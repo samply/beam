@@ -48,6 +48,7 @@ pub struct Config {
     pub pki_address: Uri,
     pub pki_realm: String,
     pub pki_token: String,
+    pub tls_ca_certificates_dir: Option<PathBuf>,
 }
 
 impl crate::config::Config for Config {
@@ -63,6 +64,7 @@ impl crate::config::Config for Config {
             pki_address: cli_args.pki_address,
             pki_realm: cli_args.pki_realm,
             pki_token,
+            tls_ca_certificates_dir: cli_args.tls_ca_certificates_dir
         };
         Ok(config)
     }

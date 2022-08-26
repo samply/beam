@@ -15,8 +15,6 @@ pub struct Config {
     pub broker_uri: Uri,
     pub broker_host_header: HeaderValue,
     pub bind_addr: SocketAddr,
-    pub pki_address: Uri,
-    pub pki_realm: String,
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId,ApiKey>,
     pub tls_ca_certificates: Vec<X509>
@@ -42,14 +40,6 @@ pub struct CliArgs {
     /// This proxy's beam id, e.g. proxy42.broker23.beam.samply.de
     #[clap(long, env, value_parser)]
     pub proxy_id: String,
-
-    /// samply.pki: URL to HTTPS endpoint
-    #[clap(long, env, value_parser)]
-    pub pki_address: Uri,
-
-    /// samply.pki: Authentication realm
-    #[clap(long, env, value_parser, default_value = "samply_pki")]
-    pub pki_realm: String,
 
     /// samply.pki: File containing the authentication token
     #[clap(long, env, value_parser, default_value = "/run/secrets/pki.secret")]
@@ -103,9 +93,7 @@ impl crate::config::Config for Config {
         let config = Config {
             broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
             broker_uri: cli_args.broker_url,
-            pki_address: cli_args.pki_address,
             bind_addr: cli_args.bind_addr,
-            pki_realm: cli_args.pki_realm,
             proxy_id,
             api_keys,
             tls_ca_certificates
