@@ -55,9 +55,7 @@ In practice,
 
 This design ensures that each component, mainly applications but Proxies and Brokers as well, can be addressed in tasks. Should the need arise in the future, this network could be federated by federating the brokers (not unsimilar to E-Mail/SMTP, XMPP, etc.)
 
-The Proxies have to fetch certificates from the central Certificate Authority,
-however, this communication is relayed by the broker. This ensures, that no
-external access to the CA is required.
+The Proxies have to fetch certificates from the central Certificate Authority, however, this communication is relayed by the broker. This ensures, that no external access to the CA is required.
 
 ## Getting started
 The following paragraph simulates the creation and the completion of a task
