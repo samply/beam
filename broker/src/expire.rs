@@ -2,7 +2,7 @@ use std::{sync::Arc, collections::HashMap, time::{SystemTime, Duration, SystemTi
 
 use shared::{MyUuid, MsgSigned, MsgTaskRequest, MsgId};
 use tokio::{sync::{RwLock, broadcast::Receiver, RwLockReadGuard}, select};
-use tracing::{debug, warn, info};
+use tracing::{debug, warn, info, error};
 
 struct Latest {
     id: Option<MsgId>,
@@ -19,9 +19,20 @@ pub(crate) async fn watch(tasks: Arc<RwLock<HashMap<MyUuid, MsgSigned<MsgTaskReq
     };
     loop {
         let until = match &soonest.expire {
-            Some(soonest) => soonest.duration_since(SystemTime::now())?,
-            None => Duration::MAX,
+            Some(soonest) => {
+                match soonest.duration_since(SystemTime::now()) {
+                    Ok(x) => x,
+                    Err(expired_since) => {
+                        warn!("Tried to wait on a task that had in fact expired since {}.", expired_since);
+                        Duration::MAX
+                    }
+                }
+            },
+            None => {
+                Duration::MAX
+            }
         };
+        debug!("Next task will expire in {} seconds", until.as_secs());
         select! {
             // New Task created => check if it will expire sooner than all the other ones
             Ok(new) = new_task_rx.recv() => {
@@ -29,12 +40,10 @@ pub(crate) async fn watch(tasks: Arc<RwLock<HashMap<MyUuid, MsgSigned<MsgTaskReq
                     if new.msg.expire < expire {
                         soonest.id = Some(new.msg.id);
                         soonest.expire = Some(new.msg.expire);
-                        debug!("Next task will expire in {} seconds", new.msg.expire.duration_since(SystemTime::now()).unwrap_or_default().as_secs());
                     }
                 } else {
                     soonest.id = Some(new.msg.id);
                     soonest.expire = Some(new.msg.expire);
-                    debug!("Next task will expire in {} seconds", new.msg.expire.duration_since(SystemTime::now()).unwrap_or_default().as_secs());
                 }
             },
             // Timer met (=> task has expired)
@@ -46,6 +55,8 @@ pub(crate) async fn watch(tasks: Arc<RwLock<HashMap<MyUuid, MsgSigned<MsgTaskReq
                 } else {
                     warn!("Tried to remove expired task {} but it was already gone.", soonest.id.unwrap());
                 }
+                soonest.id = None;
+                soonest.expire = None;
             }
         }
     }

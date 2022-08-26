@@ -8,7 +8,7 @@ use axum::{
 use serde::{Deserialize};
 use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasTaskId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, error};
 
 use crate::expire;
 
@@ -22,7 +22,11 @@ struct State {
 
 pub(crate) fn router() -> Router {
     let state = State::default();
-    tokio::task::spawn(expire::watch(state.tasks.clone(), state.new_task_tx.subscribe()));
+    let state2 = state.clone();
+    tokio::task::spawn(async move {
+        let err = expire::watch(state2.tasks.clone(), state2.new_task_tx.subscribe()).await;
+        error!("Internal error: expire() returned with error {:?}", err);
+    });
     Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
         .route("/v1/tasks/:task_id/results", get(get_results_for_task))
