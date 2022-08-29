@@ -5,6 +5,7 @@ mod serve_tasks;
 mod serve_health;
 mod serve_pki;
 mod banner;
+mod expire;
 mod crypto;
 
 use std::{collections::HashMap, sync::Arc};

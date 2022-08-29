@@ -17,7 +17,7 @@ function test() {
     echo "=> $(basename $test) ..."
     source $test
   done
-  echo "All tests have completed successfully."
+  echo -e "  ${COL_GREEN}All tests have completed successfully.${COL_NONE}"
 }
 
 case "$1" in

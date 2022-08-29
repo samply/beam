@@ -377,6 +377,7 @@ mod tests {
         let actual_broker_id = BrokerId::new(&actual_broker_id_str).unwrap();
         assert_eq!(actual_broker_id.to_string(), actual_broker_id_str);
     }
+
     #[test]
     fn try_from_app_or_proxy_id() {
         let app_id_str = "app.proxy1.broker.samply.de";
