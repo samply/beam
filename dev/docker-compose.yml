@@ -31,7 +31,7 @@ services:
       - pki.secret
       - dummy.pem
   proxy1:
-    depends_on: [vault]
+    depends_on: [broker]
     build:
       context: ../
       dockerfile: Dockerfile.ci.proxy
@@ -41,21 +41,17 @@ services:
     environment:
       BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY1_ID}
-      PKI_ADDRESS: http://vault:8200
       APP_0_ID: ${APP1_ID_SHORT}
       APP_0_KEY: ${APP_KEY}
       APP_1_ID: ${APP2_ID_SHORT}
       APP_1_KEY: ${APP_KEY}
-      no_proxy: vault
-      NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
     secrets:
-      - pki.secret
       - proxy1.pem
   proxy2:
-    depends_on: [vault]
+    depends_on: [broker]
     build:
       context: ../
       dockerfile: Dockerfile.ci.proxy
@@ -65,18 +61,14 @@ services:
     environment:
       BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY2_ID}
-      PKI_ADDRESS: http://vault:8200
       APP_0_ID: ${APP1_ID_SHORT}
       APP_0_KEY: ${APP_KEY}
       APP_1_ID: ${APP2_ID_SHORT}
       APP_1_KEY: ${APP_KEY}
-      no_proxy: vault
-      NO_PROXY: vault
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
       RUST_LOG: ${RUST_LOG}
     secrets:
-      - pki.secret
       - proxy2.pem
 secrets:
   pki.secret:
