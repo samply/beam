@@ -31,7 +31,7 @@ pub(crate) fn router() -> Router {
         .route("/v1/tasks", get(get_tasks).post(post_task))
         .route("/v1/tasks/:task_id/results", get(get_results_for_task))
         .route("/v1/tasks/:task_id/results/:app_id", put(put_result))
-        .layer(Extension(State::default()))
+        .layer(Extension(state))
 }
 
 impl Default for State {
