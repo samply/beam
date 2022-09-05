@@ -50,6 +50,7 @@ pub struct Config {
     pub(crate) tls_ca_certificates_dir: Option<PathBuf>,
     pub(crate) broker_domain: String,
     pub root_cert: X509,
+    pub tls_ca_certificates: Vec<X509>
 }
 
 pub(crate) struct ConfigCrypto {
@@ -71,7 +72,9 @@ impl crate::config::Config for Config {
         }
         let broker_domain = broker_domain.unwrap().to_string();
         let tls_ca_certificates_dir = cli_args.tls_ca_certificates_dir;
-        Ok(Config { broker_domain, tls_ca_certificates_dir, root_cert })
+        let tls_ca_certificates = crate::crypto::load_certificates_from_dir(tls_ca_certificates_dir.clone())
+            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory: {}", e)))?;
+        Ok(Config { broker_domain, tls_ca_certificates_dir, root_cert, tls_ca_certificates })
     }    
 }
 

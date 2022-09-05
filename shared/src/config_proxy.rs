@@ -16,8 +16,7 @@ pub struct Config {
     pub broker_host_header: HeaderValue,
     pub bind_addr: SocketAddr,
     pub proxy_id: ProxyId,
-    pub api_keys: HashMap<AppId,ApiKey>,
-    pub tls_ca_certificates: Vec<X509>
+    pub api_keys: HashMap<AppId,ApiKey>
 }
 
 pub type ApiKey = String;
@@ -50,7 +49,7 @@ pub struct CliArgs {
     pub privkey_file: PathBuf,
 
     /// samply.pki: Path to CA Root certificate
-    #[clap(long, env, value_parser, default_value = "/usr/share/beam/root-ca.crt")]
+    #[clap(long, env, value_parser, default_value = "/run/secrets/root_cert.crt.pem")]
     rootcert_file: PathBuf,
 
     /// (included for technical reasons)
@@ -92,15 +91,12 @@ impl crate::config::Config for Config {
         if api_keys.is_empty() {
             return Err(SamplyBeamError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {0}_0_ID=<clientname>, {0}_0_KEY=<key>", APP_PREFIX)));
         }
-        let tls_ca_certificates = crate::crypto::load_certificates_from_dir(cli_args.tls_ca_certificates_dir)
-            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory: {}", e)))?;
         let config = Config {
             broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
             broker_uri: cli_args.broker_url,
             bind_addr: cli_args.bind_addr,
             proxy_id,
-            api_keys,
-            tls_ca_certificates
+            api_keys
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)

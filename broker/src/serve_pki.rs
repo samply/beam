@@ -37,6 +37,7 @@ impl IntoResponse for PkiError {
 pub(crate) fn router() -> Router {
     Router::new()
         .route("/v1/pki/certs", get(get_certificate_list))
+        .route("/v1/pki/certs/im-ca", get(get_im_cert))
         .route("/v1/pki/certs/by_serial/:serial", get(get_certificate_by_serial))
 }
 
@@ -49,6 +50,13 @@ async fn get_certificate_by_serial(
     let pem = cert.cert.to_pem()
         .map_err(|e| PkiError::OpenSslError(e.to_string()))?;
     Ok(String::from_utf8(pem)?)
+}
+
+async fn get_im_cert() -> Result<String, PkiError> {
+    debug!("=> Asked for IM CA Cert");
+    let cert = shared::crypto::get_im_cert().await
+        .or(Err(PkiError::CommunicationWithVault(String::new())))?;
+    Ok(cert)
 }
 
 async fn get_certificate_list() -> Result<Json<Vec<String>>,PkiError> {

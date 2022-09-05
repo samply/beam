@@ -39,7 +39,7 @@ struct CliArgs {
     privkey_file: PathBuf,
 
     /// samply.pki: Path to CA Root certificate
-    #[clap(long, env, value_parser, default_value = "/usr/share/beam/root-ca.crt")]
+    #[clap(long, env, value_parser, default_value = "/run/secrets/root_cert.crt.pem")]
     rootcert_file: PathBuf,
 
     /// (included for technical reasons)

@@ -19,7 +19,8 @@ pub struct CertificateCache{
     serial_to_x509: HashMap<Serial, X509>,
     cn_to_serial: HashMap<ProxyId, Serial>,
     update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>,
-    root_cert: Option<X509> // Might not be available at initialization time
+    root_cert: Option<X509>, // Might not be available at initialization time
+    im_cert: Option<X509> // Might not be available at initialization time
 }
 
 #[async_trait]
@@ -27,6 +28,7 @@ pub trait GetCerts: Sync + Send {
     fn new() -> Result<Self, SamplyBeamError> where Self: Sized;
     async fn certificate_list(&self) -> Result<Vec<String>,SamplyBeamError>;
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String,SamplyBeamError>;
+    async fn im_certificate_as_pem(&self) -> Result<String,SamplyBeamError>;
 }
 
 impl CertificateCache {
@@ -35,7 +37,8 @@ impl CertificateCache {
             serial_to_x509: HashMap::new(),
             cn_to_serial: HashMap::new(),
             update_trigger,
-            root_cert: None
+            root_cert: None,
+            im_cert: None,
         })
     }
 
@@ -129,7 +132,7 @@ impl CertificateCache {
                 })
                 .collect();
 
-            if commonnames.is_empty() || verify_cert(&opensslcert, &self.root_cert.as_ref().expect("No root CA certificate found!")).is_err() {
+            if commonnames.is_empty() || verify_cert(certificate, &self.root_cert.as_ref().expect("No root CA certificate found"), &self.im_cert.as_ref().expect("No intermediate CA cert found")).is_err() {
                 warn!("Certificate with serial {} invalid (no cname or invalid certificate).", serial);
             } else {
                 self.serial_to_x509.insert(serial.clone(), opensslcert);
@@ -159,10 +162,14 @@ impl CertificateCache {
         result
     }
 
-/// Sets the root certificate, which is usually not avaelable at static time. Must be called before validation
-pub fn set_root_cert(&mut self, root_certificate: &X509) {
-    self.root_cert = Some(root_certificate.clone());
-}
+    /// Sets the root certificate, which is usually not avaelable at static time. Must be called before validation
+    pub fn set_root_cert(&mut self, root_certificate: &X509) {
+        self.root_cert = Some(root_certificate.clone());
+    }
+
+    pub async fn set_im_cert(&mut self) {
+        self.im_cert = Some(X509::from_pem(&get_im_cert().await.unwrap().as_bytes()).unwrap()); // TODO Unwrap
+    }
 }
 
 static CERT_GETTER: OnceCell<Box<dyn GetCerts>> = OnceCell::new();
@@ -176,6 +183,10 @@ pub fn init_cert_getter<G: GetCerts + 'static>(getter: G) {
 
 pub async fn get_serial_list() -> Result<Vec<String>, SamplyBeamError> {
     CERT_GETTER.get().unwrap().certificate_list().await
+}
+
+pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
+    CERT_GETTER.get().unwrap().im_certificate_as_pem().await
 }
 
 #[dynamic(lazy)]
@@ -277,11 +288,15 @@ fn extract_x509(cert: Option<X509>) -> Option<CryptoPublicPortion> {
 }
 
 /// Verify whether the certificate is signed by root_ca_cert and the dates are valid
-pub fn verify_cert(certificate: &X509, root_ca_cert: &X509) -> Result<bool,SamplyBeamError> {
-    if certificate.verify(root_ca_cert.public_key()?.as_ref())? && x509_date_valid(&certificate)? {
+pub fn verify_cert(certificate: &X509, root_ca_cert: &X509, im_ca_cert: &X509) -> Result<bool,SamplyBeamError> {
+    let im = im_ca_cert.verify(root_ca_cert.public_key()?.as_ref())?;
+    let client = certificate.verify(im_ca_cert.public_key()?.as_ref())?;
+    let date = x509_date_valid(&certificate)?;
+    let result = im ^ client ^ date; // TODO: Check if actually constant time
+    if result { 
         Ok(true)
     } else {
-        Ok(false)
+        Err(SamplyBeamError::VaultError("Invalid Certificate".to_string()))
     }
 }
 

@@ -63,6 +63,12 @@ impl GetCerts for GetCertsFromBroker {
         self.query(format!("/v1/pki/certs/by_serial/{}", serial)).await
     }
 
+    async fn im_certificate_as_pem(&self) -> Result<String,SamplyBeamError> {
+        debug!("Retrieving im ca certificate ...");
+        self.query("/v1/pki/certs/im-ca".to_string()).await
+    }
+
+
     fn new() -> Result<Self,SamplyBeamError> {
         unimplemented!()
     }
