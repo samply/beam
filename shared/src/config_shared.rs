@@ -24,7 +24,7 @@ struct CliArgs {
     privkey_file: PathBuf,
 
     /// samply.pki: Path to CA Root certificate
-    #[clap(long, env, value_parser, default_value = "/etc/samply/beam/root-ca.crt")]
+    #[clap(long, env, value_parser, default_value = "/run/secrets/root_cert.crt.pem")]
     rootcert_file: PathBuf,
 
     // TODO: The following arguments have been added for compatibility reasons with the proxy config. Find another way to merge configs.
