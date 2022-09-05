@@ -15,7 +15,7 @@ use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, co
 type Serial = String;
 const SIGNATURE_LENGTH: u16 = 256;
 
-pub(crate) struct CertificateCache{
+pub struct CertificateCache{
     serial_to_x509: HashMap<Serial, X509>,
     cn_to_serial: HashMap<ProxyId, Serial>,
     update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>,
@@ -179,7 +179,7 @@ pub async fn get_serial_list() -> Result<Vec<String>, SamplyBeamError> {
 }
 
 #[dynamic(lazy)]
-static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
+pub static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
     let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBeamError>>>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
     let cc2 = cc.clone();

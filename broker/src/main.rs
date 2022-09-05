@@ -20,7 +20,7 @@ pub async fn main() -> anyhow::Result<()> {
 
     let cert_getter = crypto::build_cert_getter()?;
     shared::crypto::init_cert_getter(cert_getter);
-
+    shared::crypto::CERT_CACHE.write().await.set_root_cert(&config::CONFIG_SHARED.root_cert);
     #[cfg(debug_assertions)]
     if shared::examples::print_example_objects() { return Ok(()); }
     
