@@ -292,7 +292,7 @@ fn extract_x509(cert: Option<X509>) -> Option<CryptoPublicPortion> {
 }
 
 /// Verify whether the certificate is signed by root_ca_cert and the dates are valid
-pub fn verify_cert(certificate: &X509, root_ca_cert: &X509, im_ca_cert: &X509) -> Result<bool,SamplyBeamError> {
+pub fn verify_cert(certificate: &X509, root_ca_cert: &X509) -> Result<bool,SamplyBeamError> {
     let client = certificate.verify(root_ca_cert.public_key()?.as_ref())?;
     let date = x509_date_valid(&certificate)?;
     let result = client && date; // TODO: Check if actually constant time
