@@ -83,14 +83,12 @@ function build() {
 function clean() {
     stop
     rm -rfv artifacts/
-    rm -v ../config/root-ca.crt
 }
 
 function start {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    cp ./pki/dktk_root_2022_ca.crt.pem ../config/root-ca.crt
     [ -x ../artifacts/binaries-$ARCH ] || build_rust
     docker-compose up --no-recreate --abort-on-container-exit
 }
