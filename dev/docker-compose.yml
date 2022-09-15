@@ -49,6 +49,7 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
+      no_proxy: broker,${BROKER_URL}
     secrets:
       - proxy1.pem
       - root_cert.crt.pem
@@ -70,6 +71,7 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
       RUST_LOG: ${RUST_LOG}
+      no_proxy: broker,${BROKER_URL}
     secrets:
       - proxy2.pem
       - root_cert.crt.pem
