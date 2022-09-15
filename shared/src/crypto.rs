@@ -437,7 +437,6 @@ fn x509_date_valid(cert: &X509) -> Result<bool, ErrorStack> {
     let expirydate = asn1_time_to_system_time(cert.not_after())?;
     let startdate = asn1_time_to_system_time(cert.not_before())?;
     let now = SystemTime::now();
-    debug!("Checking cert date valid");
     return Ok(expirydate > now && now > startdate);
 }
 

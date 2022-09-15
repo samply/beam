@@ -33,7 +33,5 @@ hyper = { version = "0.14.19", features = ["full"] }
 hyper-tls = "0.5.0"
 hyper-proxy = "0.9.1"
 
-vaultrs = { git = "https://github.com/jmgilman/vaultrs", default-features = false, features = [ "native-tls" ] }# <= Change once update > 0.6.2 is out
-
 [build-dependencies]
 build-data = "0"

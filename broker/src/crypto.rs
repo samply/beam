@@ -7,10 +7,8 @@ use hyper_tls::HttpsConnector;
 use serde::{Serialize, Deserialize};
 use shared::{crypto::GetCerts, errors::SamplyBeamError, config};
 use tracing::debug;
-use vaultrs::{client::{VaultClientSettingsBuilderError, VaultClient, VaultClientSettingsBuilder}, error::ClientError, pki};
 
 pub struct GetCertsFromPki {
-    vault_client: VaultClient,
     pki_realm: String,
     hyper_client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
 }
@@ -32,14 +30,13 @@ struct PkiListResponse {
 #[async_trait]
 impl GetCerts for GetCertsFromPki {
     async fn certificate_list(&self) -> Result<Vec<String>,SamplyBeamError> {
-        // pki::cert::list(&self.vault_client, &self.pki_realm).await
-        //     .map_err(|e| SamplyBeamError::VaultError(format!("Error in connection to certificate authority: {e}")))
+        debug!("Getting Cert List");
         let uri = pki_url_builder(&format!("{}/certs",&config::CONFIG_CENTRAL.pki_realm));
         let req = Request::builder()
             .method("LIST")
-            .header(header::AUTHORIZATION, format!("X-Vault-Token: {}",&config::CONFIG_CENTRAL.pki_token))
+            .header("X-Vault-Token",&config::CONFIG_CENTRAL.pki_token)
             .uri(uri)
-            .body(body::Body::empty()).unwrap(); //TODO Unwrap
+            .body(body::Body::empty()).expect("Can not create Cert List Request"); //TODO Unwrap
         let resp = self.hyper_client.request(req).await
             .map_err(|e| SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))?;
         if resp.status() == StatusCode::OK {
@@ -47,19 +44,19 @@ impl GetCerts for GetCertsFromPki {
                 .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive vault certificate list: {}",e)))?;
             let body: PkiListResponse = serde_json::from_slice(&body_bytes)
                 .map_err(|e| SamplyBeamError::VaultError(format!("Cannot deserialize vault certificate list: {}",e)))?;
+            debug!("Got cert list with {} elements",body.data.keys.len());
             return Ok(body.data.keys);
         }
+        debug!("No cert list! Status {}", resp.status());
         Err(SamplyBeamError::VaultError(format!("Cannot retreive certificate list: {}",resp.status())))
     }
 
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String,SamplyBeamError> {
-        // let certificate = pki::cert::read(&self.vault_client, &self.pki_realm, serial).await
-        //     .map_err(|e| SamplyBeamError::VaultError(e.to_string()))?;
-        // Ok(certificate.certificate)
-        let uri = pki_url_builder(&format!("{}/cert/{}/raw/pem",&config::CONFIG_CENTRAL.pki_realm, serial));
+        debug!("Getting Cert with serial {}",serial);
+        let uri = pki_url_builder(&format!("{}/cert/{}/raw/pem",&self.pki_realm, serial));
         let req = Request::builder()
             .method("GET")
-            .header(header::AUTHORIZATION, format!("X-Vault-Token: {}",&config::CONFIG_CENTRAL.pki_token))
+            .header("X-Vault-Token",&config::CONFIG_CENTRAL.pki_token)
             .uri(uri)
             .body(body::Body::empty()).unwrap(); //TODO Unwrap
         let resp = self.hyper_client.request(req).await
@@ -75,13 +72,11 @@ impl GetCerts for GetCertsFromPki {
     }
 
     async fn im_certificate_as_pem(&self) -> Result<String,SamplyBeamError> {
-        // let certificate = pki::cert::read(&self.vault_client, &self.pki_realm, serial).await
-        //     .map_err(|e| SamplyBeamError::VaultError(e.to_string()))?;
-        // Ok(certificate.certificate)
-        let uri = pki_url_builder(&format!("{}/ca/pem",&config::CONFIG_CENTRAL.pki_realm));
+        debug!("Getting IM CA Cert");
+        let uri = pki_url_builder(&format!("{}/ca/pem",&self.pki_realm));
         let req = Request::builder()
             .method("GET")
-            .header(header::AUTHORIZATION, format!("X-Vault-Token: {}",&config::CONFIG_CENTRAL.pki_token))
+            .header("X-Vault-Token",&config::CONFIG_CENTRAL.pki_token)
             .uri(uri)
             .body(body::Body::empty()).unwrap(); //TODO Unwrap
         let resp = self.hyper_client.request(req).await
@@ -97,7 +92,7 @@ impl GetCerts for GetCertsFromPki {
     }
 
     fn new() -> Result<Self,SamplyBeamError> {
-        let mut certs = Vec::new();
+        let mut certs: Vec<String> = Vec::new();
         if let Some(dir) = &config::CONFIG_CENTRAL.tls_ca_certificates_dir {
             for file in std::fs::read_dir(dir).map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read CA certificates: {}", e)))? {
                 if let Ok(file) = file {
@@ -108,18 +103,9 @@ impl GetCerts for GetCertsFromPki {
         }
         let hyper_client = shared::http_proxy::build_hyper_client(&config::CONFIG_SHARED.tls_ca_certificates)
             .map_err(SamplyBeamError::HttpProxyProblem)?;
-        let vault_client = VaultClient::new(
-            VaultClientSettingsBuilder::default()
-                .address(&config::CONFIG_CENTRAL.pki_address.to_string())
-                .token(&config::CONFIG_CENTRAL.pki_token)
-                .ca_certs(certs)
-                .build()
-                .map_err(|e| SamplyBeamError::VaultError(format!("Unable to build vault client settings: {}", e)))?
-            ).map_err(|e| SamplyBeamError::VaultError(format!("Error in connection to certificate authority: {}", e)))?;
-        
         let pki_realm = config::CONFIG_CENTRAL.pki_realm.clone();
 
-        Ok(Self { vault_client, pki_realm , hyper_client})
+        Ok(Self { pki_realm , hyper_client})
     }
 }
 
@@ -128,5 +114,5 @@ pub(crate) fn build_cert_getter() -> Result<GetCertsFromPki,SamplyBeamError> {
 }
 
 pub(crate) fn pki_url_builder(location: &str) -> Uri {
-    Uri::builder().scheme(config::CONFIG_CENTRAL.pki_address.scheme().unwrap().as_str()).authority(config::CONFIG_CENTRAL.pki_address.authority().unwrap().to_owned()).path_and_query(format!("v1/{}",location)).build().unwrap() // TODO Unwrap
+    Uri::builder().scheme(config::CONFIG_CENTRAL.pki_address.scheme().unwrap().as_str()).authority(config::CONFIG_CENTRAL.pki_address.authority().unwrap().to_owned()).path_and_query(format!("/v1/{}",location)).build().unwrap() // TODO Unwrap
 }

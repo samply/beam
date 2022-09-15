@@ -9,7 +9,6 @@ use serde::{Serialize, Deserialize};
 use shared::{config::CONFIG_CENTRAL, errors::SamplyBeamError};
 use thiserror::Error;
 use tracing::{error, info, debug};
-use vaultrs::pki;
 
 #[derive(Error, Debug)]
 enum PkiError {
