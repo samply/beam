@@ -132,7 +132,7 @@ impl CertificateCache {
                 })
                 .collect();
 
-            if commonnames.is_empty() || verify_cert(certificate, &self.root_cert.as_ref().expect("No root CA certificate found"), &self.im_cert.as_ref().expect("No intermediate CA cert found")).is_err() {
+            if commonnames.is_empty() || verify_cert(&opensslcert, &self.im_cert.as_ref().expect("No intermediate CA cert found")).is_err() {
                 warn!("Certificate with serial {} invalid (no cname or invalid certificate).", serial);
             } else {
                 self.serial_to_x509.insert(serial.clone(), opensslcert);
@@ -169,6 +169,10 @@ impl CertificateCache {
 
     pub async fn set_im_cert(&mut self) {
         self.im_cert = Some(X509::from_pem(&get_im_cert().await.unwrap().as_bytes()).unwrap()); // TODO Unwrap
+        let valid_cert = verify_cert(&self.im_cert.as_ref().unwrap(), &self.root_cert.as_ref().expect("No Root CA set!"))
+            .expect(&format!("The intermediate certificate is invalid. Please send this info to the central beam admin for debugging:\n---BEGIN DEBUG---\n{}\nroot\n{}\n---END DEBUG---", 
+                             String::from_utf8(self.im_cert.as_ref().unwrap().to_text().unwrap()).unwrap(),
+                             String::from_utf8(self.root_cert.as_ref().unwrap().to_text().unwrap()).unwrap()));
     }
 }
 
@@ -289,10 +293,9 @@ fn extract_x509(cert: Option<X509>) -> Option<CryptoPublicPortion> {
 
 /// Verify whether the certificate is signed by root_ca_cert and the dates are valid
 pub fn verify_cert(certificate: &X509, root_ca_cert: &X509, im_ca_cert: &X509) -> Result<bool,SamplyBeamError> {
-    let im = im_ca_cert.verify(root_ca_cert.public_key()?.as_ref())?;
-    let client = certificate.verify(im_ca_cert.public_key()?.as_ref())?;
+    let client = certificate.verify(root_ca_cert.public_key()?.as_ref())?;
     let date = x509_date_valid(&certificate)?;
-    let result = im ^ client ^ date; // TODO: Check if actually constant time
+    let result = client && date; // TODO: Check if actually constant time
     if result { 
         Ok(true)
     } else {
@@ -434,6 +437,7 @@ fn x509_date_valid(cert: &X509) -> Result<bool, ErrorStack> {
     let expirydate = asn1_time_to_system_time(cert.not_after())?;
     let startdate = asn1_time_to_system_time(cert.not_before())?;
     let now = SystemTime::now();
+    debug!("Checking cert date valid");
     return Ok(expirydate > now && now > startdate);
 }
 
