@@ -2,26 +2,36 @@ use std::{collections::HashMap, sync::Arc};
 
 use axum::{
     http::{StatusCode, header},
-    routing::{get, post},
+    routing::{get, post, put},
     Extension, Json, Router, extract::{Query, Path}, response::IntoResponse
 };
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasTaskId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
-use tracing::{debug, info, trace};
+use tracing::{debug, info, trace, error};
+
+use crate::expire;
 
 #[derive(Clone)]
 struct State {
     tasks: Arc<RwLock<HashMap<MsgId, MsgSigned<MsgTaskRequest>>>>,
     new_task_tx: Arc<Sender<MsgSigned<MsgTaskRequest>>>,
     new_result_tx: Arc<RwLock<HashMap<MsgId, Sender<MsgSigned<MsgTaskResult>>>>>,
+    removed_task_rx: Arc<Sender<MsgId>>
 }
 
 pub(crate) fn router() -> Router {
+    let state = State::default();
+    let state2 = state.clone();
+    tokio::task::spawn(async move {
+        let err = expire::watch(state2.tasks.clone(), state2.new_task_tx.subscribe()).await;
+        error!("Internal error: expire() returned with error {:?}", err);
+    });
     Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
-        .route("/v1/tasks/:task_id/results", get(get_results_for_task).put(put_result))
-        .layer(Extension(State::default()))
+        .route("/v1/tasks/:task_id/results", get(get_results_for_task))
+        .route("/v1/tasks/:task_id/results/:app_id", put(put_result))
+        .layer(Extension(state))
 }
 
 impl Default for State {
@@ -31,7 +41,12 @@ impl Default for State {
     
         let tasks = Arc::new(RwLock::new(tasks));
         let new_task_tx = Arc::new(new_task_tx);
-        State { tasks, new_task_tx, new_result_tx: Arc::new(RwLock::new(HashMap::new())) }
+        State {
+            tasks,
+            new_task_tx,
+            new_result_tx: Arc::new(RwLock::new(HashMap::new())),
+            removed_task_rx: Arc::new(tokio::sync::broadcast::channel(512).0)
+        }
     }
 }
 
@@ -63,7 +78,7 @@ async fn get_results_for_task(
         (results, rx)
     };
     if let Some(rx) = rx {
-        wait_for_elements_notask(&mut results, &block, rx, &filter_for_me).await;
+        wait_for_elements_notask(&mut results, &block, rx, &filter_for_me, state.removed_task_rx.subscribe()).await;
     }
     let statuscode = wait_get_statuscode(&results, &block);
     Ok((statuscode, Json(results)))
@@ -82,8 +97,8 @@ fn wait_get_statuscode<S>(vec: &Vec<S>, block: &HowLongToBlock) -> StatusCode {
 }
 
 // TODO: Is there a way to write this function in a generic way? (1/2)
-async fn wait_for_elements_notask<'a, K,M: Msg>(vec: &mut Vec<M>, block: &HowLongToBlock, mut new_element_rx: Receiver<M>, filter: &MsgFilterNoTask<'a>)
-where M: Clone + HasWaitId<K>, K: PartialEq
+async fn wait_for_elements_notask<'a, M: Msg>(vec: &mut Vec<M>, block: &HowLongToBlock, mut new_element_rx: Receiver<M>, filter: &MsgFilterNoTask<'a>, mut deleted_task_rx: Receiver<MsgId>)
+where M: Clone + HasTaskId<MsgId>
 {
     let wait_until =
         time::Instant::now() + block.wait_time.unwrap_or(time::Duration::from_secs(31536000));
@@ -107,11 +122,19 @@ where M: Clone + HasWaitId<K>, K: PartialEq
                 match result {
                     Ok(req) => {
                         if filter.filter(&req) {
-                            vec.retain(|el| el.get_wait_id() != req.get_wait_id());
+                            vec.retain(|el| el.task_id() != req.task_id());
                             vec.push(req);
                         }
                     },
-                    Err(_) => { panic!("Unable to receive from queue! What happened?"); }
+                    Err(_) => { panic!("Unable to receive from queue new_element_rx! What happened?"); }
+                }
+            },
+            deleted_task_id = deleted_task_rx.recv() => {
+                match deleted_task_id {
+                    Ok(deleted_task_id) => {
+                        vec.retain(|el| el.task_id() != deleted_task_id);
+                    },
+                    Err(_) => { panic!("Unable to receive from queue deleted_task_rx! What happened?"); }
                 }
             }
         }
@@ -119,7 +142,7 @@ where M: Clone + HasWaitId<K>, K: PartialEq
 }
 
 // TODO: Is there a way to write this function in a generic way? (2/2)
-async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, block: &HowLongToBlock, mut new_element_rx: Receiver<MsgSigned<MsgTaskRequest>>, filter: &MsgFilterForTask<'a>)
+async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, block: &HowLongToBlock, mut new_element_rx: Receiver<MsgSigned<MsgTaskRequest>>, filter: &MsgFilterForTask<'a>, mut deleted_task_rx: Receiver<MsgId>)
 {
     let wait_until =
         time::Instant::now() + block.wait_time.unwrap_or(time::Duration::from_secs(31536000));
@@ -143,11 +166,19 @@ async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, bl
                 match result {
                     Ok(req) => {
                         if filter.filter(&req) {
-                            vec.retain(|el| el.get_wait_id() != req.get_wait_id());
+                            vec.retain(|el| el.task_id() != req.task_id());
                             vec.push(req);
                         }
                     },
                     Err(_) => { panic!("Unable to receive from queue! What happened?"); }
+                }
+            },
+            deleted_task_id = deleted_task_rx.recv() => {
+                match deleted_task_id {
+                    Ok(deleted_task_id) => {
+                        vec.retain(|el| el.task_id() != deleted_task_id);
+                    },
+                    Err(_) => { panic!("Unable to receive from queue deleted_task_rx! What happened?"); }
                 }
             }
         }
@@ -213,7 +244,7 @@ async fn get_tasks(
         (vec, state.new_task_tx.subscribe())
     };
     // Step 2: Extend vector with new elements, waiting for `block` amount of time/items
-    wait_for_elements_task(&mut vec, &block, new_task_rx, &filter).await;
+    wait_for_elements_task(&mut vec, &block, new_task_rx, &filter, state.removed_task_rx.subscribe()).await;
     let statuscode = wait_get_statuscode(&vec, &block);
     Ok((statuscode, Json(vec)))
 }
@@ -284,17 +315,17 @@ struct MsgFilterForTask<'a> {
 impl<'a> MsgFilterForTask<'a> {
     fn unanswered(&self, msg: &MsgTaskRequest) -> bool {
         if self.unanswered_by.is_none() {
-            debug!("Is {} unanswered? Yes, criterion not defined.", msg.get_id());
+            debug!("Is {} unanswered? Yes, criterion not defined.", msg.id());
             return true;
         }
         let unanswered = self.unanswered_by.unwrap();
         for res in msg.results.values() {
             if res.get_from() == unanswered {
-                debug!("Is {} unanswered? No, answer found.", msg.get_id());
+                debug!("Is {} unanswered? No, answer found.", msg.id());
                 return false;
             }
         }
-        debug!("Is {} unanswered? Yes, no matching answer found.", msg.get_id());
+        debug!("Is {} unanswered? Yes, no matching answer found.", msg.id());
         true
     }
 }
@@ -360,17 +391,20 @@ async fn post_task(
     ))
 }
 
-// PUT /v1/tasks/:task_id/results
+// PUT /v1/tasks/:task_id/results/:app_id
 async fn put_result(
-    Path(task_id): Path<MsgId>,
+    Path((task_id, app_id)): Path<(MsgId,AppOrProxyId)>,
     result: MsgSigned<MsgTaskResult>,
     Extension(state): Extension<State>
-) -> Result<(StatusCode, impl IntoResponse), (StatusCode, &'static str)> {
+) -> Result<StatusCode, (StatusCode, &'static str)> {
     debug!("Called: Task {:?}, {:?}", task_id, result);
     if task_id != result.msg.task {
         return Err((StatusCode::BAD_REQUEST, "Task IDs supplied in path and payload do not match."));
     }
     let worker_id = result.msg.from.clone();
+    if app_id != worker_id {
+        return Err((StatusCode::BAD_REQUEST, "AppID supplied in URL and signed message do not match."));
+    }
 
     // Step 1: Check prereqs.
     let mut tasks = state.tasks.write().await;
@@ -400,8 +434,6 @@ async fn put_result(
     if let Err(e) = sender.send(result) {
         debug!("Unable to send notification: {}. Ignoring since probably noone is currently waiting for tasks.", e);
     }
-    Ok((
-        statuscode,
-        [(header::LOCATION, format!("/v1/tasks/{}/results/{}", task_id, worker_id))]
-    ))
+    Ok(statuscode)
 }
+

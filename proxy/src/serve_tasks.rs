@@ -1,4 +1,4 @@
-use std::time::SystemTime;
+use std::time::{SystemTime, Duration};
 
 use axum::{Router, Extension, routing::any, response::Response, http::HeaderValue};
 use httpdate::fmt_http_date;
@@ -92,7 +92,6 @@ async fn sign_request(req: Request<Body>, config: &config_proxy::Config, target_
     let mut body = if body.is_empty() {
         debug!("Body is empty, substituting MsgEmpty.");
         let empty = MsgEmpty {
-            id: MsgId::new(),
             from: sender.into(),
         };
         serde_json::to_value(empty).unwrap()

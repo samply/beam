@@ -32,8 +32,8 @@
                 "PROXY_ID": "proxy2.broker",
                 "PRIVKEY_FILE": "dev/pki/proxy2.priv.pem",
                 "BIND_ADDR": "0.0.0.0:8082",
-                "http_proxy": "",
-                "HTTP_PROXY": "",
+                "all_proxy": "",
+                "ALL_PROXY": "",
             }
         },
         {
@@ -90,7 +90,17 @@
                 }
             },
             "args": [],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "BROKER_URL": "http://broker:8080",
+                "PKI_ADDRESS": "http://vault:8200",
+                "no_proxy": "vault",
+                "NO_PROXY": "vault",
+                "PRIVKEY_FILE": "dev/pki/dummy.priv.pem",
+                "BIND_ADDR": "0.0.0.0:8080",
+                "RUST_LOG": "DEBUG",
+                "PKI_APIKEY_FILE": "dev/pki/pki.secret",
+            }
         },
         {
             "type": "lldb",
@@ -109,7 +119,7 @@
                 }
             },
             "args": [],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
         },
         {
             "type": "lldb",

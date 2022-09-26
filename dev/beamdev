@@ -13,6 +13,10 @@ cd $SD
 
 source $SD/example_json.sh
 
+if [ -z "$RUST_LOG" ]; then
+     export RUST_LOG=""
+fi
+
 export PROXY1_ID=${PROXY1_ID:-proxy1.broker}
 export PROXY2_ID=${PROXY2_ID:-proxy2.broker}
 export PROXY1_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
@@ -128,7 +132,7 @@ COL_GREEN='\033[0;32m'
 COL_BLUE='\033[0;34m'
 
 function testing {
-    echo -e "${COL_BLUE}TEST \"$@\"${COL_NONE}"
+    echo -e "${COL_BLUE}TEST: $@${COL_NONE}"
 }
 
 function fail {
@@ -176,7 +180,11 @@ function curl_post {
     echo "$JSON"
 }
 
-export -f curl_get curl_post curl_put start stop clean testing fail success
+function task_with_ttl {
+    sed "s/\[TTL\]/$1/g"
+}
+
+export -f curl_get curl_post curl_put start stop clean testing fail success task_with_ttl
 
 check_prereqs
 

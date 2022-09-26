@@ -1,13 +1,13 @@
 # This assumes binaries are present, see COPY directive.
 
 FROM alpine AS chmodder
-ARG TARGETARCH=amd64
+ARG TARGETARCH
 COPY /artifacts/binaries-$TARGETARCH/broker /app/
 RUN chmod +x /app/*
 
 FROM gcr.io/distroless/cc
 #ARG COMPONENT
-ARG TARGETARCH=amd64
+#ARG TARGETARCH
 #COPY /artifacts/binaries-$TARGETARCH/$COMPONENT /usr/local/bin/
 COPY --from=chmodder /app/* /usr/local/bin/
 #ENTRYPOINT [ "/usr/local/bin/$COMPONENT" ]

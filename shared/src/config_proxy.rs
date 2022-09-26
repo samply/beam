@@ -1,4 +1,5 @@
 use clap::Parser;
+use openssl::x509::X509;
 
 use std::{net::SocketAddr, process::exit, collections::HashMap, fs::read_to_string, str::FromStr, path::{Path, PathBuf}};
 
@@ -14,25 +15,23 @@ pub struct Config {
     pub broker_uri: Uri,
     pub broker_host_header: HeaderValue,
     pub bind_addr: SocketAddr,
-    pub pki_address: Uri,
-    pub pki_realm: String,
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId,ApiKey>,
-    pub http_proxy: Option<Uri>
+    pub tls_ca_certificates: Vec<X509>
 }
 
 pub type ApiKey = String;
 
 #[derive(Parser,Debug)]
-#[clap(name("Samply.Beam.Proxy"), version, arg_required_else_help(true))]
+#[clap(name("🌈 Samply.Beam.Proxy"), version, arg_required_else_help(true), after_help(crate::config_shared::CLAP_FOOTER))]
 pub struct CliArgs {
     /// Local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8081").unwrap())]
     pub bind_addr: SocketAddr,
 
-    /// Outgoing HTTP proxy (e.g. http://myproxy.mynetwork:3128)
+    /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
     #[clap(long, env, value_parser)]
-    pub http_proxy: Option<String>,
+    pub tls_ca_certificates_dir: Option<PathBuf>,
     
     /// The broker's base URL, e.g. https://broker23.beam.samply.de
     #[clap(long, env, value_parser)]
@@ -41,14 +40,6 @@ pub struct CliArgs {
     /// This proxy's beam id, e.g. proxy42.broker23.beam.samply.de
     #[clap(long, env, value_parser)]
     pub proxy_id: String,
-
-    /// samply.pki: URL to HTTPS endpoint
-    #[clap(long, env, value_parser)]
-    pub pki_address: Uri,
-
-    /// samply.pki: Authentication realm
-    #[clap(long, env, value_parser, default_value = "samply_pki")]
-    pub pki_realm: String,
 
     /// samply.pki: File containing the authentication token
     #[clap(long, env, value_parser, default_value = "/run/secrets/pki.secret")]
@@ -90,30 +81,22 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBeamE
 impl crate::config::Config for Config {
     fn load() -> Result<Config,SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
+        BrokerId::set_broker_id(&cli_args.broker_url.host().unwrap().to_string());
         let proxy_id = ProxyId::new(&cli_args.proxy_id)
             .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Invalid Beam ID \"{}\" supplied: {}", cli_args.proxy_id, e)))?;
         let api_keys = parse_apikeys(&proxy_id)?;
         if api_keys.is_empty() {
             return Err(SamplyBeamError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {0}_0_ID=<clientname>, {0}_0_KEY=<key>", APP_PREFIX)));
         }
-        let http_proxy: Option<Uri> = if let Some(proxy) = cli_args.http_proxy {
-            if proxy.is_empty() {
-                None
-            } else {
-                Some(proxy.parse()
-                    .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Not a valid proxy URL: {proxy}. Reason: {e}")))?)
-            }
-        } else { None };
+        let tls_ca_certificates = crate::crypto::load_certificates_from_dir(cli_args.tls_ca_certificates_dir)
+            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory: {}", e)))?;
         let config = Config {
             broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
             broker_uri: cli_args.broker_url,
-            pki_address: cli_args.pki_address,
             bind_addr: cli_args.bind_addr,
-            pki_realm: cli_args.pki_realm,
             proxy_id,
             api_keys,
-            http_proxy
+            tls_ca_certificates
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)
@@ -150,7 +133,7 @@ mod tests {
             std::env::set_var(format!("APP_{i}_KEY"), key);
         }
         const BROKER_ID: &str = "broker.samply.de";
-        BrokerId::set_broker_id(BROKER_ID.to_string());
+        BrokerId::set_broker_id(&BROKER_ID.to_string());
         let parsed = parse_apikeys(&ProxyId::new(&format!("proxy.{BROKER_ID}")).unwrap()).unwrap();
         assert_eq!(parsed.len(), apps.len());
     }

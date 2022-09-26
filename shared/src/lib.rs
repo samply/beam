@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use static_init::dynamic;
 use tracing::debug;
 
-use std::{time::Duration, ops::Deref, fmt::Display};
+use std::{time::{Duration, Instant, SystemTime}, ops::Deref, fmt::Display};
 
 use rand::Rng;
 use serde::{Deserialize, Serialize, de::Visitor};
@@ -77,7 +77,7 @@ impl Display for MyUuid {
 }
 
 #[derive(PartialEq, Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "lowercase", tag = "status", content = "body")]
 pub enum WorkStatus {
     Claimed,
     TempFailed(TaskResponse),
@@ -146,15 +146,10 @@ pub static EMPTY_VEC_APPORPROXYID: Vec<AppOrProxyId> = Vec::new();
 
 #[derive(Serialize,Deserialize,Debug)]
 pub struct MsgEmpty {
-    pub id: MsgId,
     pub from: AppOrProxyId,
 }
 
 impl Msg for MsgEmpty {
-    fn get_id(&self) -> &MsgId {
-        &self.id
-    }
-
     fn get_from(&self) -> &AppOrProxyId {
         &self.from
     }
@@ -169,7 +164,6 @@ impl Msg for MsgEmpty {
 }
 
 pub trait Msg: Serialize {
-    fn get_id(&self) -> &MsgId;
     fn get_from(&self) -> &AppOrProxyId;
     fn get_to(&self) -> &Vec<AppOrProxyId>;
     fn get_metadata(&self) -> &Value;
@@ -190,10 +184,6 @@ impl MsgWithBody for MsgTaskResult {
 }
 
 impl<M: Msg> Msg for MsgSigned<M> {
-    fn get_id(&self) -> &MsgId {
-        self.msg.get_id()
-    }
-
     fn get_from(&self) -> &AppOrProxyId {
         self.msg.get_from()
     }
@@ -208,10 +198,6 @@ impl<M: Msg> Msg for MsgSigned<M> {
 }
 
 impl Msg for MsgTaskRequest {
-    fn get_id(&self) -> &MsgId {
-        &self.id
-    }
-
     fn get_from(&self) -> &AppOrProxyId {
         &self.from
     }
@@ -226,10 +212,6 @@ impl Msg for MsgTaskRequest {
 }
 
 impl Msg for MsgTaskResult {
-    fn get_id(&self) -> &MsgId {
-        &self.id
-    }
-
     fn get_from(&self) -> &AppOrProxyId {
         &self.from
     }
@@ -255,17 +237,52 @@ impl Msg for MsgTaskResult {
 //     }
 // }
 
+mod serialize_time {
+    use std::{time::{SystemTime, UNIX_EPOCH, Duration}};
+
+    use serde::{self, Deserialize, Deserializer, Serializer};
+    use tracing::{warn, debug, error};
+
+
+    pub fn serialize<S>(time: &SystemTime, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let ttl = match time.duration_since(SystemTime::now()) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Internal Error: Tried to serialize a task which should have expired and expunged from memory {} seconds ago. Will return TTL=0. Cause: {}", e.duration().as_secs(), e);
+                Duration::ZERO
+            },
+        };
+        s.serialize_u64(ttl.as_secs())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let ttl: u64 = u64::deserialize(deserializer)?;
+        let expire = SystemTime::now() + Duration::from_secs(ttl);
+        debug!("Deserialized u64 {} to time {:?}", ttl, expire);
+        Ok(
+            expire
+        )
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskRequest {
     pub id: MsgId,
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub body: String,
-    // pub expire: SystemTime,
+    #[serde(with="serialize_time", rename="ttl")]
+    pub expire: SystemTime,
     pub failure_strategy: FailureStrategy,
     #[serde(skip)]
     pub results: HashMap<AppOrProxyId,MsgSigned<MsgTaskResult>>,
-    pub metadata: Value
+    pub metadata: Value,
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EncryptedMsgTaskRequest {
@@ -274,7 +291,7 @@ pub struct EncryptedMsgTaskRequest {
     pub to: Vec<AppOrProxyId>,
     //auth
     pub body: Option<String>,
-    // pub expire: SystemTime,
+    // pub expire: Instant,
     pub failure_strategy: Option<FailureStrategy>,
     pub encrypted: String,
     pub encryption_keys: Vec<Option<String>>,
@@ -284,37 +301,41 @@ pub struct EncryptedMsgTaskRequest {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskResult {
-    pub id: MsgId,
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub task: MsgId,
+    #[serde(flatten)]
     pub status: WorkStatus,
     pub metadata: Value,
 }
 
-pub trait HasWaitId<T> {
-    fn get_wait_id(&self) -> T;
+pub trait HasTaskId<MsgId> {
+    fn task_id(&self) -> MsgId;
 }
 
-impl HasWaitId<MsgId> for MsgTaskRequest {
-    fn get_wait_id(&self) -> MsgId {
+impl HasTaskId<MsgId> for MsgTaskRequest {
+    fn task_id(&self) -> MsgId {
         self.id
     }
 }
 
-impl HasWaitId<MsgId> for MsgTaskResult {
-    fn get_wait_id(&self) -> MsgId {
+impl HasTaskId<MsgId> for MsgTaskResult {
+    fn task_id(&self) -> MsgId {
         self.task
     }
 }
 
-impl<M> HasWaitId<MsgId> for MsgSigned<M> where M: HasWaitId<MsgId> + Msg {
-    fn get_wait_id(&self) -> MsgId {
-        self.msg.get_wait_id()
+impl<M> HasTaskId<MsgId> for MsgSigned<M> where M: HasTaskId<MsgId> + Msg {
+    fn task_id(&self) -> MsgId {
+        self.msg.task_id()
     }
 }
 
 impl MsgTaskRequest {
+    pub fn id(&self) -> &MsgId {
+        &self.id
+    }
+
     pub fn new(
         from: AppOrProxyId,
         to: Vec<AppOrProxyId>,
@@ -329,7 +350,8 @@ impl MsgTaskRequest {
             body,
             failure_strategy,
             results: HashMap::new(),
-            metadata
+            metadata,
+            expire: SystemTime::now() + Duration::from_secs(3600)
         }
     }
 }
@@ -353,10 +375,6 @@ impl MsgPing {
 }
 
 impl Msg for MsgPing {
-    fn get_id(&self) -> &MsgId {
-        &self.id
-    }
-
     fn get_from(&self) -> &AppOrProxyId {
         &self.from
     }

@@ -55,6 +55,8 @@ In practice,
 
 This design ensures that each component, mainly applications but Proxies and Brokers as well, can be addressed in tasks. Should the need arise in the future, this network could be federated by federating the brokers (not unsimilar to E-Mail/SMTP, XMPP, etc.)
 
+The Proxies have to fetch certificates from the central Certificate Authority, however, this communication is relayed by the broker. This ensures, that no external access to the CA is required.
+
 ## Getting started
 The following paragraph simulates the creation and the completion of a task
 using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
@@ -78,16 +80,16 @@ In this example, we use the same ApiKey `AppKey` for both parties.
 at party 2 is capable of solving it, so it asks `proxy1.broker.example.de` to
 create that new task:
 ```
-curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"]}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
+curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"],"ttl":600}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
 ```
 `Proxy1` replies:
 ```
 HTTP/1.1 201 Created
-location: /tasks/ 70c0aa90-bfcf-4312-a6af-42cbd57dc0b8
-content-length: 0
-date: Mon, 27 Jun 2022 13:58:35 GMT
+Location: /tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8
+Content-Length: 0
+Date: Mon, 27 Jun 2022 13:58:35 GMT
 ```
-where the `location` header field is the id of the newly created task. With that
+where the `Location` header field is the id of the newly created task. With that
 the task is registered and will be distributed to the appropriate locations.
 
 ### Listening for relevant tasks
@@ -101,13 +103,13 @@ The query returns the task, and as `app` at Proxy 2, we inform the broker that
 we are working on this important task by creating a preliminary "result" with
 `"status": "claimed"`:
 ```
-curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":"claimed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results
+curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":"claimed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/app.proxy2.broker.example.de
 ```
 
 ### Returning a Result
 Party 2 processes the received task. After succeeding, `app` at party 2 returns the result to party 1:
 ```
-curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":{"succeeded":"The answer is 42"},"task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results
+curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","metadata":["Arbitrary","types","are","possible"],"status":"succeeded","body":"The answer is 42","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/app.proxy2.broker.example.de
 ```
 
 ### Waiting for tasks to complete
@@ -115,7 +117,7 @@ Meanwhile, `app` at party 1 waits on the completion of its task. But not wanting
 ```
 curl -k -X GET -v -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results?wait_count=1
 ```
-This *long polling* opens the connection and sleeps until a reply is recieved. For more information, see the API documentation.
+This *long polling* opens the connection and sleeps until a reply is received. For more information, see the API documentation.
 
 ## Data objects (JSON)
 ### Task
@@ -136,6 +138,7 @@ Tasks are represented in the following structure:
       "max_tries": 5
     }
   },
+  "ttl": 3600,
   "metadata": "The broker can read and use this field e.g., to apply filters on behalf of an app"
 }
 ```
@@ -146,6 +149,7 @@ Tasks are represented in the following structure:
 - `body`: Description of work to be done. Not interpreted by the Broker.
 - `failure_strategy`: Advises each client how to handle failures. Possible values `discard`, `retry`.
 - `failure_strategy.retry`: How often to retry (`max_tries`) a failed task and how long to wait in between each try (`backoff_millisecs`).
+- `ttl`: Time-to-live in seconds. Once this reaches zero, the broker will expunge the task along with its results.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Result](#result) for more examples) and can be handled by the broker (thus intentionally not encrypted).
 
 ### Result
@@ -154,15 +158,13 @@ Each task can hold 0...n results by each *worker* defined in the task's `to` fie
 A succeeded result for the above task:
 ```json
 {
-  "id": "8db76400-e2d9-4d9d-881f-f073336338c1",
   "from": "app1.proxy-hd.broker-project1.samply.de",
   "to": [
     "app7.proxy-hd.broker-project1.samply.de"
   ],
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
-  "status": {
-    "succeeded": "Successfully quenched 1.43e14 flux pulse devices"
-  },
+  "status": "succeeded",
+  "body": "Successfully quenched 1.43e14 flux pulse devices",
   "metadata": ["Arbitrary", "types", "are", "possible"]
 }
 ```
@@ -170,27 +172,24 @@ A succeeded result for the above task:
 A failed task:
 ```json
 {
-  "id": "24a49494-6a00-415f-80fc-b2ae34658b98",
   "from": "app5.proxy-ma.broker-project1.samply.de",
   "to": [
     "app7.proxy-hd.broker-project1.samply.de"
   ],
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
-  "status": {
-    "permfailed": "Unable to decrypt quantum state"
-  },
+  "status": "permfailed",
+  "body": "Unable to decrypt quantum state",
   "metadata": {
     "complex": "A map (key 'complex') is possible, too"
   }
 }
 ```
 
-- `id`: UUID identifying the result. Note that when the result is initially submitted, the server is not required to use the submitted ID but may auto-generate its own one. Currently, since there can be only 0..1 results per client (= `from` field), a result's URL has the form `/v1/tasks/<task_id>/results/<id_in_from_field>` and the `id` field is only used internally, e.g. for filtering. However, for future compatibility, Callers must assume the submission's `id` property is ignored and check the reply's `Location` header for the actual URL to the task.
 - `from`: BeamID identifying the client submitting this result. This needs to match an entry the `to` field in the task.
 - `to`: BeamIDs the intended recipients of the result. Used for encrypted payloads.
 - `task`: UUID identifying the task this result belongs to.
-- `status`: Defines status of this work result. Possible values `claimed`, `tempfailed(<body>)`, `permfailed(<body>)`, `succeeded(<body>)`. It is up to the application how these statuses are used. For example, some application might require workers to acknowledge the receipt of tasks by setting `status=claimed`, whereas others have only short-running tasks and skip this step.
-- `status.body`: Required for `status`es listed above with `(<body>)`. Either carries the actual result payload of the task (`succeeded`) or an error message.
+- `status`: Defines status of this work result. Allowed values `claimed`, `tempfailed`, `permfailed`, `succeeded`. It is up to the application how these statuses are used. For example, some application might require workers to acknowledge the receipt of tasks by setting `status=claimed`, whereas others have only short-running tasks and skip this step.
+- `body`: Supported and required for all `status`es except for `claimed`. Either carries the actual result payload of the task in case the status is `succeeded` or an error message.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Task](#task)) and is not encrypted.
 
 ## API
@@ -205,9 +204,9 @@ Parameters: none
 Returns:
 ```
 HTTP/1.1 201 Created
-location: /tasks/b999cf15-3c31-408f-a3e6-a47502308799
-content-length: 0
-date: Mon, 27 Jun 2022 13:58:35 GMT
+Location: /tasks/b999cf15-3c31-408f-a3e6-a47502308799
+Content-Length: 0
+Date: Mon, 27 Jun 2022 13:58:35 GMT
 ```
 
 In subsequent requests, use the URL defined in the `location` header to refer to the task (NOT the one you supplied in your POST body).
@@ -220,7 +219,7 @@ URL: `/v1/tasks`
 Parameters:
 - `from` (optional): Fetch only tasks created by this ID.
 - `to` (optional): Fetch only tasks directed to this ID.
-- [long polling](#long-polling) is supported.
+- [long polling](#long-polling-api-access) is supported.
 - `filter` (optional): Fetch only tasks fulfilling the specified filter criterion. Generic queries are not yet implemented, but the following "convenience filters" reflecting common use cases exist:
   - `filter=todo`: Matches unfinished tasks to be worked on by the asking client. Is a combination of:
     - `to` contains me and
@@ -229,9 +228,9 @@ Parameters:
 Returns an array of tasks, cf. [here](#task)
 ```
 HTTP/1.1 200 OK
-content-type: application/json
-content-length: 220
-date: Mon, 27 Jun 2022 14:05:59 GMT
+Content-Type: application/json
+Content-Length: 220
+Date: Mon, 27 Jun 2022 14:05:59 GMT
 
 [
   {
@@ -240,20 +239,35 @@ date: Mon, 27 Jun 2022 14:05:59 GMT
 )
 ```
 
+### Create a result
+Create or update a result of a task. 
+
+Method: `PUT`  
+URL: `/v1/tasks/<task_id>/results/<app_id>`  
+Body: see [Result](#result)  
+Parameters: none
+
+Returns:
+```
+HTTP/1.1 204 No Content
+Content-Length: 0
+Date: Mon, 27 Jun 2022 13:58:35 GMT
+```
+
 ### Retrieve results
 The submitter of the task (see [Create Task](#create-task)) calls this endpoint to retrieve the results.
 
 Method: `GET`  
 URL: `/v1/tasks/<task_id>/results`  
 Parameters:
-- [long polling](#long-polling) is supported.
+- [long polling](#long-polling-api-access) is supported.
 
 Returns an array of results, cf. [here](#result)
 ```
 HTTP/1.1 200 OK
-content-type: application/json
-content-length: 179
-date: Mon, 27 Jun 2022 14:26:45 GMT
+Content-Type: application/json
+Content-Length: 179
+Date: Mon, 27 Jun 2022 14:26:45 GMT
 
 [
   {
@@ -283,8 +297,8 @@ Parameters:
 In the current version only an appropriate status code is returned once/if initialization has succeeded. However, in the future more detailed health information might be returned in the reply body.
 ```
 HTTP/1.1 200 OK
-content-length: 0
-date: Mon, 27 Jun 2022 14:26:45 GMT
+Content-Length: 0
+Date: Mon, 27 Jun 2022 14:26:45 GMT
 ```
 
 ## Development Environment
@@ -311,6 +325,9 @@ Confirm that your setup works by running `./dev/test noci`, which runs the tests
 
 To work with the environment, you may run `./dev/beamdev defaults` to see some helpful values, including the dev default URLs and a working authentication header.
 
+### Logging
+Both the Broker and the Proxy respect the log level in the `RUST_LOG` environment variable. E.g., `RUST_LOG=debug` enables debug outputs. Warning: the `trace` log level is *very* noisy.
+
 ## Roadmap
 - [X] API Key authentication of local applications
 - [X] Certificate management
@@ -322,3 +339,8 @@ To work with the environment, you may run `./dev/beamdev defaults` to see some h
 - [ ] Broker-side filtering of the unencrypted fields with JSON queries
 - [ ] Integration of OAuth2 (in discussion)
 - [x] Helpful dev environment
+- [x] Expiration of tasks and results
+- [x] Support TLS-terminating proxies
+
+## Cryptography Notice
+This distribution includes cryptographic software. The country in which you currently reside may have restrictions on the import, possession, use, and/or re-export to another country, of encryption software. BEFORE using any encryption software, please check your country's laws, regulations and policies concerning the import, possession, or use, and re-export of encryption software, to see if this is permitted. See [http://www.wassenaar.org/](http://www.wassenaar.org) for more information.

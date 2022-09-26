@@ -1,6 +1,6 @@
 [package]
 name = "broker"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -31,6 +31,8 @@ tracing = "0.1.35"
 
 hyper = { version = "0.14.19", features = ["full"] }
 hyper-tls = "0.5.0"
+
+vaultrs = { git = "https://github.com/jmgilman/vaultrs", default-features = false, features = [ "native-tls" ] }# <= Change once update > 0.6.2 is out
 
 [build-dependencies]
 build-data = "0"

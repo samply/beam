@@ -15,34 +15,31 @@ export TASK0='
       "max_tries": 5
     }
   },
+  "ttl": [TTL],
   "metadata": "The broker can read and use this field e.g., to apply filters on behalf of an app"
 }'
 
 export RESULT_BY_APP1='
 {
-  "id": "8db76400-e2d9-4d9d-881f-f073336338c1",
   "from": "app1.proxy1.broker",
   "to": [
     "app1.proxy1.broker"
   ],
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
-  "status": {
-    "succeeded": "Successfully quenched 1.43e14 flux pulse devices"
-  },
+  "status": "succeeded",
+  "body": "Successfully quenched 1.43e14 flux pulse devices",
   "metadata": ["Arbitrary", "types", "are", "possible"]
 }'
 
 export RESULT_BY_APP2='
 {
-  "id": "24a49494-6a00-415f-80fc-b2ae34658b98",
   "from": "app2.proxy1.broker",
   "to": [
     "app1.proxy1.broker"
   ],
   "task": "70c0aa90-bfcf-4312-a6af-42cbd57dc0b8",
-  "status": {
-    "permfailed": "Unable to decrypt quantum state"
-  },
+  "status": "permfailed",
+  "body": "Unable to decrypt quantum state",
   "metadata": {
     "complex": "A map (key 'complex') is possible, too"
   }
@@ -62,5 +59,35 @@ export TASK_BY_A1P1_FOR_A1P2='
       "max_tries": 5
     }
   },
+  "ttl": [TTL],
   "metadata": null
+}'
+export TASK2_BY_A1P1_FOR_A1P2='
+{
+  "id": "6f531223-3699-4f6e-b7bf-88d8064fea7e",
+  "from": "app1.proxy1.broker",
+  "to": [
+    "app1.proxy2.broker"
+  ],
+  "body": "So much work!",
+  "failure_strategy": {
+    "retry": {
+      "backoff_millisecs": 1000,
+      "max_tries": 5
+    }
+  },
+  "ttl": [TTL],
+  "metadata": null
+}'
+export RESULT_BY_APP1_P2='
+{
+  "from": "app1.proxy2.broker",
+  "to": [
+    "app1.proxy1.broker"
+  ],
+  "task": "6f531223-3699-4f6e-b7bf-88d8064fea7e",
+  "status": "claimed",
+  "metadata": {
+    "complex": "A map (key 'complex') is possible, too"
+  }
 }'
