@@ -1,6 +1,6 @@
-# Samply.Beam 0.3.0
+# Samply.Beam 0.3.0 -- 2022-09-26
 
-We are happy to announce the new Samply.Beam major release 0.3.0. Like many early-stage software projects, the Samply.Beam developments moves fast and we are exited to see new features, improved performance and stability, and an overall improvement of code quality and error handling. Furthermore, the first productive use of Samply.Beam shoed some shortcomings in the API, so we strived to streamline the developer experience for costumer applications.
+We are happy to announce the new Samply.Beam major release 0.3.0. Like many early-stage software projects, the Samply.Beam developments moves fast and we are exited to see new features, improved performance and stability, and an overall improvement of code quality and error handling. Furthermore, the first productive use of Samply.Beam brought some shortcomings in the API to our attention, so we strived to streamline the developer experience for costumer applications.
 
 Unfortunately, this high pace of development and the significant improvements come with some breaking changes in the API. If you have not already, please adapt your applications accordingly.
 
@@ -12,23 +12,29 @@ Thank you for using Samply.Beam and all your feedback, helping us improve Samply
 
 ### Expiry of messages
 
-Many tasks are only relevant for a specific duration. This is now reflexted in the mandatory `ttl` field of the task JSON, stating the ttime-to-live in seconds. After this time, the task and all its attached results expire and are cleaned up.
+Many tasks are only relevant for a specific duration. This is now reflected in the mandatory `ttl` field of the task JSON, stating the time-to-live in seconds. After this time, the task and all its attached results expire and are cleaned up.
 
 ### Removed `status` body for `Result` objects
+
+To be consistent in the usage of the `Task` and `Result` JSONs, we changed the
+`Result` interface. The `status` now only provides the status as a string (i.e.,
+`claimed`, `succeeded`, `tempfailed`, or `permfailed`) and does not take the
+return body itself. Instead, the `body` of a successful result is attached to
+the root of the `Result` object.
 
 ### Cleaned up public API
  * Removed `id` field from result
  * Changed result endpoint
- 
+
 ## Major changes
 
 ### The Beam.Proxies now address the central CA via Beam.Broker
 
-By addessing the central CA via central Broker the configuration of the local Beam.Proxies is greatly reduced and the central CA does not need to be publicly reachable.
+By addressing the central CA via central Broker the configuration of the local Beam.Proxies is greatly reduced and the central CA does not need to be publicly reachable.
 
 ### Support for TLS terminating proxy servers
 
-As many institutions operate a Man-in-the-middle TLS-terminating proxy, you can now provide the appropriate certificate to sucessfully establish connections through theses systems. The optional commandline parameter `--tls_ca_certificates_dir` (or the respective environment variable) takes the folder containing all relevant certificates.
+As many institutions operate a Man-in-the-middle TLS-terminating proxy, you can now provide the appropriate certificate to successfully establish connections through theses systems. The optional command line parameter `--tls_ca_certificates_dir` (or the respective environment variable) takes the folder containing all relevant certificates.
 
 ### Respect `no_proxy` environment variable
 
