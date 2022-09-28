@@ -27,7 +27,10 @@ where
     async fn from_request(req: &mut RequestParts<B>) -> Result<Self,Self::Rejection> {
         let body = req.take_body().ok_or(ERR_BODY)?;
         let bytes = hyper::body::to_bytes(body).await.map_err(|_| ERR_BODY)?;
-        let token_without_extended_signature = std::str::from_utf8(&bytes).map_err(|_| ERR_SIG)?;
+        let token_without_extended_signature = std::str::from_utf8(&bytes).map_err(|e| {
+            warn!("Unable to parse token_without_extended_signature as UTF-8: {}", e);
+            ERR_SIG
+        })?;
         verify_with_extended_header(req, Some(token_without_extended_signature)).await
     }
 }
@@ -69,12 +72,23 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
 }
 
 async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestParts<B>, token_without_extended_signature: Option<&str>) -> Result<MsgSigned<M>,(StatusCode, &'static str)> {
-    let token_with_extended_signature = std::str::from_utf8(req.headers().get(header::AUTHORIZATION).ok_or(ERR_SIG)?.as_bytes()).map_err(|_| ERR_SIG)?;
+    let token_with_extended_signature = std::str::from_utf8(req.headers().get(header::AUTHORIZATION).ok_or_else(|| {
+        warn!("Unable to read Authorization header (in verify_with_extended_header)");
+        ERR_SIG
+        })?
+        .as_bytes())
+        .map_err(|e| {
+            warn!("Unable to read Authorization header (in verify_with_extended_header): {}", e);
+            ERR_SIG
+            })?;
     let token_with_extended_signature = token_with_extended_signature.trim_start_matches("SamplyJWT ");
     
     let (proxy_public_info, pubkey, mut content_with) 
         = extract_jwt(token_with_extended_signature).await
-        .map_err(|_| ERR_SIG)?;
+        .map_err(|e| {
+            warn!("Unable to extract JWT: {}", e);
+            ERR_SIG
+        })?;
     
     // Check extra digest
 
