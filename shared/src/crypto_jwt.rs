@@ -80,20 +80,26 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
 
     let custom = content_with.custom.as_object_mut();
     if custom.is_none() {
+        warn!("Received a request with empty JWT custom claims");
         return Err(ERR_SIG);
     }
     let custom = custom.unwrap();
     let digest_claimed = custom.remove("extra_fields_digest");
     if digest_claimed.is_none() {
+        warn!("Received a request but had an empty digest_claimed");
         return Err(ERR_SIG);
     }
     let digest_claimed = digest_claimed.unwrap();
     if ! digest_claimed.is_string() {
+        warn!("Received a request but digest_claimed was not a valid string");
         return Err(ERR_SIG);
     }
     let digest_claimed = digest_claimed.as_str().unwrap();
     let digest_actual = make_extra_fields_digest(req.method(), req.uri(), req.headers())
-        .map_err(|_| ERR_SIG)?;
+        .map_err(|e| {
+            warn!("Got error in make_extra_fields_digest: {}", e);
+            ERR_SIG
+        })?;
     
     if digest_actual != digest_claimed {
         warn!("Digests did not match: expected {}, received {}", digest_claimed, digest_actual);
@@ -109,6 +115,7 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
             })?;
         let custom_without = content_without.custom.as_object();
         if custom_without.is_none() {
+            warn!("Upon message verification, encountered an empty custom_without.");
             return Err(ERR_SIG);
         }
         let custom_without = custom_without.unwrap();
@@ -117,12 +124,18 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
             return Err(ERR_SIG);
         }
         let custom_without = serde_json::from_value::<M>(Value::Object(custom_without.clone()))
-            .map_err(|_| ERR_BODY)?;
+            .map_err(|e| {
+                warn!("Unable to unpack custom_without to JSON value, returning ERR_BODY: {}", e);
+                ERR_BODY
+        })?;
         (custom_without, token_without_extended_signature)
     } else {
         // TODO: We need to fetch the message from the custom_with
         let msg = serde_json::from_value::<M>(content_with.custom)
-            .map_err(|_| ERR_SIG)?;
+            .map_err(|e| {
+                warn!("Unable to unpack custom_without to JSON value, returning ERR_SIG: {}", e);
+                ERR_SIG
+            })?;
         let msg_empty = MsgEmpty {
             from: msg.get_from().clone(),
         };
@@ -135,6 +148,7 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
 
     // Check if Messages' "from" attribute can be signed by the proxy
     if ! custom_without.get_from().can_be_signed_by(&proxy_public_info.beam_id) {
+        warn!("Received messages' \"from\" attribute which should not have been signed by the proxy.");
         return Err(ERR_FROM);
     }
     // TODO: Check if Date header makes sense (replay attacks)
