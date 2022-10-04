@@ -9,7 +9,7 @@ pub enum SamplyBeamError {
     #[error("Invalid broker address supplied: {0}")]
     WrongBrokerUri(&'static str),
     #[error("The request could not be validated.")]
-    RequestValidationFailed,
+    RequestValidationFailed(String),
     #[error("Invalid path supplied")]
     InvalidPath,
     #[error("Invalid Client ID: {0}")]

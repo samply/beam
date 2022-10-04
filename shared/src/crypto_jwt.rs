@@ -54,7 +54,7 @@ where
 
 pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
     let metadata = Token::decode_metadata(token)
-        .map_err(|_| SamplyBeamError::RequestValidationFailed)?;
+        .map_err(|e| SamplyBeamError::RequestValidationFailed(e.to_string()))?;
     let serial = metadata.key_id().unwrap_or_default();
         // .map_err(|_| SamplyBeamError::RequestValidationFailed)?;
     let public = crypto::get_cert_and_client_by_serial_as_pemstr(serial).await;
@@ -67,18 +67,18 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
             SamplyBeamError::SignEncryptError(format!("Unable to initialize public key: {}", e))
         })?;
     let content = pubkey.verify_token::<Value>(token, None)
-        .map_err(|_| SamplyBeamError::RequestValidationFailed )?;
+        .map_err(|e| SamplyBeamError::RequestValidationFailed(e.to_string()))?;
     Ok((public, pubkey, content))
 }
 
 async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestParts<B>, token_without_extended_signature: Option<&str>) -> Result<MsgSigned<M>,(StatusCode, &'static str)> {
     let token_with_extended_signature = std::str::from_utf8(req.headers().get(header::AUTHORIZATION).ok_or_else(|| {
-        warn!("Unable to read Authorization header (in verify_with_extended_header)");
+        warn!("Missing Authorization header (in verify_with_extended_header)");
         ERR_SIG
         })?
         .as_bytes())
         .map_err(|e| {
-            warn!("Unable to read Authorization header (in verify_with_extended_header): {}", e);
+            warn!("Unable to parse existing Authorization header (in verify_with_extended_header): {}", e);
             ERR_SIG
             })?;
     let token_with_extended_signature = token_with_extended_signature.trim_start_matches("SamplyJWT ");
