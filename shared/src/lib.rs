@@ -127,14 +127,14 @@ impl<M: Msg> MsgSigned<M> {
 
         // Message content matches token?
         let val = serde_json::to_value(&self.msg)
-        .expect("Internal error: Unable to interpret already parsed message to JSON Value.");
+            .expect("Internal error: Unable to interpret already parsed message to JSON Value.");
         if content.custom != val {
-            return Err(SamplyBeamError::RequestValidationFailed);
+            return Err(SamplyBeamError::RequestValidationFailed("content.custom did not match parsed message.".to_string()));
         }
 
         // From field matches CN in certificate?
         if ! self.get_from().can_be_signed_by(&proxy_public_info.beam_id) {
-            return Err(SamplyBeamError::RequestValidationFailed);
+            return Err(SamplyBeamError::RequestValidationFailed(format!("{} is not allowed to sign for {}", &proxy_public_info.beam_id, self.get_from())));
         }
         debug!("Message has been verified succesfully.");
         Ok(())
