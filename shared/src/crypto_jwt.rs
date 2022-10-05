@@ -56,7 +56,7 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
     let metadata = Token::decode_metadata(token)
         .map_err(|e| SamplyBeamError::RequestValidationFailed(e.to_string()))?;
     let serial = metadata.key_id()
-        .ok_or_else(|| Err(SamplyBeamError::RequestValidationFailed(format!("Unable to extract certificate serial from JWT. The offending JWT was: {}", token))))?;
+        .ok_or_else(|| SamplyBeamError::RequestValidationFailed(format!("Unable to extract certificate serial from JWT. The offending JWT was: {}", token)))?;
     let public = crypto::get_cert_and_client_by_serial_as_pemstr(serial).await
         .ok_or_else(|| SamplyBeamError::VaultError(format!("Unable to retrieve matching certificate for serial \"{}\"", serial)))?;
     let pubkey = RS256PublicKey::from_pem(&public.pubkey)
