@@ -86,7 +86,7 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
     let (proxy_public_info, pubkey, mut content_with) 
         = extract_jwt(token_with_extended_signature).await
         .map_err(|e| {
-            warn!("Unable to extract JWT: {}", e);
+            warn!("Unable to extract JWT: {}. The full JWT was: {}", e, token_with_extended_signature);
             ERR_SIG
         })?;
     
