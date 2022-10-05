@@ -36,7 +36,7 @@ rsa = "0.6"
 sha2 = "0.10.2"
 openssl = "0.10.40"
 aes-gcm = "0.9.4"
-jwt-simple = { git = "https://github.com/jedisct1/rust-jwt-simple", rev="b6a2c5be" } # <= Change once version >0.11.0 is out
+jwt-simple = "0.11.1"
 
 # Global variables
 static_init = "1.0.2"
