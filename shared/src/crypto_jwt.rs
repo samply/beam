@@ -54,7 +54,7 @@ where
 
 pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
     let metadata = Token::decode_metadata(token)
-        .map_err(|e| SamplyBeamError::RequestValidationFailed(e.to_string()))?;
+        .map_err(|e| SamplyBeamError::RequestValidationFailed(format!("Unable to decode JWT metadata: {}", e)))?;
     let serial = metadata.key_id()
         .ok_or_else(|| SamplyBeamError::RequestValidationFailed(format!("Unable to extract certificate serial from JWT. The offending JWT was: {}", token)))?;
     let public = crypto::get_cert_and_client_by_serial_as_pemstr(serial).await
@@ -64,7 +64,7 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
             SamplyBeamError::SignEncryptError(format!("Unable to initialize public key: {}", e))
         })?;
     let content = pubkey.verify_token::<Value>(token, None)
-        .map_err(|e| SamplyBeamError::RequestValidationFailed(e.to_string()))?;
+        .map_err(|e| SamplyBeamError::RequestValidationFailed(format!("Unable to verify token and extract claims from JWT: {}", e)))?;
     Ok((public, pubkey, content))
 }
 
