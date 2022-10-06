@@ -6,7 +6,7 @@ use static_init::dynamic;
 use tokio::{sync::{RwLock, mpsc, oneshot}};
 use tracing::{debug, warn, info, error};
 use std::{path::{Path, PathBuf}, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string};
-use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PaddingScheme, pkcs1::DecodeRsaPublicKey};
+use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PublicKeyParts, PaddingScheme, pkcs1::DecodeRsaPublicKey};
 use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 
@@ -428,18 +428,21 @@ pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, 
     Ok(result)
 }
 
-pub(crate) fn get_best_certificate(publics: Vec<CryptoPublicPortion>) -> Option<CryptoPublicPortion> {
-    if publics.is_empty() {
-        return None;
-    }
-    let the_beginning = Asn1Time::from_unix(0).unwrap();
-    let mut newest_time = the_beginning.as_ref();
-    let mut newest_public = None;
-    for public in &publics {
-        if newest_time < public.cert.not_before() {
-            newest_time = public.cert.not_before();
-            newest_public = Some(public);
-        }
-    }
-    newest_public.cloned()
+/// Checks whether or not a x509 certificate matches a private key by comparing the (public) modulus
+fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey)->Result<bool,ErrorStack>{
+    let cert_rsa = cert.public_key()?.rsa()?;
+    let cert_mod = cert_rsa.n();
+    let key_mod = key.n();
+    let key_mod_bignum = openssl::bn::BigNum::from_slice(&key_mod.to_bytes_be())?;
+    return Ok(cert_mod.ucmp(&key_mod_bignum) == std::cmp::Ordering::Equal);
+}
+
+/// Selecs the best fitting certificate from a vector of certs according to:
+/// 1) Does it match the private key?
+/// 2) Select the newest of the remaining
+pub(crate) fn get_best_certificate(publics: &Vec<CryptoPublicPortion>, private_rsa: &RsaPrivateKey) -> Option<CryptoPublicPortion> {
+    let mut publics = publics.to_owned();
+    publics.retain(|c| is_cert_from_privkey(&c.cert,private_rsa).unwrap_or(false)); // retain certs matching the private cert
+    publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Can not select newest certificate").reverse()); // sort by newest
+    publics.first().cloned() // If empty vec --> return None
 }
