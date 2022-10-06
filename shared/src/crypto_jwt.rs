@@ -1,9 +1,10 @@
 use axum::{async_trait, extract::{FromRequest, RequestParts}, body::{HttpBody}, BoxError, http::StatusCode};
 use hyper::{header::{self, HeaderName}, Method, Uri, HeaderMap};
-use jwt_simple::prelude::{Token, RS256PublicKey, RSAPublicKeyLike, RS256KeyPair, Claims, Duration, RSAKeyPairLike, KeyMetadata, Base64};
+use jwt_simple::prelude::{Token, RS256PublicKey, RSAPublicKeyLike, RS256KeyPair, Claims, Duration, RSAKeyPairLike, KeyMetadata, Base64, VerificationOptions};
 use openssl::base64;
 use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
+use static_init::dynamic;
 use tracing::{debug, error, warn};
 use crate::{BeamId, errors::SamplyBeamError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::ProxyId};
 
@@ -53,6 +54,12 @@ where
 }
 
 pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
+    // TODO: Make static/const
+    let options = VerificationOptions {
+        accept_future: true,
+        ..Default::default()
+    };
+
     let metadata = Token::decode_metadata(token)
         .map_err(|e| SamplyBeamError::RequestValidationFailed(format!("Unable to decode JWT metadata: {}", e)))?;
     let serial = metadata.key_id()
@@ -63,7 +70,7 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
         .map_err(|e| {
             SamplyBeamError::SignEncryptError(format!("Unable to initialize public key: {}", e))
         })?;
-    let content = pubkey.verify_token::<Value>(token, None)
+    let content = pubkey.verify_token::<Value>(token, Some(options))
         .map_err(|e| SamplyBeamError::RequestValidationFailed(format!("Unable to verify token and extract claims from JWT: {}", e)))?;
     Ok((public, pubkey, content))
 }
