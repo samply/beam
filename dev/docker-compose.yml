@@ -48,6 +48,7 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
+      no_proxy: broker
     secrets:
       - proxy1.pem
   proxy2:
@@ -68,8 +69,30 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
       RUST_LOG: ${RUST_LOG}
+      no_proxy: broker
     secrets:
       - proxy2.pem
+  proxy3:
+    depends_on: [broker]
+    build:
+      context: ../
+      dockerfile: Dockerfile.ci.proxy
+    image: samply/beam-proxy:${TAG}
+    ports:
+      - 8083:8082
+    environment:
+      BROKER_URL: ${BROKER_URL}
+      PROXY_ID: ${PROXY3_ID}
+      APP_0_ID: ${APP1_ID_SHORT}
+      APP_0_KEY: ${APP_KEY}
+      APP_1_ID: ${APP2_ID_SHORT}
+      APP_1_KEY: ${APP_KEY}
+      PRIVKEY_FILE: /run/secrets/proxy3.pem
+      BIND_ADDR: 0.0.0.0:8082
+      RUST_LOG: ${RUST_LOG}
+      no_proxy: broker
+    secrets:
+      - proxy3.pem
 secrets:
   pki.secret:
     file: ./pki/pki.secret
@@ -77,5 +100,7 @@ secrets:
     file: ./pki/${PROXY1_ID_SHORT}.priv.pem
   proxy2.pem:
     file: ./pki/${PROXY2_ID_SHORT}.priv.pem
+  proxy3.pem:
+    file: ./pki/${PROXY3_ID_SHORT}.priv.pem
   dummy.pem:
     file: ./pki/dummy.priv.pem

@@ -5,10 +5,12 @@ SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 [ -z "$PROXY1_ID" ] && ( echo "PROXY1_ID not set!"; exit 1)
 [ -z "$PROXY2_ID" ] && ( echo "PROXY2_ID not set!"; exit 1)
+[ -z "$PROXY3_ID" ] && ( echo "PROXY3_ID not set!"; exit 1)
 
 cd $SCRIPT_DIR
 export PROXY1_ID_SHORT=$(echo $PROXY1_ID | cut -d '.' -f 1)
 export PROXY2_ID_SHORT=$(echo $PROXY2_ID | cut -d '.' -f 1)
+export PROXY3_ID_SHORT=$(echo $PROXY3_ID | cut -d '.' -f 1)
 export BROKER_ID=$(echo $PROXY1_ID | cut -d '.' -f 2-)
 export VAULT_ADDR=http://127.0.0.1:8200
 
@@ -102,12 +104,14 @@ case "$1" in
           clean
           touch ${PROXY1_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
           touch ${PROXY2_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
+          touch ${PROXY3_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
           start
           while ! [ "$(curl -s $VAULT_ADDR/v1/sys/health | jq -r .sealed)" == "false" ]; do echo "Waiting ..."; sleep 0.1; done
           docker-compose exec -T vault sh -c "https_proxy=$http_proxy apk add --no-cache bash curl jq"
           docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki init"
           docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY1_ID_SHORT"
           docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY2_ID_SHORT"
+          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID PROXY3_ID=$PROXY3_ID /pki/pki request_proxy $PROXY3_ID_SHORT"
           docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy dummy"
           ;;
      *)
