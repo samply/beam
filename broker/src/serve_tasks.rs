@@ -6,9 +6,9 @@ use axum::{
     Extension, Json, Router, extract::{Query, Path}, response::IntoResponse
 };
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasTaskId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
-use tracing::{debug, info, trace, error};
+use tracing::{debug, info, trace, error, warn};
 
 use crate::expire;
 
@@ -59,7 +59,7 @@ async fn get_results_for_task(
 ) -> Result<(StatusCode, Json<Vec<MsgSigned<MsgTaskResult>>>), (StatusCode, &'static str)> {
     debug!("get_results_for_task called by {}: {:?}, {:?}", msg.get_from(), task_id, block);
     let filter_for_me = MsgFilterNoTask { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::Or };
-    let (mut results, rx)  = {
+    let (mut results, rx_new_result, rx_deleted_task)  = {
         let tasks = state.tasks.read().await;
         let task = match tasks.get(&task_id) {
             Some(task) => task,
@@ -69,16 +69,16 @@ async fn get_results_for_task(
             return Err((StatusCode::UNAUTHORIZED, "Not your task."));
         }
         let results = task.msg.results.values().cloned().collect();
-        let rx = match would_wait_for_elements(&results, &block) {
+        let rx_new_result = match would_wait_for_elements(&results, &block) {
             true => Some(state.new_result_tx.read().await.get(&task_id)
-                        .unwrap_or_else(|| panic!("Internal error: No result_tx found for task {}", task_id))
+                        .unwrap_or_else(|| panic!("Internal error: No new_result_tx found for task {}", task_id))
                         .subscribe()),
             false => None,
         };
-        (results, rx)
+        (results, rx_new_result, state.removed_task_rx.subscribe())
     };
-    if let Some(rx) = rx {
-        wait_for_elements_notask(&mut results, &block, rx, &filter_for_me, state.removed_task_rx.subscribe()).await;
+    if let Some(rx) = rx_new_result {
+        wait_for_results_for_task(&mut results, &block, rx, &filter_for_me, rx_deleted_task, &task_id).await;
     }
     let statuscode = wait_get_statuscode(&results, &block);
     Ok((statuscode, Json(results)))
@@ -97,8 +97,8 @@ fn wait_get_statuscode<S>(vec: &Vec<S>, block: &HowLongToBlock) -> StatusCode {
 }
 
 // TODO: Is there a way to write this function in a generic way? (1/2)
-async fn wait_for_elements_notask<'a, M: Msg>(vec: &mut Vec<M>, block: &HowLongToBlock, mut new_element_rx: Receiver<M>, filter: &MsgFilterNoTask<'a>, mut deleted_task_rx: Receiver<MsgId>)
-where M: Clone + HasTaskId<MsgId>
+async fn wait_for_results_for_task<'a, M: Msg, I: PartialEq>(vec: &mut Vec<M>, block: &HowLongToBlock, mut new_result_rx: Receiver<M>, filter: &MsgFilterNoTask<'a>, mut deleted_task_rx: Receiver<MsgId>, task_id: &MsgId)
+where M: Clone + HasWaitId<I>
 {
     let wait_until =
         time::Instant::now() + block.wait_time.unwrap_or(time::Duration::from_secs(31536000));
@@ -118,23 +118,26 @@ where M: Clone + HasTaskId<MsgId>
             _ = tokio::time::sleep_until(wait_until) => {
                 break;
             },
-            result = new_element_rx.recv() => {
+            result = new_result_rx.recv() => {
                 match result {
                     Ok(req) => {
                         if filter.filter(&req) {
-                            vec.retain(|el| el.task_id() != req.task_id());
+                            vec.retain(|el| el.wait_id() != req.wait_id());
                             vec.push(req);
                         }
                     },
-                    Err(_) => { panic!("Unable to receive from queue new_element_rx! What happened?"); }
+                    Err(e) => { panic!("Unable to receive from queue new_result_rx: {}", e); }
                 }
             },
             deleted_task_id = deleted_task_rx.recv() => {
                 match deleted_task_id {
                     Ok(deleted_task_id) => {
-                        vec.retain(|el| el.task_id() != deleted_task_id);
+                        if deleted_task_id == *task_id {
+                            warn!("Task {} was just deleted while someone was waiting for results. Returning the {} results up to now.", task_id, vec.len());
+                            return;
+                        }
                     },
-                    Err(_) => { panic!("Unable to receive from queue deleted_task_rx! What happened?"); }
+                    Err(e) => { panic!("Unable to receive from queue deleted_task_rx: {}", e); }
                 }
             }
         }
@@ -166,7 +169,7 @@ async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, bl
                 match result {
                     Ok(req) => {
                         if filter.filter(&req) {
-                            vec.retain(|el| el.task_id() != req.task_id());
+                            vec.retain(|el| el.wait_id() != req.wait_id());
                             vec.push(req);
                         }
                     },
@@ -176,7 +179,7 @@ async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, bl
             deleted_task_id = deleted_task_rx.recv() => {
                 match deleted_task_id {
                     Ok(deleted_task_id) => {
-                        vec.retain(|el| el.task_id() != deleted_task_id);
+                        vec.retain(|el| el.wait_id() != deleted_task_id);
                     },
                     Err(_) => { panic!("Unable to receive from queue deleted_task_rx! What happened?"); }
                 }
