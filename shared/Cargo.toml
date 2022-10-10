@@ -32,7 +32,7 @@ tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
 
 # Crypto
 rand = "0.8.5"
-rsa = "0.6"
+rsa = "0.7"
 sha2 = "0.10.2"
 openssl = "0.10.40"
 aes-gcm = "0.9.4"
