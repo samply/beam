@@ -420,9 +420,12 @@ pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, 
         for file in ca_dir.read_dir()? { //.map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory {}: {}", ca_dir.to_string_lossy(), e)))
             let path = file?.path();
             let content = std::fs::read(&path)?;
-            let cert = X509::from_pem(&content)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("Unable to read certificate from file {}: {}", path.to_string_lossy(), e)))?;
-            result.push(cert);
+            let cert = X509::from_pem(&content);
+            if let Err(e) = cert {
+                warn!("Unable to read certificate from file {}: {}", path.to_string_lossy(), e);
+                continue;
+            }
+            result.push(cert.unwrap());
         }
     }
     Ok(result)
