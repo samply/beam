@@ -9,13 +9,17 @@ struct Latest {
     expire: Option<SystemTime>
 }
 
+async fn get_soonest(tasks: &HashMap<MyUuid, MsgSigned<MsgTaskRequest>>) -> Latest {
+    match get_shortest(tasks) {
+        Some(x) => Latest { id: Some(x.msg.id), expire: Some(x.msg.expire) },
+        None => Latest { id: None, expire: None },
+    }
+}
+
 pub(crate) async fn watch(tasks: Arc<RwLock<HashMap<MyUuid, MsgSigned<MsgTaskRequest>>>>, mut new_task_rx: Receiver<MsgSigned<MsgTaskRequest>>) -> Result<(), SystemTimeError> {
     let mut soonest = {
         let tasks = tasks.read().await;
-        match get_shortest(&tasks) {
-            Some(x) => Latest { id: Some(x.msg.id), expire: Some(x.msg.expire) },
-            None => Latest { id: None, expire: None },
-        }
+        get_soonest(&tasks).await
     };
     loop {
         let until = match &soonest.expire {
@@ -32,7 +36,7 @@ pub(crate) async fn watch(tasks: Arc<RwLock<HashMap<MyUuid, MsgSigned<MsgTaskReq
                 Duration::MAX
             }
         };
-        debug!("Next task will expire in {} seconds", until.as_secs());
+        debug!("Next task {} will expire in {} seconds", { if soonest.id.is_some() { soonest.id.unwrap().to_string() } else { "(none)".to_string() }}, until.as_secs());
         select! {
             // New Task created => check if it will expire sooner than all the other ones
             Ok(new) = new_task_rx.recv() => {
@@ -55,14 +59,14 @@ pub(crate) async fn watch(tasks: Arc<RwLock<HashMap<MyUuid, MsgSigned<MsgTaskReq
                 } else {
                     warn!("Tried to remove expired task {} but it was already gone.", soonest.id.unwrap());
                 }
-                soonest.id = None;
-                soonest.expire = None;
+                // Now that we removed the previously-soonest task, what is the next one?
+                soonest = get_soonest(&tasks).await;
             }
         }
     }
 }
 
-fn get_shortest<'a>(tasks: &'a RwLockReadGuard<HashMap<MyUuid, MsgSigned<MsgTaskRequest>>>) -> Option<&'a MsgSigned<MsgTaskRequest>> {
+fn get_shortest(tasks: &HashMap<MyUuid, MsgSigned<MsgTaskRequest>>) -> Option<&MsgSigned<MsgTaskRequest>> {
     let mut shortest = tasks.values().next()?;
     for task in tasks.values() {
         if task.msg.expire < shortest.msg.expire {

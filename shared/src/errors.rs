@@ -8,8 +8,8 @@ pub enum SamplyBeamError {
     BindAddr(AddrParseError),
     #[error("Invalid broker address supplied: {0}")]
     WrongBrokerUri(&'static str),
-    #[error("The request could not be validated.")]
-    RequestValidationFailed,
+    #[error("The request could not be validated: {0}.")]
+    RequestValidationFailed(String),
     #[error("Invalid path supplied")]
     InvalidPath,
     #[error("Invalid Client ID: {0}")]

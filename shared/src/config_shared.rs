@@ -1,4 +1,4 @@
-use crate::{SamplyBeamError, crypto::{self, load_certificates_from_dir, CryptoPublicPortion, GetCerts, get_cert_and_client_by_cname_as_pemstr}, beam_id::{BrokerId, BeamId, ProxyId}, config::CONFIG_SHARED_CRYPTO};
+use crate::{SamplyBeamError, crypto::{self, load_certificates_from_dir, CryptoPublicPortion, GetCerts, get_all_certs_and_clients_by_cname_as_pemstr}, beam_id::{BrokerId, BeamId, ProxyId}, config::CONFIG_SHARED_CRYPTO};
 use std::{path::PathBuf, rc::Rc, sync::Arc, fs::read_to_string};
 use axum::async_trait;
 use hyper::Uri;
@@ -108,11 +108,10 @@ async fn load_crypto_for_proxy(cli_args: &CliArgs) -> Result<ConfigCrypto, Sampl
     let proxy_id = cli_args.proxy_id.as_ref()
         .expect("load_crypto() has been called without setting a Proxy ID (maybe in broker?). This should not happen.");
     let proxy_id = ProxyId::new(proxy_id)?;
-    let public = get_cert_and_client_by_cname_as_pemstr(&proxy_id).await;
-    if public.is_none() {
-        return Err(SamplyBeamError::SignEncryptError("Unable to parse your certificate.".into()));
-    }
-    let public = public.unwrap();
+    let publics = get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id).await
+        .ok_or_else(|| SamplyBeamError::SignEncryptError("Unable to parse your certificate.".into()))?;
+    let public = crypto::get_best_certificate(publics)
+        .expect("Unable to choose valid, newest certificate for this proxy.");
     let serial = asn_str_to_vault_str(public.cert.serial_number())?;
     privkey_rs256 = privkey_rs256.with_key_id(&serial);
     let config = ConfigCrypto {
