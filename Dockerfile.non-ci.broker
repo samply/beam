@@ -5,5 +5,5 @@ RUN cargo build --bin broker --release
 
 FROM gcr.io/distroless/cc
 COPY --from=builder /usr/src/app/target/release/broker /usr/local/bin/
-COPY /config/* /etc/samply/beam/
+#COPY config/* /etc/samply/beam/
 ENTRYPOINT [ "/usr/local/bin/broker" ]
