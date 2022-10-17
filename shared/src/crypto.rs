@@ -443,6 +443,6 @@ fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,ErrorSt
 pub(crate) fn get_best_certificate(publics: &Vec<CryptoPublicPortion>, private_rsa: &RsaPrivateKey) -> Option<CryptoPublicPortion> {
     let mut publics = publics.to_owned();
     publics.retain(|c| is_cert_from_privkey(&c.cert,private_rsa).unwrap_or(false)); // retain certs matching the private cert
-    publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Can not select newest certificate").reverse()); // sort by newest
+    publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
     publics.first().cloned() // If empty vec --> return None
 }
