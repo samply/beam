@@ -429,7 +429,7 @@ pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, 
 }
 
 /// Checks whether or not a x509 certificate matches a private key by comparing the (public) modulus
-fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey)->Result<bool,ErrorStack>{
+fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,ErrorStack>{
     let cert_rsa = cert.public_key()?.rsa()?;
     let cert_mod = cert_rsa.n();
     let key_mod = key.n();
