@@ -79,8 +79,11 @@ impl crate::config::Config for Config {
 }
 
 fn get_enrollment_msg(proxy_id: &Option<String>) -> String {
-    format!("If you are not yet enrolled in the central vault, please execute the beam-enrollment companion tool (https://github.com/samply/beam-enroll) {} and follow the steps on the screen.\nAfter your enrollment, please restart this Beam.Proxy, this message should dissapear.", match proxy_id{
-        Some(id) => format!("with the ProxyId {}", id),
+    let divider = "***************************************************************************\n
+                   ***              Beam Certificate Enrollment Warning                    ***\n
+                   ***************************************************************************";
+    format!("{}\nIf you are not yet enrolled in the central certificate store, please execute the beam-enrollment companion tool (https://github.com/samply/beam-enroll) by executing:\ndocker run --rm -it -v \"$(pwd)\":/data -e PROXY_ID={} samply/beam-enroll\n and follow the steps on the screen.\nAfter your enrollment, please restart this Beam.Proxy; this message should dissapear.", divider, match proxy_id{
+        Some(id) => id.clone(),
         _ => String::new()
     })
 }
