@@ -5,7 +5,7 @@ use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use shared::{config, config_proxy::Config};
 use shared::errors::SamplyBeamError;
-use tracing::{warn, info, debug};
+use tracing::{warn, info, debug, error};
 
 mod auth;
 mod serve;
@@ -24,7 +24,11 @@ pub async fn main() -> anyhow::Result<()> {
     let client = shared::http_proxy::build_hyper_client(&config.tls_ca_certificates)
         .map_err(SamplyBeamError::HttpProxyProblem)?;
 
-    init_crypto(config.clone(), client.clone()).await?;
+    let ec =init_crypto(config.clone(), client.clone()).await;
+    if let Err(e) = ec {
+        error!("{}",e);
+        std::process::exit(1);
+    }
 
     serve::serve(config, client).await?;
     Ok(())
