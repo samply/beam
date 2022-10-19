@@ -1,4 +1,3 @@
-use aes_gcm::aead::generic_array::GenericArray;
 use axum::{Json, http::Request, body::Body, async_trait};
 
 use once_cell::sync::OnceCell;
@@ -13,7 +12,6 @@ use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, 
 use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}, config_shared::ConfigCrypto};
 
 type Serial = String;
-const SIGNATURE_LENGTH: u16 = 256;
 
 pub(crate) struct CertificateCache{
     serial_to_x509: HashMap<Serial, X509>,
@@ -286,95 +284,6 @@ pub(crate) fn hash(data: &[u8]) -> Result<[u8; 32],SamplyBeamError> {
     Ok(digest)
 }
 
-/// Sign a message with private key. Prepends signature to payload
-pub(crate) fn sign(data: &[u8], private_key: &RsaPrivateKey) -> Result<Vec<u8>, SamplyBeamError> {
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    let digest = hasher.finalize();
-    let mut sig = private_key.sign(PaddingScheme::new_pkcs1v15_sign(Some(rsa::hash::Hash::SHA2_256)), &digest)
-        .map_err(|_| SamplyBeamError::SignEncryptError("Unable to sign message.".into()))?;
-    assert!(sig.len() as u16 == SIGNATURE_LENGTH); 
-    let mut payload: Vec<u8> = data.to_vec();
-    sig.append(&mut payload);
-    Ok(sig)
-}
-
-/// Encrypt the given fields in the json object
-pub(crate) async fn encrypt(task: &MsgTaskRequest, fields: &Vec<&str>) -> Result<EncryptedMsgTaskRequest, SamplyBeamError> {
-    // TODO: Refactor and complete
-    let mut symmetric_key = [0;256];
-    let mut nonce = [0;12];
-    openssl::rand::rand_bytes(&mut symmetric_key)?;
-    openssl::rand::rand_bytes(&mut nonce)?;
-
-    //let receiver_certs: Vec<Option<X509>> = {
-        //let mut a = Vec::new();
-        // for receiver_cert in task.to {
-        //     let cert = CERT_CACHE.get_by_cname(&receiver_cert).await;
-        //     a.push(cert);
-        // };
-        //a
-    //};
-
-    // let mut rng = rand::thread_rng();
-    // let padding_scheme = PaddingScheme::new_oaep::<sha2::Sha256>();
-    // let encrypted_keys = receiver_certs.iter()
-    //     .map(|cert| match cert {
-    //         Some(c) => Some(c.public_key()?.public_key_to_pem()?),
-    //         None => None,
-    //     })
-    //     .encrypt(&mut rng, PaddingScheme::new_oaep::<sha2::Sha256>(), symmetric_key)
-    //     .or_else(|e| Err(SamplyBrokerError::SignEncryptError(&e.to_string())));
-    Err(SamplyBeamError::SignEncryptError("Not implemented".into()))
-}
-
-/// Encryption method without operation
-async fn nop_encrypt(json: serde_json::Value, fields_: &Vec<&str>) -> Result<serde_json::Value, SamplyBeamError> {
-    Ok(json)
-}
-
-/// Entry point for web framework to encrypt and sing payload
-pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &Vec<&str>) -> Result<(),SamplyBeamError> {
-    let config_crypto = &config::CONFIG_SHARED_CRYPTO.get().unwrap();
-
-    // Body -> JSON
-    let body_json = serde_json::from_str(r#"{"to": ["recipeint1", "recipient2"],}"#)
-        .or_else(|e| Err(SamplyBeamError::SignEncryptError("Error serializing request".into())))?;
-    let body = req.body_mut();
-
-    // Encrypt Message
-    let encrypted_payload = nop_encrypt(body_json, encrypt_fields).await
-        .or_else(|e| Err(SamplyBeamError::SignEncryptError("Cannot encrypt message".into())))?;
-
-    //Sign Message
-    let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &config_crypto.privkey_rsa)?;
-
-    // Place new Body in Request
-    let new_body = Body::from(signed_message);
-    *req.body_mut() = new_body;
-
-    Ok(())
-}
-
-//FIXME: Fix slice range compile error
-///// Receives a signed payload and returns the verified signer (as ClientID) and the payload
-//async fn validate_and_split(raw_bytes: &[u8]) -> Result<(ClientId, &[u8]),SamplyBrokerError>{
-    //let signature = raw_bytes[0..SIGNATURE_LENGTH];
-    //let payload = raw_bytes[SIGNATURE_LENGTH..];
-    //let mut hasher = Sha256::new();
-    //hasher.update(&payload);
-    //let digest = hasher.finalize();
-    //for (client, cert) in CertificateCache::get_all_cnames_and_certs().await {
-        //let rsa_key = x509_cert_to_rsa_pub_key(&cert);
-        //let result =match rsa_key {
-            //Ok(pub_key) => pub_key.verify(PaddingScheme::new_pkcs1v15_sign(Some(rsa::hash::Hash::SHA2_256)), &digest, signature).or_else(|e| Err(SamplyBrokerError::from(e))),
-            //Err(e) => Err(e)
-        //};
-        //if result.is_ok() {return Ok((client, payload));}
-    //}
-    //Err(SamplyBrokerError::SignEncryptError("Invalid Signature"))
-//}
-
 /* Utility Functions */
 
 /// Extracts the pem-encoded public key from a x509 certificate
@@ -390,8 +299,8 @@ fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, Sa
     let rsa_key = 
         RsaPublicKey::from_pkcs1_pem(
             std::str::from_utf8(cert_key)
-            .or_else(|e| Err(SamplyBeamError::SignEncryptError("Invalid character in certificate public key".into())))?)
-        .or_else(|e| Err(SamplyBeamError::SignEncryptError("Can not extract public rsa key from certificate".into())));
+            .or_else(|e| Err(SamplyBeamError::SignEncryptError(format!("Invalid character in certificate public key because {}",e))))?)
+        .or_else(|e| Err(SamplyBeamError::SignEncryptError(format!("Can not extract public rsa key from certificate because {}",e))));
     rsa_key
 }
 

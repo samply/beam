@@ -35,7 +35,8 @@ rand = "0.8.5"
 rsa = "0.6"
 sha2 = "0.10.2"
 openssl = "0.10.40"
-aes-gcm = "0.9.4"
+chacha20poly1305 = "0.10.1"
+itertools = "0.10.5"
 jwt-simple = "0.11.1"
 
 # Global variables
