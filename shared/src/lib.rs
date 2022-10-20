@@ -343,6 +343,34 @@ impl Msg for MsgTaskResult {
     }
 }
 
+impl Msg for EncryptedMsgTaskRequest {
+    fn get_from(&self) -> &AppOrProxyId {
+        &self.from
+    }
+
+    fn get_to(&self) -> &Vec<AppOrProxyId> {
+        &self.to
+    }
+
+    fn get_metadata(&self) -> &Value {
+        &self.metadata
+    }
+}
+
+impl Msg for EncryptedMsgTaskResult {
+    fn get_from(&self) -> &AppOrProxyId {
+        &self.from
+    }
+
+    fn get_to(&self) -> &Vec<AppOrProxyId> {
+        &self.to
+    }
+
+    fn get_metadata(&self) -> &Value {
+        &self.metadata
+    }
+}
+
 // impl From<MsgSigned<MsgTaskRequest>> for MsgTaskRequest {
 //     fn from(x: MsgSigned<MsgTaskRequest>) -> Self {
 //         x.msg
@@ -407,19 +435,19 @@ pub struct EncryptedMsgTaskRequest {
     pub id: MsgId,
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
-    //auth
-    pub body: Option<String>,
-    // pub expire: Instant,
-    pub failure_strategy: Option<FailureStrategy>,
-    pub encrypted: String,
-    pub encryption_keys: Vec<Option<String>>,
+    pub encrypted: Vec<u8>,
+    pub encryption_keys: Vec<Vec<u8>>,
+    #[serde(with="serialize_time", rename="ttl")]
+    pub expire: SystemTime,
+    pub failure_strategy: FailureStrategy,
+    pub metadata: Value,
     #[serde(skip)]
-    pub results: HashMap<AppOrProxyId,MsgTaskResult>,
+    pub results: HashMap<AppOrProxyId,MsgSigned<EncryptedMsgTaskResult>>,
 }
 
 //TODO: Implement EncMsg and DecMsg for all message types
-//impl<MsgTaskRequest> EncMsg<MsgTaskRequest> for EncryptedMsgTaskRequest{}
-//impl<EncryptedMsgTaskRequest> DecMsg<EncryptedMsgTaskRequest> for MsgTaskRequest{}
+impl EncMsg<MsgTaskRequest> for EncryptedMsgTaskRequest{}
+impl DecMsg<EncryptedMsgTaskRequest> for MsgTaskRequest{}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskResult {
@@ -430,6 +458,20 @@ pub struct MsgTaskResult {
     pub status: WorkStatus,
     pub metadata: Value,
 }
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct EncryptedMsgTaskResult {
+    pub from: AppOrProxyId,
+    pub to: Vec<AppOrProxyId>,
+    pub task: MsgId,
+    #[serde(flatten)] 
+    pub status: WorkStatus,
+    pub encrypted: String,
+    pub encryption_keys: Vec<Option<String>>,
+    pub metadata: Value,
+}
+
+impl EncMsg<MsgTaskResult> for EncryptedMsgTaskResult{}
+impl DecMsg<EncryptedMsgTaskResult> for MsgTaskResult{}
 
 pub trait HasWaitId<I: PartialEq> {
     fn wait_id(&self) -> I;
@@ -492,6 +534,14 @@ impl PartialEq for MsgTaskRequest {
     }
 }
 impl Eq for MsgTaskRequest {}
+
+impl PartialEq for EncryptedMsgTaskRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.from == other.from && self.to == other.to && self.encrypted == other.encrypted && self.encryption_keys == other.encryption_keys && self.failure_strategy == other.failure_strategy && self.metadata == other.metadata && self.results == other.results
+    }
+}
+impl Eq for EncryptedMsgTaskRequest {}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MsgPing {
     id: MsgId,
