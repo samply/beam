@@ -368,7 +368,7 @@ mod serialize_time {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MsgTaskRequest {
     pub id: MsgId,
     pub from: AppOrProxyId,
@@ -463,6 +463,14 @@ impl MsgTaskRequest {
     }
 }
 
+// Don't compare expire, as it is constantly changing.
+// Todo Is the comparison of Results nessecary
+impl PartialEq for MsgTaskRequest {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.from == other.from && self.to == other.to && self.body == other.body && self.failure_strategy == other.failure_strategy && self.results == other.results && self.metadata == other.metadata
+    }
+}
+impl Eq for MsgTaskRequest {}
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MsgPing {
     id: MsgId,
