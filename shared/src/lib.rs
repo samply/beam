@@ -169,8 +169,8 @@ impl Msg for MsgEmpty {
 }
 
 trait EncMsg<M>: Msg + Serialize where M: Msg + DeserializeOwned{
-    /// Dectypts an encrypted message. Caution: can panic.
-    fn decrypt(&self, my_id: &AppOrProxyId, my_priv_key: &RsaPrivateKey) -> Result<M,SamplyBeamError> {
+    /// Decrypts an encrypted message. Caution: can panic.
+    #[allow(clippy::or_fun_call)] fn decrypt(&self, my_id: &AppOrProxyId, my_priv_key: &RsaPrivateKey) -> Result<M,SamplyBeamError> {
         // JSON parsing
         let binding = serde_json::to_value(self)
             .map_err(|e|SamplyBeamError::SignEncryptError(format!("Decryption error: Cannot deserialize message because {}",e)))?;
@@ -180,9 +180,12 @@ trait EncMsg<M>: Msg + Serialize where M: Msg + DeserializeOwned{
         let encrypted_field = &mut encrypted_json
             .remove("encrypted")
             .ok_or(SamplyBeamError::SignEncryptError("Decryption error: No encrypted payload found".into()))?;
-        let encrypted = encrypted_field.as_str()
+        let encrypted: Vec<u8> = encrypted_field.as_array()
             .ok_or(SamplyBeamError::SignEncryptError("Decryption error: Encrypted payload not readable".into()))?
-            .as_bytes();
+            .iter()
+            .map(|v| v.as_u64().unwrap() as u8)//TODO unwrap
+            .collect();
+            //.as_bytes();
         let to_array_index: usize = encrypted_json.get("to").ok_or(SamplyBeamError::SignEncryptError("Decryption error: 'to' field not readable".into()))?
             .as_array().ok_or(SamplyBeamError::SignEncryptError("Decryption error: Cannot get adressee array".into()))?
             .iter()
@@ -190,26 +193,35 @@ trait EncMsg<M>: Msg + Serialize where M: Msg + DeserializeOwned{
             .ok_or(SamplyBeamError::SignEncryptError("Decryption error: This client cannot be found in 'to' list".into()))?;
         let encrypted_decryption_keys = &mut encrypted_json.remove("encryption_keys")
             .ok_or(SamplyBeamError::SignEncryptError("Decryption error: Cannot read 'encryption_keys' field".into()))?;
-        let encrypted_decryption_key = encrypted_decryption_keys
+        let encrypted_decryption_key: Vec<u8> = encrypted_decryption_keys
             .as_array()
             .ok_or(SamplyBeamError::SignEncryptError("Decryption error: Cannot read 'encrypted_keys' array".into()))?
-            [to_array_index].as_str()
-            .ok_or(SamplyBeamError::SignEncryptError("Decryption error: Encryption key is not readable".into()))?;
+            [to_array_index].as_array()
+            .ok_or(SamplyBeamError::SignEncryptError("Decryption error: Encryption key is not readable".into()))?
+            .iter()
+            .map(|v| v.as_u64().unwrap() as u8)//TODO unwrap
+            .collect();
         // Cryptographic Operations
-        let cipher_engine = XChaCha20Poly1305::new_from_slice(&my_priv_key.decrypt(rsa::PaddingScheme::new_oaep::<sha2::Sha256>(), &encrypted_decryption_key.as_bytes())?)
+        let cipher_engine = XChaCha20Poly1305::new_from_slice(&my_priv_key.decrypt(rsa::PaddingScheme::new_oaep::<sha2::Sha256>(), &encrypted_decryption_key)?)
             .map_err(|e| SamplyBeamError::SignEncryptError(format!("Decryption error: Cannot initialize stream cipher because {}",e)))?;
         let nonce: XNonce = XNonce::clone_from_slice(&encrypted[0..24]);
         let ciphertext = &encrypted[24..];
-        let plaintext = cipher_engine.decrypt(&nonce, ciphertext.as_ref())
-            .map_err(|e|SamplyBeamError::SignEncryptError(format!("Decryption error: Cannot decrypt payload because {}",e)))?;
+        let plaintext = String::from_utf8(cipher_engine.decrypt(&nonce, ciphertext.as_ref())
+            .map_err(|e|SamplyBeamError::SignEncryptError(format!("Decryption error: Cannot decrypt payload because {}",e)))?
+            ).map_err(|e| SamplyBeamError::SignEncryptError(format!("Decryption error: Invalid UTF8 text in decrypted ciphertext {}",e)))?;
+
         //JSON Reassembling
         let mut decrypted_json = encrypted_json; // The "encrypted" field was removed earlier
-        let decrypted_elements = serde_json::to_value(plaintext)
+        let decrypted_elements: Value = serde_json::from_str(&plaintext)
             .map_err(|e|SamplyBeamError::SignEncryptError(format!("Decryption error: Decrypted plaintext invalid because {}",e)))?;
         let decrypted_elements = decrypted_elements.as_object()
             .ok_or(SamplyBeamError::SignEncryptError("Decryption error: Decrypted plaintext invalid".into()))?;
+
         for (key, value) in decrypted_elements.to_owned() {
-            _ = decrypted_json.insert(key, value).ok_or(SamplyBeamError::SignEncryptError("Decryption error: Cannot reassemble decrypted task".into()))?;
+            let old_val = decrypted_json.insert(key, value);
+            if old_val.is_some() {
+                return Err(SamplyBeamError::SignEncryptError("Decryption error: Duplicate field in decrypted message".into()));
+            }
         }
         let result: M = serde_json::from_value(serde_json::Value::from(decrypted_json)).or(Err(SamplyBeamError::SignEncryptError("Decryption error: Cannot deserialize message".into())))?;
         Ok(result)
@@ -217,18 +229,20 @@ trait EncMsg<M>: Msg + Serialize where M: Msg + DeserializeOwned{
 }
 
 trait DecMsg<M>: Msg + Serialize where M: Msg + DeserializeOwned {
-    fn encrypt(&self, fields_to_encrypt: &Vec<&str>, reciever_public_keys: &Vec<RsaPublicKey>) -> Result<M, SamplyBeamError> {
+    #[allow(clippy::or_fun_call)] fn encrypt(&self, fields_to_encrypt: &Vec<&str>, reciever_public_keys: &[RsaPublicKey]) -> Result<M, SamplyBeamError> {
+        // Generate Symmetric Key and Nonce
         let mut rng = rand::thread_rng();
         let symmetric_key = XChaCha20Poly1305::generate_key(&mut rng);
         let nonce = XChaCha20Poly1305::generate_nonce(&mut rng);
 
-        let binding = serde_json::to_value(&self)
-            .or_else(|e|Err(SamplyBeamError::SignEncryptError(format!("Cannot deserialize message: {}",e))))?;
+        // Deserialize Msg
+        let binding = serde_json::to_value(self)
+            .map_err(|e|SamplyBeamError::SignEncryptError(format!("Cannot deserialize message: {}",e)))?;
         let cleartext_json = binding
             .as_object()
             .ok_or(SamplyBeamError::SignEncryptError("Cannot deserialize message".into()))?.to_owned();
         
-        
+        // Encryp symmetric key with recievers' public keys
         let (encrypted_keys,err): (Vec<_>,Vec<_>) = reciever_public_keys.iter()
             .map(|key| key.encrypt(&mut rng, PaddingScheme::new_oaep::<Sha256>(), symmetric_key.as_slice()))
             .partition_result();
@@ -236,6 +250,7 @@ trait DecMsg<M>: Msg + Serialize where M: Msg + DeserializeOwned {
             return Err(SamplyBeamError::SignEncryptError("Encryption error: Cannot encrypt symmetric key".into()));
         }
         
+        // Retreive fields to encryp and remove from msg
         let mut json_to_encrypt = cleartext_json.clone();
         json_to_encrypt.retain(|k,_| fields_to_encrypt.contains(&k.as_str()));
         let mut encrypted_json = cleartext_json;
@@ -243,17 +258,23 @@ trait DecMsg<M>: Msg + Serialize where M: Msg + DeserializeOwned {
             _ = encrypted_json.remove(*f);
         }
 
+        // Add encrypted key to msg
         encrypted_json.insert(String::from("encryption_keys"), serde_json::Value::from(encrypted_keys));
 
+        // Encrypt fields content
         let cipher = XChaCha20Poly1305::new(&symmetric_key);
         let plain_value = serde_json::Value::from(json_to_encrypt);
-        let plaintext = plain_value.as_str().ok_or(SamplyBeamError::SignEncryptError("Encryption error: Cannot encrypt data".into()))?.as_bytes();
-        let ciphertext = cipher.encrypt(&nonce, plaintext.as_ref()).or(Err(SamplyBeamError::SignEncryptError("Encryption error: Can not encrypt data.".into())))?;
-        
-        encrypted_json.insert(String::from("encrypted"), serde_json::Value::from(ciphertext));
+        let plaintext = plain_value.to_string();
+        let mut ciphertext = cipher.encrypt(&nonce, plaintext.as_ref()).or(Err(SamplyBeamError::SignEncryptError("Encryption error: Can not encrypt data.".into())))?;
+        //Prepend Nonce to ciphertext
+        let mut nonce_and_ciphertext = nonce.to_vec();
+        nonce_and_ciphertext.append(&mut ciphertext);
 
-        let result: M = serde_json::from_value(serde_json::Value::from(encrypted_json)).or(Err(SamplyBeamError::SignEncryptError("Encryption error: Cannot deserialize message".into())))?;
+        //Add Encrypted fields to msg
+        encrypted_json.insert(String::from("encrypted"), serde_json::Value::from(nonce_and_ciphertext));
 
+        let serialized_string = serde_json::Value::from(encrypted_json.clone()).to_string();
+        let result: M = serde_json::from_str(&serialized_string).or(Err(SamplyBeamError::SignEncryptError("Encryption error: Cannot deserialize message".into())))?;
 
         Ok(result)
     }
