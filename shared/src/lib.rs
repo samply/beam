@@ -464,7 +464,7 @@ pub struct EncryptedMsgTaskResult {
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub task: MsgId,
-    #[serde(flatten)] 
+    #[serde(flatten)]
     pub status: WorkStatus,
     pub encrypted: Vec<u8>,
     pub encryption_keys: Vec<Vec<u8>>,
@@ -592,12 +592,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn encrypt_decrypt_msg() {
+    fn encrypt_decrypt_task() {
         //Create Task
         AppId::set_broker_id(&"broker.test.local".to_string());
         let p1_id = AppOrProxyId::AppId(AppId::new("app.proxy1.broker.test.local").unwrap());
         let p2_id = AppOrProxyId::AppId(AppId::new("app.proxy2.broker.test.local").unwrap());
-        let from = AppOrProxyId::AppId(AppId::new("app.proxy1.broker.test.local").unwrap());
+        let from = p1_id.clone();
         let to = vec![p1_id.clone(),p2_id.clone()];
         let expiry = SystemTime::now() + Duration::from_secs(60);
         let failure = FailureStrategy::Discard;
@@ -621,6 +621,36 @@ mod tests {
 
         assert_eq!(msg_p1_decr,msg_p2_decr);
         assert_eq!(msg, msg_p1_decr);
+    }
+
+    #[test]
+    fn encrypt_decrypt_result(){
+        AppId::set_broker_id(&"broker.test.local".to_string());
+        let p1_id = AppOrProxyId::AppId(AppId::new("app.proxy1.broker.test.local").unwrap());
+        let p2_id = AppOrProxyId::AppId(AppId::new("app.proxy2.broker.test.local").unwrap());
+        let from = p1_id.clone();
+        let to = vec![p1_id.clone(),p2_id.clone()];
+        let status = WorkStatus::Succeeded;
+        let msg = MsgTaskResult{from, to, task: MsgId::new(), status, body: "The result is 55!".to_string(), metadata: "".into()};
+
+        //Setup Keypairs
+        let mut rng = rand::thread_rng();
+        let rsa_length: usize = 2048;
+        let p1_private = RsaPrivateKey::new(&mut rng, rsa_length).expect("Failed to generate private key for proxy 1");
+        let p2_private = RsaPrivateKey::new(&mut rng, rsa_length).expect("Failed to generate private key for proxy 2");
+        let p1_public = RsaPublicKey::from(&p1_private);
+        let p2_public = RsaPublicKey::from(&p2_private);
+
+         // Encrypt Message
+         let fields_to_encrypt = vec!["body"];
+         let reciever_public_keys = vec![p1_public, p2_public];
+         let msg_encr = msg.encrypt(&fields_to_encrypt, &reciever_public_keys).expect("Could not encrypt message");
+         // Decrypt for both proxies
+         let msg_p1_decr = msg_encr.decrypt(&p1_id, &p1_private).expect("Cannot decrypt message");
+         let msg_p2_decr = msg_encr.decrypt(&p2_id, &p2_private).expect("Cannot decrypt message");
+ 
+         assert_eq!(msg_p1_decr,msg_p2_decr);
+         assert_eq!(msg, msg_p1_decr);
     }
 
 
