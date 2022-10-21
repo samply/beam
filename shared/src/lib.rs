@@ -459,15 +459,15 @@ pub struct MsgTaskResult {
     pub body: String,
     pub metadata: Value,
 }
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct EncryptedMsgTaskResult {
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub task: MsgId,
     #[serde(flatten)] 
     pub status: WorkStatus,
-    pub encrypted: String,
-    pub encryption_keys: Vec<Option<String>>,
+    pub encrypted: Vec<u8>,
+    pub encryption_keys: Vec<Vec<u8>>,
     pub metadata: Value,
 }
 
