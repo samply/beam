@@ -456,7 +456,7 @@ pub struct MsgTaskResult {
     pub task: MsgId,
     #[serde(flatten)]
     pub status: WorkStatus,
-    pub body: String,
+    pub body: Option<String>,
     pub metadata: Value,
 }
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -631,7 +631,7 @@ mod tests {
         let from = p1_id.clone();
         let to = vec![p1_id.clone(),p2_id.clone()];
         let status = WorkStatus::Succeeded;
-        let msg = MsgTaskResult{from, to, task: MsgId::new(), status, body: "The result is 55!".to_string(), metadata: "".into()};
+        let msg = MsgTaskResult{from, to, task: MsgId::new(), status, body: Some("The result is 55!".to_string()), metadata: "".into()};
 
         //Setup Keypairs
         let mut rng = rand::thread_rng();

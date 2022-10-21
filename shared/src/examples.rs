@@ -57,7 +57,7 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
         to: vec![app1.clone().into()],
         task: task_for_apps_1_2.id,
         status: crate::WorkStatus::Succeeded,
-        body: "All done!".to_string(),
+        body: Some("All done!".to_string()),
         metadata: json!("A normal string works, too!")
     };
     let response_by_app2 = MsgTaskResult {
@@ -65,7 +65,7 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
         to: vec![app1.into()],
         task: task_for_apps_1_2.id,
         status: crate::WorkStatus::PermFailed,
-        body: "Unable to complete".to_string(),
+        body: Some("Unable to complete".to_string()),
         metadata: json!({ "I": { "like": [ "results", "cake" ] } })
     };
     let mut tasks = Vec::new();
