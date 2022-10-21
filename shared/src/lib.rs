@@ -81,22 +81,22 @@ impl Display for MyUuid {
     }
 }
 
-#[derive(PartialEq, Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "lowercase", tag = "status", content = "body")]
+#[derive(PartialEq, Eq, Serialize, Deserialize, Debug, Clone)]
+#[serde(rename_all = "lowercase", tag = "status")]
 pub enum WorkStatus {
     Claimed,
-    TempFailed(TaskResponse),
-    PermFailed(TaskResponse),
-    Succeeded(TaskResponse),
+    TempFailed,
+    PermFailed,
+    Succeeded,
 }
 
 impl Display for WorkStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = match self {
             WorkStatus::Claimed => String::from("Claimed"),
-            WorkStatus::TempFailed(e) => format!("Temporary failure: {e}"),
-            WorkStatus::PermFailed(e) => format!("Permanent failure: {e}"),
-            WorkStatus::Succeeded(e) => format!("Success: {e}"),
+            WorkStatus::TempFailed => String::from("Temporary failure"),
+            WorkStatus::PermFailed => String::from("Permanent failure"),
+            WorkStatus::Succeeded => String::from("Success"),
         };
         f.write_str(&str)
     }
@@ -449,13 +449,14 @@ pub struct EncryptedMsgTaskRequest {
 impl EncMsg<MsgTaskRequest> for EncryptedMsgTaskRequest{}
 impl DecMsg<EncryptedMsgTaskRequest> for MsgTaskRequest{}
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct MsgTaskResult {
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub task: MsgId,
     #[serde(flatten)]
     pub status: WorkStatus,
+    pub body: String,
     pub metadata: Value,
 }
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
