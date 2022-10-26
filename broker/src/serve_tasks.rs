@@ -6,7 +6,7 @@ use axum::{
     Extension, Json, Router, extract::{Query, Path}, response::IntoResponse
 };
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId};
+use shared::{EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace, error, warn};
 
@@ -14,9 +14,9 @@ use crate::expire;
 
 #[derive(Clone)]
 struct State {
-    tasks: Arc<RwLock<HashMap<MsgId, MsgSigned<MsgTaskRequest>>>>,
-    new_task_tx: Arc<Sender<MsgSigned<MsgTaskRequest>>>,
-    new_result_tx: Arc<RwLock<HashMap<MsgId, Sender<MsgSigned<MsgTaskResult>>>>>,
+    tasks: Arc<RwLock<HashMap<MsgId, MsgSigned<EncryptedMsgTaskRequest>>>>,
+    new_task_tx: Arc<Sender<MsgSigned<EncryptedMsgTaskRequest>>>,
+    new_result_tx: Arc<RwLock<HashMap<MsgId, Sender<MsgSigned<EncryptedMsgTaskResult>>>>>,
     removed_task_rx: Arc<Sender<MsgId>>
 }
 
@@ -36,8 +36,8 @@ pub(crate) fn router() -> Router {
 
 impl Default for State {
     fn default() -> Self {
-        let tasks: HashMap<MsgId, MsgSigned<MsgTaskRequest>> = HashMap::new();
-        let (new_task_tx, _) = tokio::sync::broadcast::channel::<MsgSigned<MsgTaskRequest>>(512);
+        let tasks: HashMap<MsgId, MsgSigned<EncryptedMsgTaskRequest>> = HashMap::new();
+        let (new_task_tx, _) = tokio::sync::broadcast::channel::<MsgSigned<EncryptedMsgTaskRequest>>(512);
     
         let tasks = Arc::new(RwLock::new(tasks));
         let new_task_tx = Arc::new(new_task_tx);
@@ -56,7 +56,7 @@ async fn get_results_for_task(
     task_id: MsgId,
     msg: MsgSigned<MsgEmpty>,
     Extension(state): Extension<State>,
-) -> Result<(StatusCode, Json<Vec<MsgSigned<MsgTaskResult>>>), (StatusCode, &'static str)> {
+) -> Result<(StatusCode, Json<Vec<MsgSigned<EncryptedMsgTaskResult>>>), (StatusCode, &'static str)> {
     debug!("get_results_for_task called by {}: {:?}, {:?}", msg.get_from(), task_id, block);
     let filter_for_me = MsgFilterNoTask { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::Or };
     let (mut results, rx_new_result, rx_deleted_task)  = {
@@ -145,7 +145,7 @@ where M: Clone + HasWaitId<I>
 }
 
 // TODO: Is there a way to write this function in a generic way? (2/2)
-async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, block: &HowLongToBlock, mut new_element_rx: Receiver<MsgSigned<MsgTaskRequest>>, filter: &MsgFilterForTask<'a>, mut deleted_task_rx: Receiver<MsgId>)
+async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<EncryptedMsgTaskRequest>>, block: &HowLongToBlock, mut new_element_rx: Receiver<MsgSigned<EncryptedMsgTaskRequest>>, filter: &MsgFilterForTask<'a>, mut deleted_task_rx: Receiver<MsgId>)
 {
     let wait_until =
         time::Instant::now() + block.wait_time.unwrap_or(time::Duration::from_secs(31536000));
@@ -235,7 +235,7 @@ async fn get_tasks(
     let filter = MsgFilterForTask { normal, unanswered_by: unanswered_by.as_ref() };
     let (mut vec, new_task_rx) = {
         let map = state.tasks.read().await;
-        let vec: Vec<MsgSigned<MsgTaskRequest>> = map
+        let vec: Vec<MsgSigned<EncryptedMsgTaskRequest>> = map
             .iter()
             .filter_map(|(_,v)|
                 if filter.filter(v) {
@@ -316,7 +316,7 @@ struct MsgFilterForTask<'a> {
 }
 
 impl<'a> MsgFilterForTask<'a> {
-    fn unanswered(&self, msg: &MsgTaskRequest) -> bool {
+    fn unanswered(&self, msg: &EncryptedMsgTaskRequest) -> bool {
         if self.unanswered_by.is_none() {
             debug!("Is {} unanswered? Yes, criterion not defined.", msg.id());
             return true;
@@ -333,7 +333,7 @@ impl<'a> MsgFilterForTask<'a> {
     }
 }
 
-impl<'a> MsgFilterTrait<MsgSigned<MsgTaskRequest>> for MsgFilterForTask<'a> {
+impl<'a> MsgFilterTrait<MsgSigned<EncryptedMsgTaskRequest>> for MsgFilterForTask<'a> {
     fn from(&self) -> Option<&AppOrProxyId> {
         self.normal.from
     }
@@ -342,7 +342,7 @@ impl<'a> MsgFilterTrait<MsgSigned<MsgTaskRequest>> for MsgFilterForTask<'a> {
         self.normal.to
     }
 
-    fn filter(&self, msg: &MsgSigned<MsgTaskRequest>) -> bool {
+    fn filter(&self, msg: &MsgSigned<EncryptedMsgTaskRequest>) -> bool {
         MsgFilterNoTask::filter(&self.normal, msg)
             && self.unanswered(&msg.msg)
     }
@@ -368,7 +368,7 @@ impl<'a, M: Msg> MsgFilterTrait<M> for MsgFilterNoTask<'a> {
 
 // POST /v1/tasks
 async fn post_task(
-    msg: MsgSigned<MsgTaskRequest>,
+    msg: MsgSigned<EncryptedMsgTaskRequest>,
     Extension(state): Extension<State>,
 ) -> Result<(StatusCode, impl IntoResponse), (StatusCode, String)> {
     // let id = MsgId::new();
@@ -397,7 +397,7 @@ async fn post_task(
 // PUT /v1/tasks/:task_id/results/:app_id
 async fn put_result(
     Path((task_id, app_id)): Path<(MsgId,AppOrProxyId)>,
-    result: MsgSigned<MsgTaskResult>,
+    result: MsgSigned<EncryptedMsgTaskResult>,
     Extension(state): Extension<State>
 ) -> Result<StatusCode, (StatusCode, &'static str)> {
     debug!("Called: Task {:?}, {:?}", task_id, result);

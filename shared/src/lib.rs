@@ -449,6 +449,12 @@ pub struct EncryptedMsgTaskRequest {
 impl EncMsg<MsgTaskRequest> for EncryptedMsgTaskRequest{}
 impl DecMsg<EncryptedMsgTaskRequest> for MsgTaskRequest{}
 
+impl EncryptedMsgTaskRequest {
+    pub fn id(&self) -> &MsgId {
+        &self.id
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct MsgTaskResult {
     pub from: AppOrProxyId,
@@ -474,6 +480,17 @@ pub struct EncryptedMsgTaskResult {
 impl EncMsg<MsgTaskResult> for EncryptedMsgTaskResult{}
 impl DecMsg<EncryptedMsgTaskResult> for MsgTaskResult{}
 
+impl MsgWithBody for EncryptedMsgTaskRequest {
+    // fn get_body(&self) -> &str {
+    //     &self.body
+    // }
+}
+impl MsgWithBody for EncryptedMsgTaskResult {
+    // fn get_body(&self) -> &str {
+    //     self.get_body()
+    // }
+}
+
 pub trait HasWaitId<I: PartialEq> {
     fn wait_id(&self) -> I;
 }
@@ -485,6 +502,18 @@ impl HasWaitId<MsgId> for MsgTaskRequest {
 }
 
 impl HasWaitId<String> for MsgTaskResult {
+    fn wait_id(&self) -> String {
+        format!("{},{}", self.task, self.from)
+    }
+}
+
+impl HasWaitId<MsgId> for EncryptedMsgTaskRequest {
+    fn wait_id(&self) -> MsgId {
+        self.id
+    }
+}
+
+impl HasWaitId<String> for EncryptedMsgTaskResult {
     fn wait_id(&self) -> String {
         format!("{},{}", self.task, self.from)
     }

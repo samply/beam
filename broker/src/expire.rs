@@ -1,6 +1,6 @@
 use std::{sync::Arc, collections::HashMap, time::{SystemTime, Duration, SystemTimeError}};
 
-use shared::{MyUuid, MsgSigned, MsgTaskRequest, MsgId};
+use shared::{MyUuid, MsgSigned, EncryptedMsgTaskRequest, MsgId};
 use tokio::{sync::{RwLock, broadcast::Receiver, RwLockReadGuard}, select};
 use tracing::{debug, warn, info, error};
 
@@ -9,14 +9,14 @@ struct Latest {
     expire: Option<SystemTime>
 }
 
-async fn get_soonest(tasks: &HashMap<MyUuid, MsgSigned<MsgTaskRequest>>) -> Latest {
+async fn get_soonest(tasks: &HashMap<MyUuid, MsgSigned<EncryptedMsgTaskRequest>>) -> Latest {
     match get_shortest(tasks) {
         Some(x) => Latest { id: Some(x.msg.id), expire: Some(x.msg.expire) },
         None => Latest { id: None, expire: None },
     }
 }
 
-pub(crate) async fn watch(tasks: Arc<RwLock<HashMap<MyUuid, MsgSigned<MsgTaskRequest>>>>, mut new_task_rx: Receiver<MsgSigned<MsgTaskRequest>>) -> Result<(), SystemTimeError> {
+pub(crate) async fn watch(tasks: Arc<RwLock<HashMap<MyUuid, MsgSigned<EncryptedMsgTaskRequest>>>>, mut new_task_rx: Receiver<MsgSigned<EncryptedMsgTaskRequest>>) -> Result<(), SystemTimeError> {
     let mut soonest = {
         let tasks = tasks.read().await;
         get_soonest(&tasks).await
@@ -66,7 +66,7 @@ pub(crate) async fn watch(tasks: Arc<RwLock<HashMap<MyUuid, MsgSigned<MsgTaskReq
     }
 }
 
-fn get_shortest(tasks: &HashMap<MyUuid, MsgSigned<MsgTaskRequest>>) -> Option<&MsgSigned<MsgTaskRequest>> {
+fn get_shortest(tasks: &HashMap<MyUuid, MsgSigned<EncryptedMsgTaskRequest>>) -> Option<&MsgSigned<EncryptedMsgTaskRequest>> {
     let mut shortest = tasks.values().next()?;
     for task in tasks.values() {
         if task.msg.expire < shortest.msg.expire {
