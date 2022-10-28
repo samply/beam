@@ -37,8 +37,10 @@ pub async fn main() -> anyhow::Result<()> {
 async fn init_crypto(config: Config, client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Result<(),SamplyBeamError> {
     shared::crypto::init_cert_getter(crypto::build_cert_getter(config.clone(), client.clone())?);
     
-    let _public_info = shared::crypto::get_all_certs_and_clients_by_cname_as_pemstr(&config.proxy_id).await
+    let public_info = shared::crypto::get_all_certs_and_clients_by_cname_as_pemstr(&config.proxy_id).await
         .ok_or_else(|| SamplyBeamError::VaultError(format!("Unable to fetch your certificate from vault. Is your Proxy ID really {}?", config.proxy_id)))?;
+
+    debug!("Got {} certificates from the central CA", public_info.len());
 
     let (serial, cname) = shared::config_shared::init_crypto_for_proxy().await?;
     if cname != config.proxy_id.to_string() {
