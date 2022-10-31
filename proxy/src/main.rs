@@ -1,11 +1,11 @@
 #![allow(unused_imports)]
 
-use hyper::{Client, client::HttpConnector};
+use hyper::{Client, client::HttpConnector, Uri, Request, StatusCode, body};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use shared::{config, config_proxy::Config};
 use shared::errors::SamplyBeamError;
-use tracing::{warn, info, debug};
+use tracing::{warn, info, debug, error};
 
 mod auth;
 mod serve;
@@ -24,7 +24,16 @@ pub async fn main() -> anyhow::Result<()> {
     let client = shared::http_proxy::build_hyper_client(&config::CONFIG_SHARED.tls_ca_certificates)
         .map_err(SamplyBeamError::HttpProxyProblem)?;
 
-    init_crypto(config.clone(), client.clone()).await?;
+    if let Err(err) = get_broker_health(&config, &client).await {
+        error!("Cannot reach Broker: {}", err);
+        std::process::exit(1);
+    }
+
+    let ec =init_crypto(config.clone(), client.clone()).await;
+    if let Err(e) = ec {
+        error!("{}",e);
+        std::process::exit(1);
+    }
 
     serve::serve(config, client).await?;
     Ok(())
@@ -46,4 +55,18 @@ async fn init_crypto(config: Config, client: Client<ProxyConnector<HttpsConnecto
     info!("Certificate retrieved for our proxy ID {cname} (serial {serial})");
 
     Ok(())
+}
+
+async fn get_broker_health(config: &Config, client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Result<(), SamplyBeamError> {
+    let uri = Uri::builder().scheme(config.broker_uri.scheme().unwrap().as_str()).authority(config.broker_uri.authority().unwrap().to_owned()).path_and_query("/v1/health").build().map_err(|e| SamplyBeamError::HttpRequestBuildError(e))?;
+    let req = Request::builder()
+        .method("GET")
+        .uri(uri)
+        .body(body::Body::empty())?;
+    let resp = client.request(req).await?;
+    match resp.status() {
+        StatusCode::OK => Ok(()),
+        _ => Err(SamplyBeamError::InternalSynchronizationError(format!("Can not connect to broker, recieved status code {}",resp.status())))
+                 }
+
 }
