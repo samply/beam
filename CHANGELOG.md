@@ -1,3 +1,35 @@
+# Samply.Beam 0.4.0 --
+
+This newest release of Samply.Beam paves the road to more production safety. We revised the CA deployment and usage, established a clearly defined (and tool supported) certificate enrollment process, and improved the overall stability of the applications.
+
+The new certificate and private key handling process requires manual intervention in the update process, so please carefully read the following change notice.
+
+We are exited to release this new version and help with shaping the infrastructure landscape of the European medical informatics.
+
+## Breaking changes
+
+### Certificate enrollment
+In previous releases of Beam, certificate and private key generation was entirely left to the system administrator. Furthermore, only the certificate expiry but not the certificate chain validated. Now, both the Beam.Proxy and the Beam.Broker require the CA's root certificate to be present locally and validates the Root CA --> Intermediate CA --> Proxy Certificate chain. For that, the command line parameter `--rootcert-file`, and the environment variable `ROOTCERT_FILE` have been introduced. The [Beam deployment packages]() reflect this change by loading the root certificate via the docker-compose secret mechanism.
+
+Furthermore, the process of creating a private key and enrolling a matching certificate into the CA has been described in the documentation and a companion tool to assist system administrators [has been published](). The companion tool takes the proxy id and broker id and a) generates a private key in a location of choice and b) prints out a Certificate Sign Request (CSR), that can be signed at the central CA. This way, we hope to ensure, that the private key never leaves the local sites.
+
+You can find more information in the [documentation](README.MD#beam-enrollment-companion-tool-assisted-method) and in the repository for [Beam's central docker-compose deployment]().
+
+### Certificate validation and selection
+Previously, if multiple certificates for a single common name were present in the CA the first one retrieved was chosen by the Beam.Proxy to use. In this version, the logic of choosing a certificate has changed: First, expired certificates are discarded. Second, certificates using a different modulus than the private key are discarded, and lastly, the newest of the remaining certificates are chosen.
+
+Future versions of Beam will include an additional Certificate Revocation List check, however, this is not implemented, yet.
+
+If your current setup relies on the previous behaviour, please check your CA and setup the certificates to follow the previously outlined selection rules.
+
+## Major changes
+ * Bugfix: `Wait_count` malfunction. There was an issue, where some results were not returned by the long polling mechanism. The issue is fixed in this version.
+
+## Minor improvement
+ * Improved debug output and logging
+ * Updated dependencies
+ * Removed `vault-rs` dependency
+
 # Samply.Beam 0.3.0 -- 2022-09-26
 
 We are happy to announce the new Samply.Beam major release 0.3.0. Like many early-stage software projects, the Samply.Beam developments moves fast and we are exited to see new features, improved performance and stability, and an overall improvement of code quality and error handling. Furthermore, the first productive use of Samply.Beam brought some shortcomings in the API to our attention, so we strived to streamline the developer experience for costumer applications.
