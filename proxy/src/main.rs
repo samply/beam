@@ -28,6 +28,8 @@ pub async fn main() -> anyhow::Result<()> {
     if let Err(err) = get_broker_health(&config, &client).await {
         error!("Cannot reach Broker: {}", err);
         std::process::exit(1);
+    } else {
+        info!("Connected to Broker: {}",&config.broker_uri);
     }
 
     let ec =init_crypto(config.clone(), client.clone()).await;
