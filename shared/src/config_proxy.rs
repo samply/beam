@@ -52,7 +52,7 @@ pub struct CliArgs {
     pub privkey_file: PathBuf,
 
     /// samply.pki: Path to CA Root certificate
-    #[clap(long, env, value_parser, default_value = "/run/secrets/root_cert.crt.pem")]
+    #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
     rootcert_file: PathBuf,
 
     /// (included for technical reasons)
