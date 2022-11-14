@@ -1,5 +1,6 @@
 use tracing::{dispatcher::SetGlobalDefaultError, Level, debug};
 
+#[allow(clippy::if_same_then_else)] // The redundant if-else serves documentation purposes
 pub fn init_logger() -> Result<(), SetGlobalDefaultError>{
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_max_level(Level::DEBUG);
