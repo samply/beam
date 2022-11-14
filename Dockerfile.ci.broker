@@ -10,7 +10,6 @@ FROM gcr.io/distroless/cc
 #ARG TARGETARCH
 #COPY /artifacts/binaries-$TARGETARCH/$COMPONENT /usr/local/bin/
 COPY --from=chmodder /app/* /usr/local/bin/
-#COPY config/* /etc/samply/beam/
 #ENTRYPOINT [ "/usr/local/bin/$COMPONENT" ]
 ENTRYPOINT [ "/usr/local/bin/broker" ]
 

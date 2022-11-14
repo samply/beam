@@ -61,13 +61,6 @@ impl CertificateCache {
                     }
                 }
             };
-/*<<<<< HEAD
-            match cert { // why is this not done in the second try?
-                Some(certificate) => if x509_date_valid(&certificate).unwrap_or(false) { return cert.cloned(); }, // Validity of the certificate gets checked at fetching time.
-                None => ()
-            }
-=====
->>>>> develop*/
         } // Drop Read Locks
         if result.is_empty() {
             warn!("Did not find certificate for cname {}, even after update.", cname);
@@ -155,7 +148,6 @@ impl CertificateCache {
                 };
                 debug!("Added certificate {} for cname {}", serial, cn);
             }
-
         }
     Ok(())
 
