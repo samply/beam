@@ -4,7 +4,7 @@ use once_cell::sync::OnceCell;
 use static_init::dynamic;
 use tokio::{sync::{RwLock, mpsc, oneshot}};
 use tracing::{debug, warn, info, error};
-use std::{path::{Path, PathBuf}, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string};
+use std::{path::{Path, PathBuf}, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string, borrow::BorrowMut};
 use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PublicKeyParts, PaddingScheme, pkcs1::DecodeRsaPublicKey};
 use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
@@ -231,6 +231,19 @@ pub async fn get_cert_and_client_by_serial_as_pemstr(serial: &str) -> Option<Cry
     }
 }
 
+pub async fn get_newest_certs_for_cnames_as_pemstr(cnames: Vec<ProxyId>) -> Option<Vec<CryptoPublicPortion>> {
+    let mut result: Vec<CryptoPublicPortion> = Vec::new(); // No fancy map/iter, bc of async
+    for id in cnames {
+        let certs = get_all_certs_and_clients_by_cname_as_pemstr(&id).await;
+        if let Some(certificates) = certs {
+            if let Some(best_candidate) = get_best_other_certificate(&certificates) {
+            result.push(best_candidate);
+            }
+        };
+    }
+    (!result.is_empty()).then_some(result)
+}
+
 fn extract_x509(cert: &X509) -> Option<CryptoPublicPortion> {
     // Public key
     let pubkey = cert.public_key();
@@ -295,7 +308,7 @@ fn x509_cert_to_x509_public_key(cert: &X509) -> Result<Vec<u8>, SamplyBeamError>
 }
 
 /// Converts the x509 pem-encoded public key to the rsa public key
-fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, SamplyBeamError> {
+pub fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, SamplyBeamError> {
     let rsa_key = 
         RsaPublicKey::from_pkcs1_pem(
             std::str::from_utf8(cert_key)
@@ -305,18 +318,18 @@ fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, Sa
 }
 
 /// Convenience function to extract a rsa public key from a x509 certificate. Calls x509_cert_to_x509_public_key and x509_public_key_to_rsa_pub_key internally.
-fn x509_cert_to_rsa_pub_key(cert: &X509) -> Result<RsaPublicKey, SamplyBeamError> {
+pub fn x509_cert_to_rsa_pub_key(cert: &X509) -> Result<RsaPublicKey, SamplyBeamError> {
     x509_public_key_to_rsa_pub_key(&x509_cert_to_x509_public_key(cert)?)
 }
 
 /// Converts the asn.1 time (e.g., from a certificate exiration date) to rust's SystemTime. From https://github.com/sfackler/rust-openssl/issues/1157#issuecomment-1016737160
-fn asn1_time_to_system_time(time: &Asn1TimeRef) -> Result<SystemTime, ErrorStack> {
+pub fn asn1_time_to_system_time(time: &Asn1TimeRef) -> Result<SystemTime, ErrorStack> {
     let unix_time = Asn1Time::from_unix(0)?.diff(time)?;
     Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(unix_time.days as u64 * 86400 + unix_time.secs as u64))
 }
 
 /// Checks if SystemTime::now() is between the not_before and the not_after dates of a x509 certificate
-fn x509_date_valid(cert: &X509) -> Result<bool, ErrorStack> {
+pub fn x509_date_valid(cert: &X509) -> Result<bool, ErrorStack> {
     let expirydate = asn1_time_to_system_time(cert.not_after())?;
     let startdate = asn1_time_to_system_time(cert.not_before())?;
     let now = SystemTime::now();
@@ -341,7 +354,7 @@ pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, 
 }
 
 /// Checks whether or not a x509 certificate matches a private key by comparing the (public) modulus
-fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,ErrorStack>{
+pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,ErrorStack>{
     let cert_rsa = cert.public_key()?.rsa()?;
     let cert_mod = cert_rsa.n();
     let key_mod = key.n();
@@ -351,10 +364,22 @@ fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,ErrorSt
 
 /// Selecs the best fitting certificate from a vector of certs according to:
 /// 1) Does it match the private key?
-/// 2) Select the newest of the remaining
-pub(crate) fn get_best_certificate(publics: &Vec<CryptoPublicPortion>, private_rsa: &RsaPrivateKey) -> Option<CryptoPublicPortion> {
+/// 2) Is the current date in the valid date range?
+/// 3) Select the newest of the remaining
+pub(crate) fn get_best_own_certificate(publics: &Vec<CryptoPublicPortion>, private_rsa: &RsaPrivateKey) -> Option<CryptoPublicPortion> {
     let mut publics = publics.to_owned();
     publics.retain(|c| is_cert_from_privkey(&c.cert,private_rsa).unwrap_or(false)); // retain certs matching the private cert
+    publics.retain(|c| x509_date_valid(&c.cert).unwrap_or(false)); // retain certs with valid dates
+    publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
+    publics.first().cloned() // If empty vec --> return None
+}
+
+/// Selecs the best fitting certificate from a vector of certs according to:
+/// 1) Is the current date in the valid date range?
+/// 2) Select the newest of the remaining
+pub fn get_best_other_certificate(publics: &Vec<CryptoPublicPortion>) -> Option<CryptoPublicPortion> {
+    let mut publics = publics.to_owned();
+    publics.retain(|c| x509_date_valid(&c.cert).unwrap_or(false)); // retain certs with valid dates
     publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
     publics.first().cloned() // If empty vec --> return None
 }
