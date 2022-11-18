@@ -1,8 +1,9 @@
 #![allow(unused_imports)]
 
-use hyper::{Client, client::HttpConnector};
+use hyper::{Client, client::HttpConnector, Uri, Request, StatusCode, body};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
+use tokio_retry::{Retry, strategy::jitter};
 use shared::{config, config_proxy::Config};
 use shared::errors::SamplyBeamError;
 use tracing::{warn, info, debug, error};
@@ -23,6 +24,13 @@ pub async fn main() -> anyhow::Result<()> {
     let config = config::CONFIG_PROXY.clone();
     let client = shared::http_proxy::build_hyper_client(&config.tls_ca_certificates)
         .map_err(SamplyBeamError::HttpProxyProblem)?;
+
+    if let Err(err) = get_broker_health(&config, &client).await {
+        error!("Cannot reach Broker: {}", err);
+        std::process::exit(1);
+    } else {
+        info!("Connected to Broker: {}",&config.broker_uri);
+    }
 
     let ec =init_crypto(config.clone(), client.clone()).await;
     if let Err(e) = ec {
@@ -48,4 +56,29 @@ async fn init_crypto(config: Config, client: Client<ProxyConnector<HttpsConnecto
     info!("Certificate retrieved for our proxy ID {cname} (serial {serial})");
 
     Ok(())
+}
+
+async fn get_broker_health(config: &Config, client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Result<(), SamplyBeamError> {
+    let mut counter: u32 = 0;
+    let function = ||{
+        let uri = Uri::builder().scheme(config.broker_uri.scheme().unwrap().as_str()).authority(config.broker_uri.authority().unwrap().to_owned()).path_and_query("/v1/health").build().map_err(|e| SamplyBeamError::HttpRequestBuildError(e)).unwrap(); // TODO Unwrap
+        let req = Request::builder()
+            .method("GET")
+            .uri(uri)
+            .body(body::Body::empty()).unwrap(); //TODO Unwrap
+        if counter > 0 {
+            debug!("Still trying to reach Broker ({}th retry)", counter);
+        }
+        counter += 1;
+        client.request(req)
+    };
+    let strategy = config.com_retry.clone()
+        //.map(jitter)
+        .take(10);
+    let resp = Retry::spawn(strategy, function).await?;
+    match resp.status() {
+        StatusCode::OK => Ok(()),
+        _ => Err(SamplyBeamError::InternalSynchronizationError(format!("Cannot connect to broker, recieved status code {}",resp.status())))
+                 }
+
 }
