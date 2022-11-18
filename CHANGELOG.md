@@ -1,3 +1,9 @@
+# Samply.Beam 0.3.2 -- 2022-11-18
+
+This release of Samply.Beam, while having only a minor version number change, is a significant step forward on Beam's roadmap. We are proud to announce the full integration of end-to-end encryption in Beam. This does not change the public API, so no changes on the user side should be required.
+
+We like to thank all users and are happy to provide additional tools to increase data protection.
+
 # Samply.Beam 0.3.0 -- 2022-09-26
 
 We are happy to announce the new Samply.Beam major release 0.3.0. Like many early-stage software projects, the Samply.Beam developments moves fast and we are exited to see new features, improved performance and stability, and an overall improvement of code quality and error handling. Furthermore, the first productive use of Samply.Beam brought some shortcomings in the API to our attention, so we strived to streamline the developer experience for costumer applications.
@@ -23,8 +29,9 @@ return body itself. Instead, the `body` of a successful result is attached to
 the root of the `Result` object.
 
 ### Cleaned up public API
- * Removed `id` field from result
- * Changed result endpoint
+
+* Removed `id` field from result
+* Changed result endpoint
 
 ## Major changes
 
@@ -46,7 +53,7 @@ A new, higher performance CI/CD pipeline automatically builds Beam docker images
 
 ## Minor improvements
 
- * Show an informational banner at startup
- * Respect the `RUST_LOG` variable for log level
- * Improved testing
- * Internal improvements
+* Show an informational banner at startup
+* Respect the `RUST_LOG` variable for log level
+* Improved testing
+* Internal improvements
