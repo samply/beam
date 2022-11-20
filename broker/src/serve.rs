@@ -10,12 +10,13 @@ use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, Ms
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace};
 
-use crate::{serve_tasks, serve_health};
+use crate::{serve_tasks, serve_health, serve_pki, crypto::GetCertsFromPki};
 
 pub(crate) async fn serve() -> anyhow::Result<()> {
     let app = 
         serve_tasks::router()
         // .merge(serve_pki::router())
+        .merge(serve_pki::router())
         .merge(serve_health::router());
 
     // Graceful shutdown handling

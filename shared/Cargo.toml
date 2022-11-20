@@ -1,6 +1,6 @@
 [package]
 name = "shared"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -24,6 +24,7 @@ hyper = { version = "0.14.19", features = ["full"] }
 # HTTP client with proxy support
 hyper-tls = "0.5.0"
 hyper-proxy = "0.9.1"
+mz-http-proxy = { version = "0.1.0", features = ["hyper"] }
 
 # Logging
 tracing = "0.1.35"
@@ -35,8 +36,7 @@ rsa = "0.6"
 sha2 = "0.10.2"
 openssl = "0.10.40"
 aes-gcm = "0.9.4"
-vaultrs = { git = "https://github.com/jmgilman/vaultrs", default-features = false, features = [ "native-tls" ] }# <= Change once update > 0.6.2 is out
-jwt-simple = { git = "https://github.com/jedisct1/rust-jwt-simple", rev="b6a2c5be" } # <= Change once version >0.11.0 is out
+jwt-simple = "0.11.1"
 
 # Global variables
 static_init = "1.0.2"
@@ -47,9 +47,10 @@ thiserror = "1.0.31"
 anyhow = "1.0.58"
 
 # Command Line Interface
-clap = { version = "3.2.8", features = ["env", "derive"] }
+clap = { version = "4.0.12", features = ["env", "derive"] }
 
-http = "*"
+http = "0.2.8"
+tokio-retry = "0.3.0"
 
 [dev-dependencies]
 tokio-test = "0.4.2"

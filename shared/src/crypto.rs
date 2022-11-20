@@ -1,68 +1,68 @@
 use aes_gcm::aead::generic_array::GenericArray;
-use axum::{Json, http::Request, body::Body};
+use axum::{Json, http::Request, body::Body, async_trait};
 
+use once_cell::sync::OnceCell;
 use static_init::dynamic;
 use tokio::{sync::{RwLock, mpsc, oneshot}};
 use tracing::{debug, warn, info, error};
-use std::{path::Path, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string};
-use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PaddingScheme, pkcs1::DecodeRsaPublicKey};
+use std::{path::{Path, PathBuf}, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string};
+use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PublicKeyParts, PaddingScheme, pkcs1::DecodeRsaPublicKey};
 use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
-use vaultrs::{client::{VaultClient, VaultClientSettingsBuilder},pki};
 
-use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}};
+use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}, config_shared::ConfigCrypto};
 
 type Serial = String;
 const SIGNATURE_LENGTH: u16 = 256;
 
 pub(crate) struct CertificateCache{
     serial_to_x509: HashMap<Serial, X509>,
-    cn_to_serial: HashMap<ProxyId, Serial>,
-    vault_client: VaultClient,
-    pki_realm: String,
-    update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>,
+    cn_to_serial: HashMap<ProxyId, Vec<Serial>>,
+    update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>
+}
+
+#[async_trait]
+pub trait GetCerts: Sync + Send {
+    fn new() -> Result<Self, SamplyBeamError> where Self: Sized;
+    async fn certificate_list(&self) -> Result<Vec<String>,SamplyBeamError>;
+    async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String,SamplyBeamError>;
 }
 
 impl CertificateCache {
     pub fn new(update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>) -> Result<CertificateCache,SamplyBeamError> {
         Ok(Self{
-        serial_to_x509: HashMap::new(),
-        cn_to_serial: HashMap::new(),
-        vault_client: VaultClient::new(
-            VaultClientSettingsBuilder::default()
-                .address(&config::CONFIG_SHARED.pki_address.to_string())
-                .token(&config::CONFIG_SHARED.pki_apikey)
-                .build()?)?,
-        pki_realm: config::CONFIG_SHARED.pki_realm.clone(),
-        update_trigger
-    })
+            serial_to_x509: HashMap::new(),
+            cn_to_serial: HashMap::new(),
+            update_trigger
+        })
     }
 
     /// Searches cache for a certificate with the given ClientId. If not found, updates cache from central vault. If then still not found, return None
-    pub async fn get_by_cname(cname: &ProxyId) -> Option<X509> { // TODO: What if multiple certs are found?
-        debug!("Getting cert with cname {}", cname);
+    pub async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<X509> { // TODO: What if multiple certs are found?
+        let mut result = Vec::new();
+        Self::update_certificates().await.unwrap_or_else(|e| {warn!("Updating certificates failed: {}",e);()}); // requires write lock.
+        debug!("Getting cert(s) with cname {}", cname);
         { // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
             let cache = CERT_CACHE.read().await;
-            let cert = match cache.cn_to_serial.get(cname){
-                Some(serial) => cache.serial_to_x509.get(serial),
-                None => None
+            if let Some(serials) = cache.cn_to_serial.get(cname){
+                for serial in serials {
+                    let x509 = cache.serial_to_x509.get(serial);
+                    if let Some(x509) = x509 {
+                        if ! x509_date_valid(x509).unwrap_or(true) {
+                            warn!("Found x509 certificate with invalid date");
+                        } else {
+                            result.push(x509.clone());
+                        }
+                    }
+                }
             };
-            match cert { // why is this not done in the second try?
-                Some(certificate) => if x509_date_valid(&certificate).unwrap_or(false) { return cert.cloned(); },
-                None => ()
-            }
         } // Drop Read Locks
-        debug!("Cert with cname {} not found in cache, triggering update.", cname);
-        Self::update_certificates().await.unwrap_or(()); // requires write lock. We don't care about the result; cache lookup will just fail.
-        let cache = CERT_CACHE.read().await;
-        match cache.cn_to_serial.get(cname){
-            Some(serial) => cache.serial_to_x509.get(serial).cloned(),
-            None => {
-                warn!("Unable to find cert {} even after update.", cname);
-                None
-            }
+        if result.is_empty() {
+            warn!("Did not find certificate for cname {}, even after update.", cname);
+        } else {
+            debug!("Found {} certificate(s) for cname {}.", result.len(), cname);
         }
-
+        result
     }
 
     /// Searches cache for a certificate with the given Serial. If not found, updates cache from central vault. If then still not found, return None
@@ -71,11 +71,13 @@ impl CertificateCache {
             let cache = CERT_CACHE.read().await;
             let cert = cache.serial_to_x509.get(serial);
             match cert { // why is this not done in the second try?
-                Some(certificate) => if x509_date_valid(&certificate).unwrap_or(false) { return cert.cloned(); },
-                None => ()
+                Some(certificate) if x509_date_valid(&certificate).unwrap_or(false) => { 
+                    return Some(certificate.clone());
+                },
+                _ => ()
             }
         }
-        Self::update_certificates().await.unwrap_or(()); // requires write lock. We don't care about the result; cache lookup will just fail.
+        Self::update_certificates().await.unwrap_or_else(|e| {warn!("Updating certificates failed: {}",e);()}); // requires write lock.
         let cache = CERT_CACHE.read().await;
         return cache.serial_to_x509.get(serial).cloned();
     }
@@ -97,7 +99,7 @@ impl CertificateCache {
 
     async fn update_certificates_mut(&mut self) -> Result<(),SamplyBeamError> {
         info!("Updating certificates ...");
-        let certificate_list = pki::cert::list(&self.vault_client, &self.pki_realm).await?;
+        let certificate_list = CERT_GETTER.get().unwrap().certificate_list().await?;
         let new_certificate_serials: Vec<&String> = {
             certificate_list.iter()
                 .filter(|serial| !self.serial_to_x509.contains_key(*serial))
@@ -106,8 +108,14 @@ impl CertificateCache {
         debug!("Received {} certificates ({} of which were new).", certificate_list.len(), new_certificate_serials.len());
         //TODO Check for validity
         for serial in new_certificate_serials {
-            let certificate = pki::cert::read(&self.vault_client, &self.pki_realm, serial).await?;
-            let opensslcert = X509::from_pem(certificate.certificate.as_bytes())?;
+            debug!("Checking certificate with serial {serial}");
+            let certificate = CERT_GETTER.get().unwrap().certificate_by_serial_as_pem(serial).await;
+            if let Err(e) = certificate {
+                warn!("Could not retrieve certificate for serial {serial}: {}", e);
+                continue;
+            }
+            let certificate = certificate.unwrap();
+            let opensslcert = X509::from_pem(certificate.as_bytes())?;
             let commonnames: Vec<ProxyId> = 
                 opensslcert.subject_name()
                 .entries()
@@ -119,14 +127,23 @@ impl CertificateCache {
                         .expect(&format!("Internal error: Vault returned certificate with invalid common name: {}", x))
                 })
                 .collect();
-
-        if !commonnames.is_empty() && x509_date_valid(&opensslcert)? { // TODO: Check against CA
-            self.serial_to_x509.insert(serial.clone(), opensslcert);
-            self.cn_to_serial.insert(commonnames.first()
-                .expect("Internal error: common names empty; this should not happen")
-                .clone(), serial.clone()); //Emptyness is already checked
+            
+            if commonnames.is_empty() || x509_date_valid(&opensslcert).is_err() {
+                warn!("Certificate with serial {} invalid (no cname or invalid date).", serial);
+            } else { // TODO: Check against CA
+                let cn = commonnames.first()
+                    .expect("Internal error: common names empty; this should not happen");
+                self.serial_to_x509.insert(serial.clone(), opensslcert);
+                match self.cn_to_serial.get_mut(cn) {
+                    Some(serials) => serials.push(serial.clone()),
+                    None => {
+                        let new = vec![serial.clone()];
+                        self.cn_to_serial.insert(cn.clone(), new);
+                    }
+                };
+                debug!("Added certificate {} for cname {}", serial, cn);
+            }
         }
-    }
     Ok(())
 
     }
@@ -136,15 +153,33 @@ impl CertificateCache {
         let cache = &CERT_CACHE.read().await.serial_to_x509;
         let alias = &CERT_CACHE.read().await.cn_to_serial;
         let mut result = Vec::new();
-        if alias.is_empty() {return result;}
-        for (cname,serial) in alias.iter() {
-            match cache.get(serial) {
-                Some(cert) => result.push((cname.clone(), cert.clone())),
-                None => ()
-            };
+        if alias.is_empty() {
+            return result;
+        }
+        for (cname,serials) in alias.iter() {
+            for serial in serials {
+                if let Some(cert) = cache.get(serial) {
+                    result.push((cname.clone(), cert.clone()));
+                } else {
+                    warn!("Unable to find certificate for serial {}.", serial);
+                }
+            }
         }
         result
     }
+}
+
+static CERT_GETTER: OnceCell<Box<dyn GetCerts>> = OnceCell::new();
+
+pub fn init_cert_getter<G: GetCerts + 'static>(getter: G) {
+    let res = CERT_GETTER.set(Box::new(getter));
+    if res.is_err() {
+        panic!("Internal error: Tried to initialize cert_getter twice");
+    }
+}
+
+pub async fn get_serial_list() -> Result<Vec<String>, SamplyBeamError> {
+    CERT_GETTER.get().unwrap().certificate_list().await
 }
 
 #[dynamic(lazy)]
@@ -171,36 +206,34 @@ async fn get_cert_by_serial(serial: &str) -> Option<X509>{
     }
 }
 
-async fn get_cert_by_cname(cname: &ProxyId) -> Option<X509>{
-    match CertificateCache::get_by_cname(cname).await {
-        Some(x) => Some(x.clone()),
-        None => None
-    }
+async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<X509>{
+    CertificateCache::get_all_certs_by_cname(cname).await
 }
 
-#[derive(Debug)]
-pub struct ProxyPublicPortion {
+#[derive(Debug, Clone)]
+pub struct CryptoPublicPortion {
     pub beam_id: ProxyId,
-    pub cert: String,
+    pub cert: X509,
     pub pubkey: String,
 }
 
-pub async fn get_cert_and_client_by_cname_as_pemstr(cname: &ProxyId) -> Option<ProxyPublicPortion> {
-    let cert: Option<X509> = get_cert_by_cname(cname).await;
-    extract_x509(cert)
+pub async fn get_all_certs_and_clients_by_cname_as_pemstr(cname: &ProxyId) -> Option<Vec<CryptoPublicPortion>> {
+    get_all_certs_by_cname(cname).await
+        .iter()
+        .map(|c| extract_x509(c))
+        .collect()
 }
 
-// pub async fn get_cert_and_client_by_serial_as_pemstr(serial: &str) -> Option<CertAndClient> {
-//     let cert = get_cert_by_serial(serial).await;
-//     extract_cert_and_client(cert)
-// }
-
-fn extract_x509(cert: Option<X509>) -> Option<ProxyPublicPortion> {
-    if cert.is_none() {
-        return None;
+pub async fn get_cert_and_client_by_serial_as_pemstr(serial: &str) -> Option<CryptoPublicPortion> {
+    let cert = get_cert_by_serial(serial).await;
+    if let Some(x) = cert {
+        extract_x509(&x)
+    } else {
+        None
     }
-    let cert = cert.unwrap();
+}
 
+fn extract_x509(cert: &X509) -> Option<CryptoPublicPortion> {
     // Public key
     let pubkey = cert.public_key();
     if pubkey.is_err() {
@@ -234,18 +267,13 @@ fn extract_x509(cert: Option<X509>) -> Option<ProxyPublicPortion> {
             }
         }
     };
-    let cert = cert.to_pem();
-    if cert.is_err() {
-        return None;
-    }
-    let cert = cert.unwrap();
-    let cert = std::str::from_utf8(cert.as_slice());
-    if cert.is_err() {
-        return None;
-    }
-    Some(ProxyPublicPortion {
+    let cert = cert
+        .to_pem()
+        .ok()?;
+    let cert = X509::from_pem(&cert).ok()?;
+    Some(CryptoPublicPortion {
         beam_id: verified_sender,
-        cert: cert.unwrap().into(),
+        cert,
         pubkey,
     })
 }
@@ -307,6 +335,7 @@ async fn nop_encrypt(json: serde_json::Value, fields_: &Vec<&str>) -> Result<ser
 
 /// Entry point for web framework to encrypt and sing payload
 pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &Vec<&str>) -> Result<(),SamplyBeamError> {
+    let config_crypto = &config::CONFIG_SHARED_CRYPTO.get().unwrap();
 
     // Body -> JSON
     let body_json = serde_json::from_str(r#"{"to": ["recipeint1", "recipient2"],}"#)
@@ -318,7 +347,7 @@ pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &V
         .or_else(|e| Err(SamplyBeamError::SignEncryptError("Cannot encrypt message".into())))?;
 
     //Sign Message
-    let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &config::CONFIG_SHARED.privkey_rsa)?;
+    let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &config_crypto.privkey_rsa)?;
 
     // Place new Body in Request
     let new_body = Body::from(signed_message);
@@ -383,4 +412,40 @@ fn x509_date_valid(cert: &X509) -> Result<bool, ErrorStack> {
     let startdate = asn1_time_to_system_time(cert.not_before())?;
     let now = SystemTime::now();
     return Ok(expirydate > now && now > startdate);
+}
+
+pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, std::io::Error> {
+    let mut result = Vec::new();
+    if let Some(ca_dir) = ca_dir {
+        for file in ca_dir.read_dir()? { //.map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory {}: {}", ca_dir.to_string_lossy(), e)))
+            let path = file?.path();
+            let content = std::fs::read(&path)?;
+            let cert = X509::from_pem(&content);
+            if let Err(e) = cert {
+                warn!("Unable to read certificate from file {}: {}", path.to_string_lossy(), e);
+                continue;
+            }
+            result.push(cert.unwrap());
+        }
+    }
+    Ok(result)
+}
+
+/// Checks whether or not a x509 certificate matches a private key by comparing the (public) modulus
+fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,ErrorStack>{
+    let cert_rsa = cert.public_key()?.rsa()?;
+    let cert_mod = cert_rsa.n();
+    let key_mod = key.n();
+    let key_mod_bignum = openssl::bn::BigNum::from_slice(&key_mod.to_bytes_be())?;
+    return Ok(cert_mod.ucmp(&key_mod_bignum) == std::cmp::Ordering::Equal);
+}
+
+/// Selecs the best fitting certificate from a vector of certs according to:
+/// 1) Does it match the private key?
+/// 2) Select the newest of the remaining
+pub(crate) fn get_best_certificate(publics: &Vec<CryptoPublicPortion>, private_rsa: &RsaPrivateKey) -> Option<CryptoPublicPortion> {
+    let mut publics = publics.to_owned();
+    publics.retain(|c| is_cert_from_privkey(&c.cert,private_rsa).unwrap_or(false)); // retain certs matching the private cert
+    publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
+    publics.first().cloned() // If empty vec --> return None
 }

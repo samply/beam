@@ -26,10 +26,13 @@ impl Display for BeamIdType {
 }
 
 pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
-    fn set_broker_id(domain: String) {
+    fn get_broker_id() -> Option<&'static String> {
+        BROKER_ID.get()
+    }
+    fn set_broker_id(domain: &String) {
         let res = BROKER_ID.set(domain.clone());
         if let Err(value) = res {
-            assert_eq!(domain, value, "Tried to initialize broker_id with two different values");
+            assert_eq!(*domain, value, "Tried to initialize broker_id with two different values");
         }
     }
     fn str_has_type(value: &str) -> Result<BeamIdType,SamplyBeamError> {
@@ -215,6 +218,26 @@ impl BeamId for AppOrProxyId {
     }
 }
 
+impl TryFrom<&AppOrProxyId> for AppId {
+    type Error = SamplyBeamError;
+
+    fn try_from(id: &AppOrProxyId) -> Result<Self, Self::Error> {
+        match id {
+            AppOrProxyId::AppId(e) => AppId::new(e.value()),
+            AppOrProxyId::ProxyId(e) => Err(SamplyBeamError::InvalidBeamId(format!("Not an AppId: {}",e)))
+        }
+    }
+}
+impl TryFrom<&AppOrProxyId> for ProxyId {
+    type Error = SamplyBeamError;
+    fn try_from(id: &AppOrProxyId) -> Result<Self, Self::Error> {
+        match id {
+            AppOrProxyId::ProxyId(e) => ProxyId::new(e.value()),
+            AppOrProxyId::AppId(e) => Err(SamplyBeamError::InvalidBeamId(format!("Not a ProxyId: {}",e)))
+        }
+    }
+}
+
 impl From<ProxyId> for AppOrProxyId {
     fn from(id: ProxyId) -> Self {
         AppOrProxyId::ProxyId(id)
@@ -320,12 +343,19 @@ pub fn app_to_broker_id(app_id: &str) -> Result<String,SamplyBeamError> {
 
 #[cfg(test)]
 mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
+
+    fn init_broker_id(broker_id: &str) {
+        if let Err(prev) = BROKER_ID.set(broker_id.into()) {
+            if prev != broker_id {
+                panic!("Tried to initialize BROKER_ID with two different values.");
+            }
+        }
+    }
 
     #[test]
     fn test_str_has_type() {
-        assert!(BROKER_ID.set("broker.samply.de".to_string()).is_ok());
+        init_broker_id("broker.samply.de");
         assert_eq!(BrokerId::str_has_type("broker.samply.de").unwrap(), BeamIdType::BrokerId);
         assert_eq!(BrokerId::str_has_type("proxy23.broker.samply.de").unwrap(), BeamIdType::ProxyId);
         assert_eq!(BrokerId::str_has_type("app12.proxy23.broker.samply.de").unwrap(), BeamIdType::AppId);
@@ -335,16 +365,34 @@ mod tests {
 
     #[test]
     fn test_appid_brokerid() {
-        let app_id_str = "app.proxy1.broker.demo.beam.samply.de";
+        let app_id_str = "app.proxy1.broker.samply.de";
         let actual_broker_id_from_str = app_to_broker_id(app_id_str).unwrap();
-        assert_eq!("broker.demo.beam.samply.de", actual_broker_id_from_str);
+        assert_eq!("broker.samply.de", actual_broker_id_from_str);
 
-        assert!(BROKER_ID.set(actual_broker_id_from_str.to_string()).is_ok());
+        init_broker_id(&actual_broker_id_from_str);
         let app_id = AppId::new(app_id_str).unwrap();
         let actual_broker_id_str = app_to_broker_id(&app_id.to_string()).unwrap();
         assert_eq!(actual_broker_id_str, actual_broker_id_from_str);
 
         let actual_broker_id = BrokerId::new(&actual_broker_id_str).unwrap();
         assert_eq!(actual_broker_id.to_string(), actual_broker_id_str);
+    }
+
+    #[test]
+    fn try_from_app_or_proxy_id() {
+        let app_id_str = "app.proxy1.broker.samply.de";
+        let broker_id = app_to_broker_id(app_id_str).unwrap();
+
+        AppId::set_broker_id(&broker_id);
+        let app_id = AppId::new(app_id_str).unwrap();
+        let aop_id_app: AppOrProxyId = app_id.clone().into();
+        let app_result = AppId::try_from(&aop_id_app).unwrap();
+        assert_eq!(app_id, app_result);
+
+        ProxyId::set_broker_id(&broker_id);
+        let proxy_id = app_id.proxy_id();
+        let aop_id_proxy: AppOrProxyId = proxy_id.clone().into();
+        let proxy_result = ProxyId::try_from(&aop_id_proxy).unwrap();
+        assert_eq!(proxy_id, proxy_result);
     }
 }

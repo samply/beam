@@ -22,38 +22,66 @@ jobs:
 
   build-rust:
     name: Build (Rust)
-#    needs: [ pre-check ]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     strategy:
       matrix:
         arch:
           - amd64
-#          - arm64
+          - arm64
 
     steps:
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-      - uses: actions/checkout@v3
-      - uses: actions/cache@v3
-        with:
-          path: /tmp/cache
-          key: ${{ runner.os }}-${{ matrix.arch }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.toml') }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-           ${{ runner.os }}-${{ matrix.arch }}-${{ env.PROFILE }}-${{ hashFiles('**/Cargo.toml') }}-
-           ${{ runner.os }}-${{ matrix.arch }}-${{ env.PROFILE }}-
-      - name: Build (${{ matrix.arch }})
+      - name: Set arch ${{ matrix.arch }}
+        env:
+          ARCH: ${{ matrix.arch }}
         run: |
-          if [ "$PROFILE" != "debug" ]; then args="--profile $PROFILE"; fi
-          mkdir -p /tmp/cache/target /tmp/cache/cargo/registry
-          docker run --user $(id -u) --platform ${{ matrix.arch }} --rm -v $(pwd):/app -v /tmp/cache/target:/app/target -v /tmp/cache/cargo/registry:/usr/local/cargo/registry -w /app rust cargo build $args
+          if [ "${ARCH}" == "arm64" ]; then
+            echo "rustarch=aarch64-unknown-linux-gnu" >> $GITHUB_ENV
+          elif [ "${ARCH}" == "amd64" ]; then
+            echo "rustarch=x86_64-unknown-linux-gnu" >> $GITHUB_ENV
+          else
+            exit 1
+          fi
+          if [ "$(dpkg --print-architecture)" != "${ARCH}" ]; then
+            echo "Cross-compiling to ${ARCH}."
+            echo "is_cross=true" >> $GITHUB_ENV
+          else
+            echo "Natively compiling to ${ARCH}."
+            echo "is_cross=false" >> $GITHUB_ENV
+          fi
+      - name: Set profile ${{ env.PROFILE }}
+        env:
+          PROFILE: ${{ env.PROFILE }}
+        run: |
+          if [ "${PROFILE}" == "release" ]; then
+            echo "profilestr=--release" >> $GITHUB_ENV
+          elif [ "${PROFILE}" == "debug" ]; then
+            echo "profilestr=" >> $GITHUB_ENV
+          else
+            echo "profilestr=--profile $PROFILE" >> $GITHUB_ENV
+          fi
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          target: ${{ env.rustarch }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.arch }}-${{ env.PROFILE }}
+      - name: Build (${{ matrix.arch }})
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: ${{ env.is_cross }}
+          command: build
+          args: --target ${{ env.rustarch }} ${{ env.profilestr }}
       - name: Upload Artifact
         uses: actions/upload-artifact@v3
         with:
           name: binaries-${{ matrix.arch }}
           path: |
-            /tmp/cache/target/${{ env.PROFILE }}/proxy
-            /tmp/cache/target/${{ env.PROFILE }}/broker
+            target/${{ env.rustarch }}/${{ env.PROFILE }}/proxy
+            target/${{ env.rustarch }}/${{ env.PROFILE }}/broker
 
   test:
     name: Run tests
@@ -88,7 +116,7 @@ jobs:
 #        PROFILE=${{ env.PROFILE }}
 #        COMPONENT=broker
       # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
-      build-platforms: "linux/amd64"
+      # build-platforms: "linux/amd64"
       # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
       artifact-name: '*'
     # This passes the secrets from calling workflow to the called workflow
@@ -117,7 +145,7 @@ jobs:
 #        PROFILE=${{ env.PROFILE }}
 #        COMPONENT=broker
       # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
-      build-platforms: "linux/amd64"
+      # build-platforms: "linux/amd64"
       # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
       artifact-name: '*'
     # This passes the secrets from calling workflow to the called workflow

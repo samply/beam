@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use static_init::dynamic;
 use tracing::debug;
 
-use std::{time::Duration, ops::Deref, fmt::Display};
+use std::{time::{Duration, Instant, SystemTime}, ops::Deref, fmt::Display};
 
 use rand::Rng;
 use serde::{Deserialize, Serialize, de::Visitor};
@@ -127,14 +127,14 @@ impl<M: Msg> MsgSigned<M> {
 
         // Message content matches token?
         let val = serde_json::to_value(&self.msg)
-        .expect("Internal error: Unable to interpret already parsed message to JSON Value.");
+            .expect("Internal error: Unable to interpret already parsed message to JSON Value.");
         if content.custom != val {
-            return Err(SamplyBeamError::RequestValidationFailed);
+            return Err(SamplyBeamError::RequestValidationFailed("content.custom did not match parsed message.".to_string()));
         }
 
         // From field matches CN in certificate?
         if ! self.get_from().can_be_signed_by(&proxy_public_info.beam_id) {
-            return Err(SamplyBeamError::RequestValidationFailed);
+            return Err(SamplyBeamError::RequestValidationFailed(format!("{} is not allowed to sign for {}", &proxy_public_info.beam_id, self.get_from())));
         }
         debug!("Message has been verified succesfully.");
         Ok(())
@@ -237,17 +237,52 @@ impl Msg for MsgTaskResult {
 //     }
 // }
 
+mod serialize_time {
+    use std::{time::{SystemTime, UNIX_EPOCH, Duration}};
+
+    use serde::{self, Deserialize, Deserializer, Serializer};
+    use tracing::{warn, debug, error};
+
+
+    pub fn serialize<S>(time: &SystemTime, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let ttl = match time.duration_since(SystemTime::now()) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("Internal Error: Tried to serialize a task which should have expired and expunged from memory {} seconds ago. Will return TTL=0. Cause: {}", e.duration().as_secs(), e);
+                Duration::ZERO
+            },
+        };
+        s.serialize_u64(ttl.as_secs())
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let ttl: u64 = u64::deserialize(deserializer)?;
+        let expire = SystemTime::now() + Duration::from_secs(ttl);
+        debug!("Deserialized u64 {} to time {:?}", ttl, expire);
+        Ok(
+            expire
+        )
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct MsgTaskRequest {
     pub id: MsgId,
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub body: String,
-    // pub expire: SystemTime,
+    #[serde(with="serialize_time", rename="ttl")]
+    pub expire: SystemTime,
     pub failure_strategy: FailureStrategy,
     #[serde(skip)]
     pub results: HashMap<AppOrProxyId,MsgSigned<MsgTaskResult>>,
-    pub metadata: Value
+    pub metadata: Value,
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct EncryptedMsgTaskRequest {
@@ -256,7 +291,7 @@ pub struct EncryptedMsgTaskRequest {
     pub to: Vec<AppOrProxyId>,
     //auth
     pub body: Option<String>,
-    // pub expire: SystemTime,
+    // pub expire: Instant,
     pub failure_strategy: Option<FailureStrategy>,
     pub encrypted: String,
     pub encryption_keys: Vec<Option<String>>,
@@ -274,44 +309,31 @@ pub struct MsgTaskResult {
     pub metadata: Value,
 }
 
-impl MsgTaskResult {
-    pub fn new(from: AppOrProxyId, to: Vec<AppOrProxyId>, task: MsgId, status: WorkStatus, metadata: Value) -> Self {
-        Self {
-            id: MsgId::new(),
-            from,
-            to,
-            task,
-            status,
-            metadata,
-        }
-    }
-    pub fn status(&self) -> &WorkStatus {
-        &self.status
-    }
-    pub fn status_mut(&mut self) -> &mut WorkStatus {
-        &mut self.status
-    }
-}
-
-pub trait HasWaitId<T> {
-    fn get_wait_id(&self) -> T;
+pub trait HasWaitId<I: PartialEq> {
+    fn wait_id(&self) -> I;
 }
 
 impl HasWaitId<MsgId> for MsgTaskRequest {
-    fn get_wait_id(&self) -> MsgId {
+    fn wait_id(&self) -> MsgId {
         self.id
     }
 }
 
-impl HasWaitId<MsgId> for MsgTaskResult {
-    fn get_wait_id(&self) -> MsgId {
-        self.task
+impl HasWaitId<String> for MsgTaskResult {
+    fn wait_id(&self) -> String {
+        format!("{},{}", self.task, self.from)
     }
 }
 
 impl<M> HasWaitId<MsgId> for MsgSigned<M> where M: HasWaitId<MsgId> + Msg {
-    fn get_wait_id(&self) -> MsgId {
-        self.msg.get_wait_id()
+    fn wait_id(&self) -> MsgId {
+        self.msg.wait_id()
+    }
+}
+
+impl<M> HasWaitId<String> for MsgSigned<M> where M: HasWaitId<String> + Msg {
+    fn wait_id(&self) -> String {
+        self.msg.wait_id()
     }
 }
 
@@ -334,7 +356,8 @@ impl MsgTaskRequest {
             body,
             failure_strategy,
             results: HashMap::new(),
-            metadata
+            metadata,
+            expire: SystemTime::now() + Duration::from_secs(3600)
         }
     }
 }

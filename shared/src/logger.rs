@@ -10,9 +10,9 @@ pub fn init_logger() -> Result<(), SetGlobalDefaultError>{
         },
         _ => {
             if cfg!(debug_assertions) {
-                "hyper=warn,rustify=warn,vaultrs=warn,info".to_string()
-            } else {
                 "hyper=warn,rustify=warn,vaultrs=warn,debug".to_string()
+            } else {
+                "hyper=warn,rustify=warn,vaultrs=warn,info".to_string()
             }
         }
     };

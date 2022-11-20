@@ -55,6 +55,8 @@ In practice,
 
 This design ensures that each component, mainly applications but Proxies and Brokers as well, can be addressed in tasks. Should the need arise in the future, this network could be federated by federating the brokers (not unsimilar to E-Mail/SMTP, XMPP, etc.)
 
+The Proxies have to fetch certificates from the central Certificate Authority, however, this communication is relayed by the broker. This ensures, that no external access to the CA is required.
+
 ## Getting started
 The following paragraph simulates the creation and the completion of a task
 using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
@@ -78,7 +80,7 @@ In this example, we use the same ApiKey `AppKey` for both parties.
 at party 2 is capable of solving it, so it asks `proxy1.broker.example.de` to
 create that new task:
 ```
-curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"]}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
+curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"],"ttl":600}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
 ```
 `Proxy1` replies:
 ```
@@ -136,6 +138,7 @@ Tasks are represented in the following structure:
       "max_tries": 5
     }
   },
+  "ttl": 3600,
   "metadata": "The broker can read and use this field e.g., to apply filters on behalf of an app"
 }
 ```
@@ -146,6 +149,7 @@ Tasks are represented in the following structure:
 - `body`: Description of work to be done. Not interpreted by the Broker.
 - `failure_strategy`: Advises each client how to handle failures. Possible values `discard`, `retry`.
 - `failure_strategy.retry`: How often to retry (`max_tries`) a failed task and how long to wait in between each try (`backoff_millisecs`).
+- `ttl`: Time-to-live in seconds. Once this reaches zero, the broker will expunge the task along with its results.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Result](#result) for more examples) and can be handled by the broker (thus intentionally not encrypted).
 
 ### Result
@@ -319,6 +323,9 @@ Confirm that your setup works by running `./dev/test noci`, which runs the tests
 
 To work with the environment, you may run `./dev/beamdev defaults` to see some helpful values, including the dev default URLs and a working authentication header.
 
+### Logging
+Both the Broker and the Proxy respect the log level in the `RUST_LOG` environment variable. E.g., `RUST_LOG=debug` enables debug outputs. Warning: the `trace` log level is *very* noisy.
+
 ## Roadmap
 - [X] API Key authentication of local applications
 - [X] Certificate management
@@ -330,3 +337,8 @@ To work with the environment, you may run `./dev/beamdev defaults` to see some h
 - [ ] Broker-side filtering of the unencrypted fields with JSON queries
 - [ ] Integration of OAuth2 (in discussion)
 - [x] Helpful dev environment
+- [x] Expiration of tasks and results
+- [x] Support TLS-terminating proxies
+
+## Cryptography Notice
+This distribution includes cryptographic software. The country in which you currently reside may have restrictions on the import, possession, use, and/or re-export to another country, of encryption software. BEFORE using any encryption software, please check your country's laws, regulations and policies concerning the import, possession, or use, and re-export of encryption software, to see if this is permitted. See [http://www.wassenaar.org/](http://www.wassenaar.org) for more information.

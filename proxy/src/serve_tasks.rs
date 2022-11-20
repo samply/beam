@@ -1,4 +1,4 @@
-use std::time::SystemTime;
+use std::time::{SystemTime, Duration};
 
 use axum::{Router, Extension, routing::any, response::Response, http::HeaderValue};
 use httpdate::fmt_http_date;
@@ -55,7 +55,10 @@ async fn handler_tasks(
     
     let (mut parts, body) = resp.into_parts();
     let mut bytes = body::to_bytes(body).await
-        .map_err(|_| ERR_UPSTREAM)?;
+        .map_err(|e| {
+            warn!("Error receiving reply from the broker: {}", e);
+            ERR_UPSTREAM
+        })?;
     
     // TODO: Always return application/jwt from server.
     if ! bytes.is_empty() {
@@ -65,6 +68,7 @@ async fn handler_tasks(
         } else {
             let mut json = json.unwrap();
             if ! validate_and_remove_signatures(&mut json).await {
+                warn!("The answer was valid JSON but we were unable to validate and remove its signature. The osffending JSON was: {}", json);
                 return Err(ERR_VALIDATION);
             }
             bytes = serde_json::to_vec(&json).unwrap().into();

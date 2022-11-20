@@ -1,7 +1,6 @@
-use std::net::AddrParseError;
+use std::{net::AddrParseError, str::Utf8Error, string::FromUtf8Error};
 
 use openssl::error::ErrorStack;
-use vaultrs::{client::VaultClientSettingsBuilderError, error::ClientError};
 
 #[derive(thiserror::Error, Debug)]
 pub enum SamplyBeamError {
@@ -9,8 +8,8 @@ pub enum SamplyBeamError {
     BindAddr(AddrParseError),
     #[error("Invalid broker address supplied: {0}")]
     WrongBrokerUri(&'static str),
-    #[error("The request could not be validated.")]
-    RequestValidationFailed,
+    #[error("The request could not be validated: {0}.")]
+    RequestValidationFailed(String),
     #[error("Invalid path supplied")]
     InvalidPath,
     #[error("Invalid Client ID: {0}")]
@@ -23,12 +22,16 @@ pub enum SamplyBeamError {
     ConfigurationFailed(String),
     #[error("Internal synchronization error: {0}")]
     InternalSynchronizationError(String),
+    #[error("Error executing HTTP request: {0}")]
+    HttpRequestError(hyper::Error),
     #[error("Error building HTTP request: {0}")]
     HttpRequestBuildError(#[from] http::Error),
     #[error("Problem with HTTP proxy: {0}")]
     HttpProxyProblem(std::io::Error),
     #[error("Invalid Beam ID: {0}")]
-    InvalidBeamId(String)
+    InvalidBeamId(String),
+    #[error("Unable to parse HTTP response: {0}")]
+    HttpParseError(FromUtf8Error)
 }
 
 impl From<AddrParseError> for SamplyBeamError {
@@ -36,18 +39,6 @@ impl From<AddrParseError> for SamplyBeamError {
         let ret = SamplyBeamError::BindAddr(e);
         println!("Building error: {}", ret);
         ret
-    }
-}
-
-impl From<VaultClientSettingsBuilderError> for SamplyBeamError {
-    fn from(e: VaultClientSettingsBuilderError) -> Self {
-        Self::VaultError(format!("Unable to build vault client settings: {}", e))
-    }
-}
-
-impl From<ClientError> for SamplyBeamError {
-    fn from(e: ClientError) -> Self {
-        Self::VaultError(format!("Error in connection to certificate authority: {}", e))
     }
 }
 
@@ -60,5 +51,11 @@ impl From<ErrorStack> for SamplyBeamError {
 impl From<rsa::errors::Error> for SamplyBeamError {
     fn from(e: rsa::errors::Error) -> Self {
         Self::SignEncryptError(e.to_string())
+    }
+}
+
+impl From<hyper::Error> for SamplyBeamError {
+    fn from(e: hyper::Error) -> Self {
+        Self::HttpRequestError(e)
     }
 }
