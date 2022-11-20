@@ -121,7 +121,7 @@ where M: Clone + HasWaitId<I>
             result = new_result_rx.recv() => {
                 match result {
                     Ok(req) => {
-                        if filter.filter(&req) {
+                        if filter.matches(&req) {
                             vec.retain(|el| el.wait_id() != req.wait_id());
                             vec.push(req);
                         }
@@ -168,7 +168,7 @@ async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, bl
             result = new_element_rx.recv() => {
                 match result {
                     Ok(req) => {
-                        if filter.filter(&req) {
+                        if filter.matches(&req) {
                             vec.retain(|el| el.wait_id() != req.wait_id());
                             vec.push(req);
                         }
@@ -330,7 +330,7 @@ impl<'a> MsgFilterForTask<'a> {
         }
         let unanswered = self.unanswered_by.unwrap();
         for res in msg.results.values() {
-            if res.get_from() == unanswered && self.workstatus_is_not.contains(&std::mem::discriminant(&res.msg.status) {
+            if res.get_from() == unanswered && self.workstatus_is_not.contains(&std::mem::discriminant(&res.msg.status)) {
                 debug!("Is {} unanswered? No, answer found.", msg.id());
                 return false;
             }
