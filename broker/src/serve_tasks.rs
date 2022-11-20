@@ -457,7 +457,7 @@ mod test {
     #[test]
     fn filter_task() {
         const broker_id: &str = "broker";
-        BrokerId::set_broker_id(broker_id.into());
+        BrokerId::set_broker_id(&broker_id.into());
         let broker = BrokerId::new(broker_id).unwrap();
         let proxy = ProxyId::random(&broker);
         let app1: AppOrProxyId = AppId::new(&format!("app1.{}", proxy)).unwrap().into();
