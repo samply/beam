@@ -108,11 +108,12 @@ function start_bg {
             if [ "$CODE" == "200" ]; then
                 TRIES=0
             else
-                echo "Waiting for $ADDR ... (${TRIES}th try, last response was: code=$OUT, body=\"$(cat /tmp/body)\")"
+                echo "Waiting for $ADDR ... (try ${TRIES}/120, last response was: code=$OUT, body=\"$(cat /tmp/body 2>/dev/null)\")"
                 sleep 1
-                TRIES+=1
+                ((TRIES=TRIES+1))
                 if [ $TRIES -ge 120 ]; then
-                    echo "ERROR: $ADDR not available after 120 seconds. Giving up."
+                    echo "ERROR: $ADDR not available after 120 seconds. Giving up and printing docker-compose logs."
+                    docker-compose logs
                     exit 5
                 fi
             fi
