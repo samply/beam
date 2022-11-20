@@ -100,9 +100,22 @@ function start_bg {
     [ -x ../artifacts/binaries-$ARCH ] || build_rust
     docker-compose up --no-recreate -d
     for ADDR in $P1 $P2; do
-        while [ "$(curl -s -o /dev/null -w '%{response_code}' $ADDR/v1/health)" != "200" ]; do
-            echo "Waiting for $P1 ..."
-            sleep 0.1
+        TRIES=1
+        while [ $TRIES -ne 0 ]; do
+            set +e
+            CODE=$(curl -s -o /tmp/body -w '%{response_code}' $ADDR/v1/health)
+            set -e
+            if [ "$CODE" == "200" ]; then
+                TRIES=0
+            else
+                echo "Waiting for $ADDR ... (${TRIES}th try, last response was: code=$OUT, body=\"$(cat /tmp/body)\")"
+                sleep 1
+                TRIES+=1
+                if [ $TRIES -ge 120 ]; then
+                    echo "ERROR: $ADDR not available after 120 seconds. Giving up."
+                    exit 5
+                fi
+            fi
         done
     done
     echo "Services are up:"
