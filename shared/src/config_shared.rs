@@ -82,10 +82,11 @@ fn get_enrollment_msg(proxy_id: &Option<String>) -> String {
     let divider = "***************************************************************************\n
                    ***              Beam Certificate Enrollment Warning                    ***\n
                    ***************************************************************************";
-    format!("{}\nIf you are not yet enrolled in the central certificate store, please execute the beam-enrollment companion tool (https://github.com/samply/beam-enroll) by executing:\ndocker run --rm -it -v \"$(pwd)\":/data -e PROXY_ID={} samply/beam-enroll\n and follow the steps on the screen.\nAfter your enrollment, please restart this Beam.Proxy; this message should dissapear.", divider, match proxy_id{
-        Some(id) => id.clone(),
-        _ => String::new()
-    })
+    format!(
+        "{}\nIf you are not yet enrolled in the central certificate store, please execute the beam-enroll companion tool (https://github.com/samply/beam-enroll) by executing:\n  docker run --rm -it -v \"$(pwd)\":/data -e PROXY_ID={} samply/beam-enroll\nand follow the steps on the screen.\nAfter your certificate signing request (CSR) has been approved, please restart this Beam.Proxy and this message should disappear.",
+        divider,
+        proxy_id.as_deref().unwrap_or("<proxy_id>")
+    )
 }
 
 pub async fn init_crypto_for_proxy() -> Result<(String, String), SamplyBeamError>{
