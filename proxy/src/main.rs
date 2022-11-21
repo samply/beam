@@ -65,6 +65,7 @@ async fn get_broker_health(config: &Config, client: &Client<ProxyConnector<Https
         let req = Request::builder()
             .method("GET")
             .uri(uri)
+            .header("User-Agent", &format!("beam.proxy/{}",env!("CARGO_PKG_VERSION")))
             .body(body::Body::empty()).unwrap(); //TODO Unwrap
         if counter > 0 {
             debug!("Still trying to reach Broker ({}th retry)", counter);
