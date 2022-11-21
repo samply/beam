@@ -37,7 +37,7 @@ serde_json = "1"
 tokio-retry = "0.3.0"
 
 # Encryption handling
-rsa = "0.6"
+rsa = "0.7.2"
 
 [build-dependencies]
 build-data = "0"
