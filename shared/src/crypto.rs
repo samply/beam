@@ -237,7 +237,7 @@ pub async fn get_newest_certs_for_cnames_as_pemstr(cnames: Vec<ProxyId>) -> Opti
         let certs = get_all_certs_and_clients_by_cname_as_pemstr(&id).await;
         if let Some(certificates) = certs {
             if let Some(best_candidate) = get_best_other_certificate(&certificates) {
-            result.push(best_candidate);
+                result.push(best_candidate);
             }
         };
     }
@@ -297,6 +297,9 @@ pub(crate) fn hash(data: &[u8]) -> Result<[u8; 32],SamplyBeamError> {
     Ok(digest)
 }
 
+pub fn get_own_privkey() -> &'static RsaPrivateKey {
+    &config::CONFIG_SHARED_CRYPTO.get().unwrap().privkey_rsa
+}
 /* Utility Functions */
 
 /// Extracts the pem-encoded public key from a x509 certificate

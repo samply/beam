@@ -13,7 +13,7 @@ use rsa::pkcs8::DecodePublicKey;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use shared::{
-    beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY, CONFIG_SHARED_CRYPTO}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncMsg, DecMsg,
+    beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncMsg, DecMsg,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, Msg, MsgEmpty, MsgId, MsgSigned,
     MsgTaskRequest, MsgTaskResult, crypto,
 };
@@ -230,7 +230,7 @@ fn decrypt_msg<T: Msg + DeserializeOwned + Serialize, M: EncMsg<T> + Deserialize
 ) -> Result<Value, SamplyBeamError> {
     let enc_value = value.clone();
         match serde_json::from_value::<M>(enc_value) {
-        Ok(msg) => serde_json::to_value(msg.decrypt(&AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()), &CONFIG_SHARED_CRYPTO.get().unwrap().privkey_rsa)?).map_err(|e| {
+        Ok(msg) => serde_json::to_value(msg.decrypt(&AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()), crypto::get_own_privkey())?).map_err(|e| {
             SamplyBeamError::SignEncryptError(format!("Cannot decrypt message: {}", e).into())
         }),
         Err(e) => Err(SamplyBeamError::SignEncryptError(format!("Error decrypting message: {}",e))),
