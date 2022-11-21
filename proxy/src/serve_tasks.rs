@@ -79,7 +79,7 @@ async fn handler_tasks(
     let len = bytes.len();
     let body = Body::from(bytes);
     parts.headers.insert(header::CONTENT_LENGTH, len.into());
-    parts.headers.insert("User-Agent", HeaderValue::from_static(env!("PROXY_AGENT")));
+    parts.headers.insert("User-Agent", HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
     let resp = Response::from_parts(parts, body);
 
     Ok(resp)
