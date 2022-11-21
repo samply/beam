@@ -217,6 +217,7 @@ fn decryption_helper(value: &mut Value) -> Result<(), SamplyBeamError> {
     Ok(())
 }
 
+// Once specialization becomes stable, implement in Msg trait (see https://stackoverflow.com/questions/60138397/how-to-test-for-type-equality-in-rust)
 fn is_message_type<M: Msg + DeserializeOwned + std::fmt::Debug>(value: &Value) -> bool {
     let value = value.clone();
     match serde_json::from_value::<M>(value) {
