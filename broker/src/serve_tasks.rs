@@ -456,9 +456,9 @@ mod test {
 
     #[test]
     fn filter_task() {
-        const broker_id: &str = "broker";
-        BrokerId::set_broker_id(&broker_id.into());
-        let broker = BrokerId::new(broker_id).unwrap();
+        const BROKER_ID: &str = "broker";
+        BrokerId::set_broker_id(BROKER_ID.into());
+        let broker = BrokerId::new(BROKER_ID).unwrap();
         let proxy = ProxyId::random(&broker);
         let app1: AppOrProxyId = AppId::new(&format!("app1.{}", proxy)).unwrap().into();
         let app2: AppOrProxyId = AppId::new(&format!("app2.{}", proxy)).unwrap().into();
@@ -469,13 +469,13 @@ mod test {
             shared::FailureStrategy::Retry { backoff_millisecs: 1000, max_tries: 5 },
             Value::Null
         );
-        let result_by_app2 = MsgTaskResult::new(
-            app2.clone(),
-            vec![task.get_from().clone()],
-            *task.get_id(),
-            WorkStatus::TempFailed("I'd like to retry, please re-send this task".into()),
-            Value::Null
-        );
+        let result_by_app2 = MsgTaskResult{
+            from: app2.clone(),
+            to: vec![task.get_from().clone()],
+            task: *task.id(),
+            status: WorkStatus::TempFailed("I'd like to retry, please re-send this task".into()),
+            metadata: Value::Null
+        };
         let result_by_app2 = MsgSigned {
             msg: result_by_app2,
             sig: "Certainly valid".into(),
@@ -501,7 +501,7 @@ mod test {
         assert_eq!(filter.matches(&task), true, "The only result is TempFailed, so I should still get it: {:?}", task);
 
         let result_by_app2 = task.msg.results.get_mut(&app2).unwrap();
-        *result_by_app2.msg.status_mut() = WorkStatus::Succeeded("I'm done!".into());
+        result_by_app2.msg.status = WorkStatus::Succeeded("I'm done!".into());
         assert_eq!(filter.matches(&task), false, "It's done, so I shouldn't get it");
     }
 }
