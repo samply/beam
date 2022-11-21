@@ -35,7 +35,7 @@ impl GetCerts for GetCertsFromPki {
         let req = Request::builder()
             .method("LIST")
             .header("X-Vault-Token",&config::CONFIG_CENTRAL.pki_token)
-            .header("User-Agent", &format!("beam.broker/{}",env!("CARGO_PKG_VERSION")))
+            .header("User-Agent", env!("BROKER_AGENT"))
             .uri(uri)
             .body(body::Body::empty()).expect("Can not create Cert List Request"); //TODO Unwrap
         let resp = self.hyper_client.request(req).await
