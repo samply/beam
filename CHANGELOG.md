@@ -36,7 +36,7 @@ If your current setup relies on the previous behaviour, please check your CA and
 
 # Samply.Beam 0.4.0 -- 2022-11-23
 
-This release of Samply.Beam, while having only a minor version number change, is a significant step forward on Beam's roadmap. We are proud to announce the full integration of end-to-end encryption in Beam. This does not change the public API, so no changes on the user side should be required.
+With this release of Samply.Beam, we are proud to announce the full integration of end-to-end encryption. To use this, you need to upgrade all components to version 0.4.0 or newer. However, this does not change the public API of the Proxy, so no changes on the user side should be required (drop-in-replacement).
 
 We like to thank all users and are happy to provide additional tools to increase data protection.
 
