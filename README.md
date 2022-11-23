@@ -379,7 +379,7 @@ Beam.Broker and Beam.Proxy expect the private key as well as the CA root certifi
 We created a [certificate enrollment companion tool](https://github.com/samply/beam-enroll), assisting the enrollment process. Please run the docker image via:
 
 ```bash
-docker run --rm -ti -v <output-directory>:/etc/bridgehead/pki samply/beam-enroll:latest --output-file <proxy_name>.priv.pem --proxy-id <full_proxy_id>
+docker run --rm -ti -v <output-directory>:/pki samply/beam-enroll:latest --output-file /pki/<proxy_name>.priv.pem --proxy-id <full_proxy_id>
 ```
 
 and follow the instructions on the screen. The tool generates the private key file in the given directory and prints the CSR to the console -- ready to be copied into an email to the central CA's administrator without the risk of accidentally sending the wrong, i.e. private, file.
