@@ -69,6 +69,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.arch }}-${{ env.PROFILE }}
+          prefix-key: "v1-rust" # Increase to invalidate old caches.
       - name: Build (${{ matrix.arch }})
         uses: actions-rs/cargo@v1
         with:
