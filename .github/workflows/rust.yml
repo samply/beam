@@ -22,7 +22,7 @@ jobs:
 
   build-rust:
     name: Build (Rust)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
 
     strategy:
       matrix:
@@ -61,14 +61,14 @@ jobs:
             echo "profilestr=--profile $PROFILE" >> $GITHUB_ENV
           fi
       - uses: actions/checkout@v3
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.arch }}-${{ env.PROFILE }}
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
           target: ${{ env.rustarch }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.arch }}-${{ env.PROFILE }}
       - name: Build (${{ matrix.arch }})
         uses: actions-rs/cargo@v1
         with:

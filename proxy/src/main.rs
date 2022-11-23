@@ -67,6 +67,7 @@ async fn get_broker_health(config: &Config, client: &Client<ProxyConnector<Https
         let req = Request::builder()
             .method("GET")
             .uri(uri)
+            .header(hyper::header::USER_AGENT, env!("SAMPLY_USER_AGENT"))
             .body(body::Body::empty()).unwrap(); //TODO Unwrap
         if counter > 0 {
             debug!("Still trying to reach Broker ({}th retry)", counter);

@@ -46,11 +46,11 @@ pub fn build_hyper_client(ca_certificates: &Vec<X509>) -> Result<Client<ProxyCon
         num => format!("{num} proxies {:?}", proxies)
     };
     let certs = match ca_certificates.len() {
-        0 => "but no trusted certificate".to_string(),
-        1 => "with one trusted certificate".to_string(),
-        num => format!("with {num} trusted certificates")
+        0 => "no trusted certificate".to_string(),
+        1 => "a trusted certificate".to_string(),
+        num => format!("{num} trusted certificates")
     };
-    info!("Using {proxies} {certs} for TLS termination.");
+    info!("Using {proxies} and {certs} for TLS termination.");
     
     Ok(Client::builder().build(proxy_connector))
 }
