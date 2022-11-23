@@ -35,7 +35,7 @@ impl GetCerts for GetCertsFromPki {
         let req = Request::builder()
             .method("LIST")
             .header("X-Vault-Token",&config::CONFIG_CENTRAL.pki_token)
-            .header("User-Agent", env!("BROKER_AGENT"))
+            .header("User-Agent", env!("SAMPLY_USER_AGENT"))
             .uri(uri)
             .body(body::Body::empty()).expect("Can not create Cert List Request"); //TODO Unwrap
         let resp = self.hyper_client.request(req).await
@@ -59,6 +59,7 @@ impl GetCerts for GetCertsFromPki {
             .method("GET")
             .header("X-Vault-Token",&config::CONFIG_CENTRAL.pki_token)
             .uri(uri)
+            .header("User-Agent", env!("SAMPLY_USER_AGENT"))
             .body(body::Body::empty()).unwrap(); //TODO Unwrap
         let resp = self.hyper_client.request(req).await
             .map_err(|e| SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))?;
@@ -79,6 +80,7 @@ impl GetCerts for GetCertsFromPki {
             .method("GET")
             .header("X-Vault-Token",&config::CONFIG_CENTRAL.pki_token)
             .uri(uri)
+            .header("User-Agent", env!("SAMPLY_USER_AGENT"))
             .body(body::Body::empty()).unwrap(); //TODO Unwrap
         let resp = self.hyper_client.request(req).await
             .map_err(|e| SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))?;
