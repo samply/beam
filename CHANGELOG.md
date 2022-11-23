@@ -1,6 +1,6 @@
-# Samply.Beam 0.5.0 --
+# Samply.Beam 0.4.0 --
 
-This newest release of Samply.Beam paves the road to more production safety. We revised the CA deployment and usage, established a clearly defined (and tool supported) certificate enrollment process, and improved the overall stability of the applications.
+This newest release of Samply.Beam paves the road to more production safety. We revised the CA deployment and usage, established a clearly defined (and tool supported) certificate enrollment process, and improved the overall stability of the applications. Additionally, the end-to-end encryption is fully operational in this version.
 
 The new certificate and private key handling process requires manual intervention in the update process, so please carefully read the following change notice.
 
@@ -24,6 +24,10 @@ Future versions of Beam will include an additional Certificate Revocation List c
 
 If your current setup relies on the previous behaviour, please check your CA and setup the certificates to follow the previously outlined selection rules.
 
+### End-to-end encryption
+
+This version fullz implements end/to/end/encrzption between the Beam.Proxies. This breaks downwards compatibility and requires all Beam.Proxies, as well as the central Beam.Broker, to run at least this version (v0.4.0).
+
 ## Major changes
 
 * Bugfix: `Wait_count` malfunction. There was an issue, where some results were not returned by the long polling mechanism. The issue is fixed in this version.
@@ -33,12 +37,6 @@ If your current setup relies on the previous behaviour, please check your CA and
 * Improved debug output and logging
 * Updated dependencies
 * Removed `vault-rs` dependency
-
-# Samply.Beam 0.4.0 -- 2022-11-23
-
-With this release of Samply.Beam, we are proud to announce the full integration of end-to-end encryption. To use this, you need to upgrade all components to version 0.4.0 or newer. However, this does not change the public API of the Proxy, so no changes on the user side should be required (drop-in-replacement).
-
-We like to thank all users and are happy to provide additional tools to increase data protection.
 
 # Samply.Beam 0.3.0 -- 2022-09-26
 
