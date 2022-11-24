@@ -56,7 +56,7 @@ pub(crate) struct ConfigCrypto {
 impl crate::config::Config for Config {
     fn load() -> Result<Self,SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        BrokerId::set_broker_id(&cli_args.broker_url.host().unwrap().to_string());
+        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
     
         let broker_domain = cli_args.broker_url.host();
         if false {
