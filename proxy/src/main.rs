@@ -32,7 +32,7 @@ pub async fn main() -> anyhow::Result<()> {
         info!("Connected to Broker: {}",&config.broker_uri);
     }
 
-    let ec =init_crypto(config.clone(), client.clone()).await;
+    let ec = init_crypto(config.clone(), client.clone()).await;
     if let Err(e) = ec {
         error!("{}",e);
         std::process::exit(1);
