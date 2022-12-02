@@ -10,10 +10,49 @@ use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PublicKeyParts, PaddingScheme,
 use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 
-use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}, config_shared::ConfigCrypto};
+use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}, config_shared::ConfigCrypto, crypto};
 
 type Serial = String;
 const SIGNATURE_LENGTH: u16 = 256;
+
+pub(crate) struct ProxyCertInfo {
+    pub(crate) proxy_name: String,
+    pub(crate) valid_since: String,
+    pub(crate) valid_until: String,
+    pub(crate) common_name: String,
+    pub(crate) serial: String
+}
+
+impl TryFrom<&X509> for ProxyCertInfo {
+    type Error = SamplyBeamError;
+
+    fn try_from(cert: &X509) -> Result<Self, Self::Error> {
+        // let remaining = Asn1Time::days_from_now(0)?.diff(cert.not_after())?;
+        let common_name = cert.subject_name().entries()
+            .find(|c| c.object().nid() == openssl::nid::Nid::COMMONNAME)
+            .ok_or(SamplyBeamError::CertificateError("Cannot find Common Name in certificate."))?
+            .data().as_utf8()?.to_string();
+
+        const SERIALERR: SamplyBeamError = SamplyBeamError::CertificateError("Error reading certificate's serial");
+
+        let certinfo = ProxyCertInfo {
+            proxy_name: common_name
+                .split('.')
+                .next().ok_or(SamplyBeamError::CertificateError("Invalid Certificate CN: Did not contain '.'"))?
+                .into(),
+            common_name,
+            valid_since: cert.not_before().to_string(),
+            valid_until: cert.not_after().to_string(),
+            serial: cert.serial_number()
+                .to_bn()
+                .map_err(|e| SERIALERR)?
+                .to_hex_str()
+                .map_err(|e| SERIALERR)?
+                .to_string()
+        };
+        Ok(certinfo)
+    }
+}
 
 pub(crate) struct CertificateCache{
     serial_to_x509: HashMap<Serial, X509>,
@@ -45,12 +84,19 @@ impl CertificateCache {
         { // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
             let cache = CERT_CACHE.read().await;
             if let Some(serials) = cache.cn_to_serial.get(cname){
+                debug!("Considering {} certificates with matching CN: {:?}", serials.len(), serials);
                 for serial in serials {
+                    debug!("Fetching certificate with serial {}", serial);
                     let x509 = cache.serial_to_x509.get(serial);
                     if let Some(x509) = x509 {
                         if ! x509_date_valid(x509).unwrap_or(true) {
-                            warn!("Found x509 certificate with invalid date");
+                            let Ok(info) = crypto::ProxyCertInfo::try_from(x509) else {
+                                warn!("Found invalid x509 certificate -- even unable to parse it.");
+                                continue;
+                            };
+                            warn!("Found x509 certificate with invalid date: CN={}, serial={}", info.common_name, info.serial);
                         } else {
+                            debug!("Certificate with serial {} successfully retrieved.", serial);
                             result.push(x509.clone());
                         }
                     }
@@ -437,15 +483,29 @@ fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,ErrorSt
     let cert_mod = cert_rsa.n();
     let key_mod = key.n();
     let key_mod_bignum = openssl::bn::BigNum::from_slice(&key_mod.to_bytes_be())?;
-    return Ok(cert_mod.ucmp(&key_mod_bignum) == std::cmp::Ordering::Equal);
+    let is_equal = cert_mod.ucmp(&key_mod_bignum) == std::cmp::Ordering::Equal;
+    if ! is_equal {
+        match ProxyCertInfo::try_from(cert) {
+            Ok(x) => {
+                warn!("CA error: Found certificate (serial {}) that does not match private key.", x.serial);
+            },
+            Err(_) => {
+                warn!("CA error: Found a certificate that does not match private key; I cannot even parse it: {:?}", cert);
+            }
+        };
+    }
+    return Ok(is_equal);
 }
 
 /// Selecs the best fitting certificate from a vector of certs according to:
 /// 1) Does it match the private key?
 /// 2) Select the newest of the remaining
-pub(crate) fn get_best_certificate(publics: &Vec<CryptoPublicPortion>, private_rsa: &RsaPrivateKey) -> Option<CryptoPublicPortion> {
-    let mut publics = publics.to_owned();
+pub(crate) fn get_best_certificate(publics: impl Into<Vec<CryptoPublicPortion>>, private_rsa: &RsaPrivateKey) -> Option<CryptoPublicPortion> {
+    let mut publics = publics.into();
+    debug!("get_best_certificate(): Considering {} certificates: {:?}", publics.len(), publics);
     publics.retain(|c| is_cert_from_privkey(&c.cert,private_rsa).unwrap_or(false)); // retain certs matching the private cert
-    publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
+    debug!("get_best_certificate(): {} certificates match our private key.", publics.len());
+    publics.sort_by(|a,b| b.cert.not_before().compare(a.cert.not_before()).expect("Unable to select newest certificate")); // sort by newest
+    debug!("get_best_certificate(): After sorting, {} certificates remaining.", publics.len());
     publics.first().cloned() // If empty vec --> return None
 }

@@ -32,7 +32,7 @@ pub async fn main() -> anyhow::Result<()> {
         info!("Connected to Broker: {}",&config.broker_uri);
     }
 
-    let ec =init_crypto(config.clone(), client.clone()).await;
+    let ec = init_crypto(config.clone(), client.clone()).await;
     if let Err(e) = ec {
         error!("{}",e);
         std::process::exit(1);
@@ -79,7 +79,7 @@ async fn get_broker_health(config: &Config, client: &Client<ProxyConnector<Https
     let resp = Retry::spawn(strategy, function).await?;
     match resp.status() {
         StatusCode::OK => Ok(()),
-        _ => Err(SamplyBeamError::InternalSynchronizationError(format!("Cannot connect to broker, recieved status code {}",resp.status())))
-                 }
+        _ => Err(SamplyBeamError::InternalSynchronizationError(format!("Cannot connect to broker, received status code {}",resp.status())))
+    }
 
 }

@@ -31,7 +31,9 @@ pub enum SamplyBeamError {
     #[error("Invalid Beam ID: {0}")]
     InvalidBeamId(String),
     #[error("Unable to parse HTTP response: {0}")]
-    HttpParseError(FromUtf8Error)
+    HttpParseError(FromUtf8Error),
+    #[error("X509 certificate invalid: {0}")]
+    CertificateError(&'static str)
 }
 
 impl From<AddrParseError> for SamplyBeamError {
