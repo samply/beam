@@ -493,6 +493,8 @@ pub(crate) fn get_best_certificate(publics: impl Into<Vec<CryptoPublicPortion>>,
     let mut publics = publics.into();
     debug!("get_best_certificate(): Considering {} certificates: {:?}", publics.len(), publics);
     publics.retain(|c| is_cert_from_privkey(&c.cert,private_rsa).unwrap_or(false)); // retain certs matching the private cert
+    debug!("get_best_certificate(): {} certificates match our private key.", publics.len());
     publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
+    debug!("get_best_certificate(): After sorting, {} certificates remaining.", publics.len());
     publics.first().cloned() // If empty vec --> return None
 }
