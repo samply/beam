@@ -10,10 +10,49 @@ use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PublicKeyParts, PaddingScheme,
 use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 
-use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}, config_shared::ConfigCrypto};
+use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}, config_shared::ConfigCrypto, crypto};
 
 type Serial = String;
 const SIGNATURE_LENGTH: u16 = 256;
+
+pub(crate) struct ProxyCertInfo {
+    pub(crate) proxy_name: String,
+    pub(crate) valid_since: String,
+    pub(crate) valid_until: String,
+    pub(crate) common_name: String,
+    pub(crate) serial: String
+}
+
+impl TryFrom<&X509> for ProxyCertInfo {
+    type Error = SamplyBeamError;
+
+    fn try_from(cert: &X509) -> Result<Self, Self::Error> {
+        // let remaining = Asn1Time::days_from_now(0)?.diff(cert.not_after())?;
+        let common_name = cert.subject_name().entries()
+            .find(|c| c.object().nid() == openssl::nid::Nid::COMMONNAME)
+            .ok_or(SamplyBeamError::CertificateError("Cannot find Common Name in certificate."))?
+            .data().as_utf8()?.to_string();
+
+        const SERIALERR: SamplyBeamError = SamplyBeamError::CertificateError("Error reading certificate's serial");
+
+        let certinfo = ProxyCertInfo {
+            proxy_name: common_name
+                .split('.')
+                .next().ok_or(SamplyBeamError::CertificateError("Invalid Certificate CN: Did not contain '.'"))?
+                .into(),
+            common_name,
+            valid_since: cert.not_before().to_string(),
+            valid_until: cert.not_after().to_string(),
+            serial: cert.serial_number()
+                .to_bn()
+                .map_err(|e| SERIALERR)?
+                .to_hex_str()
+                .map_err(|e| SERIALERR)?
+                .to_string()
+        };
+        Ok(certinfo)
+    }
+}
 
 pub(crate) struct CertificateCache{
     serial_to_x509: HashMap<Serial, X509>,

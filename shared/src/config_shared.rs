@@ -71,12 +71,11 @@ impl crate::config::Config for Config {
 pub async fn init_crypto_for_proxy() -> Result<(String, String), SamplyBeamError>{
     let cli_args = CliArgs::parse();
     let crypto = load_crypto_for_proxy(&cli_args).await?;
-    let serial = crypto.public.cert.serial_number().to_bn().unwrap().to_hex_str().unwrap().to_string();
-    let cname = crypto.public.cert.subject_name().entries().next().unwrap().data().as_utf8()?.to_string();
+    let cert_info = crypto::ProxyCertInfo::try_from(&crypto.public.cert)?;
     if CONFIG_SHARED_CRYPTO.set(crypto).is_err() {
         panic!("Tried to initialize crypto twice (init_crypto())");
     }
-    Ok((serial, cname))
+    Ok((cert_info.serial, cert_info.common_name))
 }
 
 async fn load_crypto_for_proxy(cli_args: &CliArgs) -> Result<ConfigCrypto, SamplyBeamError> {
