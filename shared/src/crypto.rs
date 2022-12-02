@@ -84,7 +84,9 @@ impl CertificateCache {
         { // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
             let cache = CERT_CACHE.read().await;
             if let Some(serials) = cache.cn_to_serial.get(cname){
+                debug!("Considering {} certificates with matching CN: {:?}", serials.len(), serials);
                 for serial in serials {
+                    debug!("Fetching certificate with serial {}", serial);
                     let x509 = cache.serial_to_x509.get(serial);
                     if let Some(x509) = x509 {
                         if ! x509_date_valid(x509).unwrap_or(true) {
@@ -94,6 +96,7 @@ impl CertificateCache {
                             };
                             warn!("Found x509 certificate with invalid date: CN={}, serial={}", info.common_name, info.serial);
                         } else {
+                            debug!("Certificate with serial {} successfully retrieved.", serial);
                             result.push(x509.clone());
                         }
                     }
