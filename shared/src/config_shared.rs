@@ -71,12 +71,11 @@ impl crate::config::Config for Config {
 pub async fn init_crypto_for_proxy() -> Result<(String, String), SamplyBeamError>{
     let cli_args = CliArgs::parse();
     let crypto = load_crypto_for_proxy(&cli_args).await?;
-    let serial = crypto.public.cert.serial_number().to_bn().unwrap().to_hex_str().unwrap().to_string();
-    let cname = crypto.public.cert.subject_name().entries().next().unwrap().data().as_utf8()?.to_string();
+    let cert_info = crypto::ProxyCertInfo::try_from(&crypto.public.cert)?;
     if CONFIG_SHARED_CRYPTO.set(crypto).is_err() {
         panic!("Tried to initialize crypto twice (init_crypto())");
     }
-    Ok((serial, cname))
+    Ok((cert_info.serial, cert_info.common_name))
 }
 
 async fn load_crypto_for_proxy(cli_args: &CliArgs) -> Result<ConfigCrypto, SamplyBeamError> {
@@ -93,7 +92,7 @@ async fn load_crypto_for_proxy(cli_args: &CliArgs) -> Result<ConfigCrypto, Sampl
     let proxy_id = ProxyId::new(proxy_id)?;
     let publics = get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id).await
         .ok_or_else(|| SamplyBeamError::SignEncryptError("Unable to parse your certificate.".into()))?;
-    let public = crypto::get_best_certificate(&publics, &privkey_rsa).ok_or(SamplyBeamError::SignEncryptError("Unable to choose valid, newest certificate for this proxy".into()))?;
+    let public = crypto::get_best_certificate(publics, &privkey_rsa).ok_or(SamplyBeamError::SignEncryptError("Unable to choose valid, newest certificate for this proxy".into()))?;
     let serial = asn_str_to_vault_str(public.cert.serial_number())?;
     privkey_rs256 = privkey_rs256.with_key_id(&serial);
     let config = ConfigCrypto {
