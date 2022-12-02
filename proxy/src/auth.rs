@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use axum::{async_trait, extract::{FromRequest, RequestParts}};
-use hyper::{StatusCode, header::{HeaderName, self}};
+use axum::{async_trait, extract::{FromRequest, FromRequestParts}, http::request::Parts};
+use hyper::{StatusCode, header::{HeaderName, self}, Request};
 use shared::{config_proxy, config, beam_id::{AppId, BeamId}};
 
 use tracing::debug;
@@ -9,13 +9,13 @@ use tracing::debug;
 pub(crate) struct AuthenticatedApp(pub(crate) AppId);
 
 #[async_trait]
-impl<B: Send + Sync> FromRequest<B> for AuthenticatedApp {
+impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedApp {
     type Rejection = (StatusCode, [(HeaderName, &'static str);1]);
 
-    async fn from_request(req: &mut RequestParts<B>) -> Result<Self,Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self,Self::Rejection> {
         const SCHEME: &str = "ApiKey";
         const UNAUTH_ERR: (StatusCode,[(HeaderName, &str);1]) = (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, SCHEME)]);
-        if let Some(auth) = req.headers().get(header::AUTHORIZATION) {
+        if let Some(auth) = parts.headers.get(header::AUTHORIZATION) {
             let auth = auth.to_str()
                 .map_err(|_| UNAUTH_ERR)?;
             let mut auth = auth.split(' '); 

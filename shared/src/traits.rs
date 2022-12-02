@@ -1,4 +1,5 @@
-use axum::{async_trait, extract::{FromRequest, Query, Path}, BoxError, http::StatusCode};
+use axum::{async_trait, extract::{FromRequest, Query, Path, FromRequestParts, self}, BoxError, http::StatusCode, RequestPartsExt};
+use http::request::Parts;
 
 use crate::*;
 
@@ -9,15 +10,13 @@ struct HowLongToBlockAsIntegers {
 }
 
 #[async_trait]
-impl<B> FromRequest<B> for HowLongToBlock
+impl<S> FromRequestParts<S> for HowLongToBlock
 where
-B: axum::body::HttpBody + Send,
-B::Data: Send,
-B::Error: Into<BoxError>
+S: Send + Sync
 {
     type Rejection = (StatusCode, &'static str);
 
-    async fn from_request(req: &mut axum::extract::RequestParts<B>) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(req: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         match req.extract::<Query<HowLongToBlockAsIntegers>>().await {
             Ok(value) => {
                 let wait_time = value.0.wait_time.map(Duration::from_millis);
@@ -29,16 +28,13 @@ B::Error: Into<BoxError>
 }
 
 #[async_trait]
-impl<B> FromRequest<B> for MyUuid
+impl<S> FromRequestParts<S> for MyUuid
 where
-// these trait bounds are copied from `impl FromRequest for axum::Json`
-B: axum::body::HttpBody + Send,
-B::Data: Send,
-B::Error: Into<BoxError>
+S: Send + Sync
 {
     type Rejection = (StatusCode, &'static str);
 
-    async fn from_request(req: &mut axum::extract::RequestParts<B>) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(req: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         match req.extract::<Path<Uuid>>().await {
             Ok(value) => Ok(Self(value.0)),
             Err(_) => Err((StatusCode::BAD_REQUEST, "Invalid ID supplied.")),
