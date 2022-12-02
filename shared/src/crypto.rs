@@ -88,7 +88,11 @@ impl CertificateCache {
                     let x509 = cache.serial_to_x509.get(serial);
                     if let Some(x509) = x509 {
                         if ! x509_date_valid(x509).unwrap_or(true) {
-                            warn!("Found x509 certificate with invalid date");
+                            let Ok(info) = crypto::ProxyCertInfo::try_from(x509) else {
+                                warn!("Found invalid x509 certificate -- even unable to parse it.");
+                                continue;
+                            };
+                            warn!("Found x509 certificate with invalid date: CN={}, serial={}", info.common_name, info.serial);
                         } else {
                             result.push(x509.clone());
                         }
