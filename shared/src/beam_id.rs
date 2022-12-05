@@ -29,10 +29,10 @@ pub trait BeamId: Display + Sized + PartialEq + Eq + Hash {
     fn get_broker_id() -> Option<&'static String> {
         BROKER_ID.get()
     }
-    fn set_broker_id(domain: &String) {
+    fn set_broker_id(domain: String) {
         let res = BROKER_ID.set(domain.clone());
         if let Err(value) = res {
-            assert_eq!(*domain, value, "Tried to initialize broker_id with two different values");
+            assert_eq!(domain, value, "Tried to initialize broker_id with two different values");
         }
     }
     fn str_has_type(value: &str) -> Result<BeamIdType,SamplyBeamError> {
@@ -383,13 +383,13 @@ mod tests {
         let app_id_str = "app.proxy1.broker.samply.de";
         let broker_id = app_to_broker_id(app_id_str).unwrap();
 
-        AppId::set_broker_id(&broker_id);
+        AppId::set_broker_id(broker_id.clone());
         let app_id = AppId::new(app_id_str).unwrap();
         let aop_id_app: AppOrProxyId = app_id.clone().into();
         let app_result = AppId::try_from(&aop_id_app).unwrap();
         assert_eq!(app_id, app_result);
 
-        ProxyId::set_broker_id(&broker_id);
+        ProxyId::set_broker_id(broker_id);
         let proxy_id = app_id.proxy_id();
         let aop_id_proxy: AppOrProxyId = proxy_id.clone().into();
         let proxy_result = ProxyId::try_from(&aop_id_proxy).unwrap();

@@ -1,19 +1,19 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, mem::Discriminant};
 
 use axum::{
     http::{StatusCode, header},
     routing::{get, post, put},
-    Extension, Json, Router, extract::{Query, Path}, response::IntoResponse
+    Json, Router, extract::{Query, Path, State}, response::IntoResponse
 };
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId, WorkStatus};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace, error, warn};
 
 use crate::expire;
 
 #[derive(Clone)]
-struct State {
+struct TasksState {
     tasks: Arc<RwLock<HashMap<MsgId, MsgSigned<MsgTaskRequest>>>>,
     new_task_tx: Arc<Sender<MsgSigned<MsgTaskRequest>>>,
     new_result_tx: Arc<RwLock<HashMap<MsgId, Sender<MsgSigned<MsgTaskResult>>>>>,
@@ -21,7 +21,7 @@ struct State {
 }
 
 pub(crate) fn router() -> Router {
-    let state = State::default();
+    let state = TasksState::default();
     let state2 = state.clone();
     tokio::task::spawn(async move {
         let err = expire::watch(state2.tasks.clone(), state2.new_task_tx.subscribe()).await;
@@ -31,17 +31,17 @@ pub(crate) fn router() -> Router {
         .route("/v1/tasks", get(get_tasks).post(post_task))
         .route("/v1/tasks/:task_id/results", get(get_results_for_task))
         .route("/v1/tasks/:task_id/results/:app_id", put(put_result))
-        .layer(Extension(state))
+        .with_state(state)
 }
 
-impl Default for State {
+impl Default for TasksState {
     fn default() -> Self {
         let tasks: HashMap<MsgId, MsgSigned<MsgTaskRequest>> = HashMap::new();
         let (new_task_tx, _) = tokio::sync::broadcast::channel::<MsgSigned<MsgTaskRequest>>(512);
     
         let tasks = Arc::new(RwLock::new(tasks));
         let new_task_tx = Arc::new(new_task_tx);
-        State {
+        TasksState {
             tasks,
             new_task_tx,
             new_result_tx: Arc::new(RwLock::new(HashMap::new())),
@@ -52,10 +52,10 @@ impl Default for State {
 
 // GET /v1/tasks/:task_id/results
 async fn get_results_for_task(
+    State(state): State<TasksState>,
     block: HowLongToBlock,
     task_id: MsgId,
-    msg: MsgSigned<MsgEmpty>,
-    Extension(state): Extension<State>,
+    msg: MsgSigned<MsgEmpty>
 ) -> Result<(StatusCode, Json<Vec<MsgSigned<MsgTaskResult>>>), (StatusCode, &'static str)> {
     debug!("get_results_for_task called by {}: {:?}, {:?}", msg.get_from(), task_id, block);
     let filter_for_me = MsgFilterNoTask { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::Or };
@@ -121,7 +121,7 @@ where M: Clone + HasWaitId<I>
             result = new_result_rx.recv() => {
                 match result {
                     Ok(req) => {
-                        if filter.filter(&req) {
+                        if filter.matches(&req) {
                             vec.retain(|el| el.wait_id() != req.wait_id());
                             vec.push(req);
                         }
@@ -168,7 +168,7 @@ async fn wait_for_elements_task<'a>(vec: &mut Vec<MsgSigned<MsgTaskRequest>>, bl
             result = new_element_rx.recv() => {
                 match result {
                     Ok(req) => {
-                        if filter.filter(&req) {
+                        if filter.matches(&req) {
                             vec.retain(|el| el.wait_id() != req.wait_id());
                             vec.push(req);
                         }
@@ -206,8 +206,8 @@ enum FilterParam {
 async fn get_tasks(
     block: HowLongToBlock,
     Query(taskfilter): Query<TaskFilter>,
-    msg: MsgSigned<MsgEmpty>,
-    Extension(state): Extension<State>,
+    State(state): State<TasksState>,
+    msg: MsgSigned<MsgEmpty>
 ) -> Result<(StatusCode, impl IntoResponse),(StatusCode, impl IntoResponse)> {
     let from = taskfilter.from;
     let mut to = taskfilter.to;
@@ -231,14 +231,20 @@ async fn get_tasks(
         return Err((StatusCode::UNAUTHORIZED, "You can only list messages created by you (from) or directed to you (to)."));
     }
     // Step 1: Get initial vector fill from HashMap + receiver for new elements
-    let normal = MsgFilterNoTask { from: from.as_ref(), to: to.as_ref(), mode: MsgFilterMode::Or };
-    let filter = MsgFilterForTask { normal, unanswered_by: unanswered_by.as_ref() };
+    let filter = MsgFilterNoTask { from: from.as_ref(), to: to.as_ref(), mode: MsgFilterMode::Or };
+    let filter = MsgFilterForTask { 
+        normal: filter,
+        unanswered_by: unanswered_by.as_ref(),
+        workstatus_is_not: 
+            [WorkStatus::Succeeded(String::new()), WorkStatus::PermFailed(String::new())]
+            .iter().map(std::mem::discriminant).collect()
+    };
     let (mut vec, new_task_rx) = {
         let map = state.tasks.read().await;
         let vec: Vec<MsgSigned<MsgTaskRequest>> = map
             .iter()
             .filter_map(|(_,v)|
-                if filter.filter(v) {
+                if filter.matches(v) {
                     Some(v.clone()) 
                 } else { 
                     None 
@@ -258,7 +264,7 @@ trait MsgFilterTrait<M: Msg> {
     fn to(&self) -> Option<&AppOrProxyId>;
     fn mode(&self) -> &MsgFilterMode;
 
-    fn filter(&self, msg: &M) -> bool {
+    fn matches(&self, msg: &M) -> bool {
         match self.mode() {
             MsgFilterMode::Or => self.filter_or(msg),
             MsgFilterMode::And => self.filter_and(msg)
@@ -313,6 +319,7 @@ struct MsgFilterNoTask<'a> {
 struct MsgFilterForTask<'a> {
     normal: MsgFilterNoTask<'a>,
     unanswered_by: Option<&'a AppOrProxyId>,
+    workstatus_is_not: Vec<Discriminant<WorkStatus>>
 }
 
 impl<'a> MsgFilterForTask<'a> {
@@ -323,7 +330,7 @@ impl<'a> MsgFilterForTask<'a> {
         }
         let unanswered = self.unanswered_by.unwrap();
         for res in msg.results.values() {
-            if res.get_from() == unanswered {
+            if res.get_from() == unanswered && self.workstatus_is_not.contains(&std::mem::discriminant(&res.msg.status)) {
                 debug!("Is {} unanswered? No, answer found.", msg.id());
                 return false;
             }
@@ -342,8 +349,8 @@ impl<'a> MsgFilterTrait<MsgSigned<MsgTaskRequest>> for MsgFilterForTask<'a> {
         self.normal.to
     }
 
-    fn filter(&self, msg: &MsgSigned<MsgTaskRequest>) -> bool {
-        MsgFilterNoTask::filter(&self.normal, msg)
+    fn matches(&self, msg: &MsgSigned<MsgTaskRequest>) -> bool {
+        MsgFilterNoTask::matches(&self.normal, msg)
             && self.unanswered(&msg.msg)
     }
 
@@ -368,8 +375,8 @@ impl<'a, M: Msg> MsgFilterTrait<M> for MsgFilterNoTask<'a> {
 
 // POST /v1/tasks
 async fn post_task(
-    msg: MsgSigned<MsgTaskRequest>,
-    Extension(state): Extension<State>,
+    State(state): State<TasksState>,
+    msg: MsgSigned<MsgTaskRequest>
 ) -> Result<(StatusCode, impl IntoResponse), (StatusCode, String)> {
     // let id = MsgId::new();
     // msg.id = id;
@@ -397,8 +404,8 @@ async fn post_task(
 // PUT /v1/tasks/:task_id/results/:app_id
 async fn put_result(
     Path((task_id, app_id)): Path<(MsgId,AppOrProxyId)>,
-    result: MsgSigned<MsgTaskResult>,
-    Extension(state): Extension<State>
+    State(state): State<TasksState>,
+    result: MsgSigned<MsgTaskResult>
 ) -> Result<StatusCode, (StatusCode, &'static str)> {
     debug!("Called: Task {:?}, {:?}", task_id, result);
     if task_id != result.msg.task {
@@ -440,3 +447,61 @@ async fn put_result(
     Ok(statuscode)
 }
 
+#[cfg(test)]
+mod test {
+    use serde_json::Value;
+    use shared::{MsgTaskRequest, beam_id::{AppId, ProxyId, BrokerId, BeamId, AppOrProxyId}, MsgTaskResult, Msg, WorkStatus, MsgSigned};
+
+    use super::{MsgFilterForTask, MsgFilterNoTask, MsgFilterMode, MsgFilterTrait};
+
+    #[test]
+    fn filter_task() {
+        const BROKER_ID: &str = "broker";
+        BrokerId::set_broker_id(BROKER_ID.into());
+        let broker = BrokerId::new(BROKER_ID).unwrap();
+        let proxy = ProxyId::random(&broker);
+        let app1: AppOrProxyId = AppId::new(&format!("app1.{}", proxy)).unwrap().into();
+        let app2: AppOrProxyId = AppId::new(&format!("app2.{}", proxy)).unwrap().into();
+        let task = MsgTaskRequest::new(
+            app1.clone(),
+            vec![app2.clone()],
+            "Important task".into(),
+            shared::FailureStrategy::Retry { backoff_millisecs: 1000, max_tries: 5 },
+            Value::Null
+        );
+        let result_by_app2 = MsgTaskResult{
+            from: app2.clone(),
+            to: vec![task.get_from().clone()],
+            task: *task.id(),
+            status: WorkStatus::TempFailed("I'd like to retry, please re-send this task".into()),
+            metadata: Value::Null
+        };
+        let result_by_app2 = MsgSigned {
+            msg: result_by_app2,
+            sig: "Certainly valid".into(),
+        };
+        let mut task = MsgSigned {
+            msg: task,
+            sig: "Certainly valid".into(),
+        };
+        // let a = app1.clone();
+        let filter = MsgFilterNoTask {
+            from: None,
+            to: Some(&app2),
+            mode: MsgFilterMode::Or,
+        };
+        let filter = MsgFilterForTask {
+            normal: filter,
+            unanswered_by: Some(&app2),
+            workstatus_is_not: [WorkStatus::Succeeded(String::new()), WorkStatus::PermFailed(String::new())]
+            .iter().map(std::mem::discriminant).collect(),
+        };
+        assert_eq!(filter.matches(&task), true, "There are no results yet, so I should get the task: {:?}", task);
+        task.msg.results.insert(result_by_app2.get_from().clone(), result_by_app2);
+        assert_eq!(filter.matches(&task), true, "The only result is TempFailed, so I should still get it: {:?}", task);
+
+        let result_by_app2 = task.msg.results.get_mut(&app2).unwrap();
+        result_by_app2.msg.status = WorkStatus::Succeeded("I'm done!".into());
+        assert_eq!(filter.matches(&task), false, "It's done, so I shouldn't get it");
+    }
+}

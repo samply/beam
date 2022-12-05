@@ -253,7 +253,7 @@ Parameters:
 - `filter` (optional): Fetch only tasks fulfilling the specified filter criterion. Generic queries are not yet implemented, but the following "convenience filters" reflecting common use cases exist:
   - `filter=todo`: Matches unfinished tasks to be worked on by the asking client. Is a combination of:
     - `to` contains me and
-    - `results` do not contain me.
+    - `results` do not contain a result from me (except results with `status` values of `claimed,tempfail`, to allow resuming those tasks).
 
 Returns an array of tasks, cf. [here](#task)
 
