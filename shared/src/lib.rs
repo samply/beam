@@ -338,7 +338,7 @@ where
     fn encrypt(
         &self,
         fields_to_encrypt: &Vec<&str>,
-        reciever_public_keys: &Vec<RsaPublicKey>,
+        receivers_public_keys: &Vec<RsaPublicKey>,
     ) -> Result<M, SamplyBeamError> {
         // Generate Symmetric Key and Nonce
         let mut rng = rand::thread_rng();
@@ -356,8 +356,8 @@ where
             ))?
             .to_owned();
         
-        // Encryp symmetric key with recievers' public keys
-        let (encrypted_keys, err): (Vec<_>, Vec<_>) = reciever_public_keys
+        // Encrypt symmetric key with receivers' public keys
+        let (encrypted_keys, err): (Vec<_>, Vec<_>) = receivers_public_keys
             .iter()
             .map(|key| {
                 key.encrypt(
@@ -810,9 +810,9 @@ mod tests {
 
         // Encrypt Message
         let fields_to_encrypt = vec!["body"];
-        let reciever_public_keys = vec![p1_public, p2_public];
+        let receivers_public_keys = vec![p1_public, p2_public];
         let msg_encr = msg
-            .encrypt(&fields_to_encrypt, &reciever_public_keys)
+            .encrypt(&fields_to_encrypt, &receivers_public_keys)
             .expect("Could not encrypt message");
         // Decrypt for both proxies
         let msg_p1_decr = msg_encr
@@ -855,9 +855,9 @@ mod tests {
 
         // Encrypt Message
         let fields_to_encrypt = vec!["body"];
-        let reciever_public_keys = vec![p1_public, p2_public];
+        let receivers_public_keys = vec![p1_public, p2_public];
         let msg_encr = msg
-            .encrypt(&fields_to_encrypt, &reciever_public_keys)
+            .encrypt(&fields_to_encrypt, &receivers_public_keys)
             .expect("Could not encrypt message");
         // Decrypt for both proxies
         let msg_p1_decr = msg_encr
