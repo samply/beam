@@ -780,7 +780,7 @@ mod tests {
     #[test]
     fn encrypt_decrypt_task() {
         //Create Task
-        AppId::set_broker_id(&"broker.samply.de".to_string());
+        AppId::set_broker_id("broker.samply.de".to_string());
         let p1_id = AppOrProxyId::AppId(AppId::new("app.proxy1.broker.samply.de").unwrap());
         let p2_id = AppOrProxyId::AppId(AppId::new("app.proxy2.broker.samply.de").unwrap());
         let from = p1_id.clone();
@@ -828,7 +828,7 @@ mod tests {
 
     #[test]
     fn encrypt_decrypt_result() {
-        AppId::set_broker_id(&"broker.samply.de".to_string());
+        AppId::set_broker_id("broker.samply.de".to_string());
         let p1_id = AppOrProxyId::AppId(AppId::new("app.proxy1.broker.samply.de").unwrap());
         let p2_id = AppOrProxyId::AppId(AppId::new("app.proxy2.broker.samply.de").unwrap());
         let from = p1_id.clone();

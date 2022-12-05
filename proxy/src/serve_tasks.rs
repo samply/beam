@@ -1,6 +1,6 @@
 use std::time::{Duration, SystemTime};
 
-use axum::{http::{HeaderValue, request::Parts}, response::Response, routing::any, Extension, Router};
+use axum::{Router, routing::any, response::Response, http::{HeaderValue, request::Parts}, extract::{State, FromRef}};
 use httpdate::fmt_http_date;
 use hyper::{
     body,
@@ -21,14 +21,23 @@ use tracing::{debug, error, warn};
 
 use crate::auth::AuthenticatedApp;
 
+#[derive(Clone, FromRef)]
+struct TasksState {
+    client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>,
+    config: config_proxy::Config
+}
+
 pub(crate) fn router(client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Router {
     let config = config::CONFIG_PROXY.clone();
+    let state = TasksState {
+        client: client.clone(),
+        config,
+    };
     Router::new()
         // We need both path variants so the server won't send us into a redirect loop (/tasks, /tasks/, ...)
         .route("/v1/tasks", any(handler_tasks))
         .route("/v1/tasks/*path", any(handler_tasks))
-        .layer(Extension(client.clone()))
-        .layer(Extension(config))
+        .with_state(state)
 }
 
 const ERR_BODY: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Invalid body");
@@ -48,8 +57,8 @@ const ERR_FAKED_FROM: (StatusCode, &str) = (
 );
 
 async fn handler_tasks(
-    Extension(client): Extension<Client<ProxyConnector<HttpsConnector<HttpConnector>>>>,
-    Extension(config): Extension<config_proxy::Config>,
+    State(client): State<Client<ProxyConnector<HttpsConnector<HttpConnector>>>>,
+    State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
     req: Request<Body>,
 ) -> Result<Response<Body>, (StatusCode, &'static str)> {
@@ -106,6 +115,7 @@ async fn handler_tasks(
     let len = bytes.len();
     let body = Body::from(bytes);
     parts.headers.insert(header::CONTENT_LENGTH, len.into());
+    parts.headers.insert(hyper::header::USER_AGENT, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
     let resp = Response::from_parts(parts, body);
 
     Ok(resp)

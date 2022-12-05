@@ -19,13 +19,15 @@ pub(crate) async fn serve(config: config_proxy::Config, client: Client<ProxyConn
         .layer(axum::middleware::from_fn(shared::middleware::log));
 
     // Graceful shutdown handling
-    let (tx, rx) = tokio::sync::mpsc::channel(1);
-    ctrlc::set_handler(move || {
-        if tx.blocking_send(()).is_err() {
+    let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::channel(1);
+
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await
+            .expect("Unable to listen for Ctrl+C for graceful shutdown");
+        if shutdown_tx.blocking_send(()).is_err() {
             warn!("Unable to send signal for clean shutdown... ignoring.");
         }
-        })
-        .expect("Error setting handler for graceful shutdown.");
+    });
 
     let mut apps_joined = String::new();
     config.api_keys.keys().for_each(|k| write!(apps_joined, "{} ", k.to_string().split('.').next().unwrap()).unwrap());
@@ -33,7 +35,7 @@ pub(crate) async fn serve(config: config_proxy::Config, client: Client<ProxyConn
     
     axum::Server::bind(&config.bind_addr)
         .serve(app.into_make_service())
-        .with_graceful_shutdown(graceful_waiter(rx))
+        .with_graceful_shutdown(graceful_waiter(shutdown_rx))
         .await?;
 
     Ok(())
