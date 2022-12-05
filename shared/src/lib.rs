@@ -330,6 +330,8 @@ where
     }
 }
 
+const FIELDS_TO_ENCRYPT: [&'static str; 1]  = ["body"];
+
 pub trait DecMsg<M>: Msg + Serialize
 where
     M: Msg + DeserializeOwned,
@@ -337,7 +339,6 @@ where
     #[allow(clippy::or_fun_call)]
     fn encrypt(
         &self,
-        fields_to_encrypt: &Vec<&str>,
         receivers_public_keys: &Vec<RsaPublicKey>,
     ) -> Result<M, SamplyBeamError> {
         // Generate Symmetric Key and Nonce
@@ -375,10 +376,10 @@ where
 
         // Retreive fields to encryp and remove from msg
         let mut json_to_encrypt = cleartext_json.clone();
-        json_to_encrypt.retain(|k, _| fields_to_encrypt.contains(&k.as_str()));
+        json_to_encrypt.retain(|k, _| FIELDS_TO_ENCRYPT.contains(&k.as_str()));
         let mut encrypted_json = cleartext_json;
-        for f in fields_to_encrypt {
-            _ = encrypted_json.remove(*f);
+        for f in FIELDS_TO_ENCRYPT {
+            _ = encrypted_json.remove(f);
         }
 
         // Add encrypted key to msg
@@ -809,10 +810,9 @@ mod tests {
         let p2_public = RsaPublicKey::from(&p2_private);
 
         // Encrypt Message
-        let fields_to_encrypt = vec!["body"];
         let receivers_public_keys = vec![p1_public, p2_public];
         let msg_encr = msg
-            .encrypt(&fields_to_encrypt, &receivers_public_keys)
+            .encrypt(&receivers_public_keys)
             .expect("Could not encrypt message");
         // Decrypt for both proxies
         let msg_p1_decr = msg_encr
@@ -854,10 +854,9 @@ mod tests {
         let p2_public = RsaPublicKey::from(&p2_private);
 
         // Encrypt Message
-        let fields_to_encrypt = vec!["body"];
         let receivers_public_keys = vec![p1_public, p2_public];
         let msg_encr = msg
-            .encrypt(&fields_to_encrypt, &receivers_public_keys)
+            .encrypt(&receivers_public_keys)
             .expect("Could not encrypt message");
         // Decrypt for both proxies
         let msg_p1_decr = msg_encr

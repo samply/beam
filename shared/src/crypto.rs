@@ -5,11 +5,11 @@ use static_init::dynamic;
 use tokio::{sync::{RwLock, mpsc, oneshot}};
 use tracing::{debug, warn, info, error};
 use std::{path::{Path, PathBuf}, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string, borrow::BorrowMut};
-use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PublicKeyParts, PaddingScheme, pkcs1::DecodeRsaPublicKey};
+use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PublicKeyParts, PaddingScheme, pkcs1::DecodeRsaPublicKey, pkcs8::DecodePublicKey};
 use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 
-use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}, config_shared::ConfigCrypto, crypto};
+use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId, AppOrProxyId}, config_shared::ConfigCrypto, crypto};
 
 type Serial = String;
 
@@ -445,4 +445,19 @@ pub fn get_best_other_certificate(publics: &Vec<CryptoPublicPortion>) -> Option<
     publics.retain(|c| x509_date_valid(&c.cert).unwrap_or(false)); // retain certs with valid dates
     publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
     publics.first().cloned() // If empty vec --> return None
+}
+
+pub async fn get_proxy_public_keys(receivers: impl IntoIterator<Item = &AppOrProxyId>) -> Result<Vec<RsaPublicKey>,SamplyBeamError> {
+    let proxy_receivers: Vec<ProxyId> = receivers
+        .into_iter()
+        .map(|app_or_proxy| match app_or_proxy {
+            AppOrProxyId::ProxyId(id) => id.to_owned(),
+            AppOrProxyId::AppId(id) => id.proxy_id()
+        }).collect();
+    let receivers_crypto_bundle = crypto::get_newest_certs_for_cnames_as_pemstr(proxy_receivers).await;
+    let receivers_keys = match receivers_crypto_bundle {
+        Some(vec) => Ok(vec.iter().map(|crypt_publ| rsa::RsaPublicKey::from_public_key_pem(&crypt_publ.pubkey).expect("Cannot collect recipients' public keys")).collect::<Vec<rsa::RsaPublicKey>>()), // TODO Expect
+        None => Err(SamplyBeamError::SignEncryptError("Cannot gather encryption keys.".into()))
+    }?;
+    Ok(receivers_keys)
 }

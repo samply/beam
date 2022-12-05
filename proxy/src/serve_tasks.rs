@@ -9,7 +9,7 @@ use hyper::{
 };
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use rsa::pkcs8::DecodePublicKey;
+use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use shared::{
@@ -307,20 +307,8 @@ async fn encrypt_msg<T: Msg + DeserializeOwned, M: DecMsg<T> + DeserializeOwned 
     let value = value.clone();
     match serde_json::from_value::<M>(value) {
         Ok(msg) => {
-            let receivers = msg.get_to()
-                .to_owned();
-            let proxy_receivers: Vec<ProxyId> = receivers
-                .iter()
-                .map(|app_or_proxy| match app_or_proxy {
-                    AppOrProxyId::ProxyId(id) => id.to_owned(), 
-                    AppOrProxyId::AppId(id) => id.proxy_id()
-                }).collect();
-            let receivers_crypto_bundle = crypto::get_newest_certs_for_cnames_as_pemstr(proxy_receivers).await;
-            let receivers_keys = match receivers_crypto_bundle {
-                Some(vec) => Ok(vec.iter().map(|crypt_publ| rsa::RsaPublicKey::from_public_key_pem(&crypt_publ.pubkey).expect("Cannot collect recipients' public keys")).collect::<Vec<rsa::RsaPublicKey>>()), // TODO Expect
-                None => Err(SamplyBeamError::SignEncryptError("Cannot gather encryption keys.".into()))
-            }?;
-            serde_json::to_value(msg.encrypt(&vec!["body"], &receivers_keys)?).map_err(|e| {
+            let receivers_keys = crypto::get_proxy_public_keys(msg.get_to()).await?;
+            serde_json::to_value(msg.encrypt(&receivers_keys)?).map_err(|e| {
                 SamplyBeamError::SignEncryptError(format!("Cannot decrypt message: {}", e).into())
             })
         },
