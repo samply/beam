@@ -56,7 +56,7 @@ pub struct Config {
 pub(crate) struct ConfigCrypto {
     pub(crate) privkey_rs256: RS256KeyPair,
     pub(crate) privkey_rsa: RsaPrivateKey,
-    pub(crate) public: CryptoPublicPortion,
+    pub(crate) public: CryptoPublicPortion
 }
 
 impl crate::config::Config for Config {
