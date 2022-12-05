@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc, mem::Discriminant};
 use axum::{
     http::{StatusCode, header},
     routing::{get, post, put},
-    Extension, Json, Router, extract::{Query, Path}, response::IntoResponse
+    Json, Router, extract::{Query, Path, State}, response::IntoResponse
 };
 use serde::{Deserialize};
 use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId, WorkStatus};
@@ -13,7 +13,7 @@ use tracing::{debug, info, trace, error, warn};
 use crate::expire;
 
 #[derive(Clone)]
-struct State {
+struct TasksState {
     tasks: Arc<RwLock<HashMap<MsgId, MsgSigned<MsgTaskRequest>>>>,
     new_task_tx: Arc<Sender<MsgSigned<MsgTaskRequest>>>,
     new_result_tx: Arc<RwLock<HashMap<MsgId, Sender<MsgSigned<MsgTaskResult>>>>>,
@@ -21,7 +21,7 @@ struct State {
 }
 
 pub(crate) fn router() -> Router {
-    let state = State::default();
+    let state = TasksState::default();
     let state2 = state.clone();
     tokio::task::spawn(async move {
         let err = expire::watch(state2.tasks.clone(), state2.new_task_tx.subscribe()).await;
@@ -31,17 +31,17 @@ pub(crate) fn router() -> Router {
         .route("/v1/tasks", get(get_tasks).post(post_task))
         .route("/v1/tasks/:task_id/results", get(get_results_for_task))
         .route("/v1/tasks/:task_id/results/:app_id", put(put_result))
-        .layer(Extension(state))
+        .with_state(state)
 }
 
-impl Default for State {
+impl Default for TasksState {
     fn default() -> Self {
         let tasks: HashMap<MsgId, MsgSigned<MsgTaskRequest>> = HashMap::new();
         let (new_task_tx, _) = tokio::sync::broadcast::channel::<MsgSigned<MsgTaskRequest>>(512);
     
         let tasks = Arc::new(RwLock::new(tasks));
         let new_task_tx = Arc::new(new_task_tx);
-        State {
+        TasksState {
             tasks,
             new_task_tx,
             new_result_tx: Arc::new(RwLock::new(HashMap::new())),
@@ -52,10 +52,10 @@ impl Default for State {
 
 // GET /v1/tasks/:task_id/results
 async fn get_results_for_task(
+    State(state): State<TasksState>,
     block: HowLongToBlock,
     task_id: MsgId,
-    msg: MsgSigned<MsgEmpty>,
-    Extension(state): Extension<State>,
+    msg: MsgSigned<MsgEmpty>
 ) -> Result<(StatusCode, Json<Vec<MsgSigned<MsgTaskResult>>>), (StatusCode, &'static str)> {
     debug!("get_results_for_task called by {}: {:?}, {:?}", msg.get_from(), task_id, block);
     let filter_for_me = MsgFilterNoTask { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::Or };
@@ -206,8 +206,8 @@ enum FilterParam {
 async fn get_tasks(
     block: HowLongToBlock,
     Query(taskfilter): Query<TaskFilter>,
-    msg: MsgSigned<MsgEmpty>,
-    Extension(state): Extension<State>,
+    State(state): State<TasksState>,
+    msg: MsgSigned<MsgEmpty>
 ) -> Result<(StatusCode, impl IntoResponse),(StatusCode, impl IntoResponse)> {
     let from = taskfilter.from;
     let mut to = taskfilter.to;
@@ -375,8 +375,8 @@ impl<'a, M: Msg> MsgFilterTrait<M> for MsgFilterNoTask<'a> {
 
 // POST /v1/tasks
 async fn post_task(
-    msg: MsgSigned<MsgTaskRequest>,
-    Extension(state): Extension<State>,
+    State(state): State<TasksState>,
+    msg: MsgSigned<MsgTaskRequest>
 ) -> Result<(StatusCode, impl IntoResponse), (StatusCode, String)> {
     // let id = MsgId::new();
     // msg.id = id;
@@ -404,8 +404,8 @@ async fn post_task(
 // PUT /v1/tasks/:task_id/results/:app_id
 async fn put_result(
     Path((task_id, app_id)): Path<(MsgId,AppOrProxyId)>,
-    result: MsgSigned<MsgTaskResult>,
-    Extension(state): Extension<State>
+    State(state): State<TasksState>,
+    result: MsgSigned<MsgTaskResult>
 ) -> Result<StatusCode, (StatusCode, &'static str)> {
     debug!("Called: Task {:?}, {:?}", task_id, result);
     if task_id != result.msg.task {

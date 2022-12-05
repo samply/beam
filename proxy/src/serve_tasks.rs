@@ -1,6 +1,6 @@
 use std::time::{SystemTime, Duration};
 
-use axum::{Router, Extension, routing::any, response::Response, http::HeaderValue};
+use axum::{Router, routing::any, response::Response, http::HeaderValue, extract::{State, FromRef}};
 use httpdate::fmt_http_date;
 use hyper::{Client, client::{HttpConnector, connect::Connect}, StatusCode, Request, Body, Uri, body, header};
 use hyper_proxy::ProxyConnector;
@@ -12,14 +12,23 @@ use tracing::{warn, debug, error};
 
 use crate::auth::AuthenticatedApp;
 
+#[derive(Clone, FromRef)]
+struct TasksState {
+    client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>,
+    config: config_proxy::Config
+}
+
 pub(crate) fn router(client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Router {
     let config = config::CONFIG_PROXY.clone();
+    let state = TasksState {
+        client: client.clone(),
+        config,
+    };
     Router::new()
         // We need both path variants so the server won't send us into a redirect loop (/tasks, /tasks/, ...)
         .route("/v1/tasks", any(handler_tasks))
         .route("/v1/tasks/*path", any(handler_tasks))
-        .layer(Extension(client.clone()))
-        .layer(Extension(config))
+        .with_state(state)
 }
 
 const ERR_BODY: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Invalid body");
@@ -29,8 +38,8 @@ const ERR_VALIDATION: (StatusCode, &str) = (StatusCode::BAD_GATEWAY, "Unable to 
 const ERR_FAKED_FROM: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "You are not authorized to send on behalf of this app.");
 
 async fn handler_tasks(
-    Extension(client): Extension<Client<ProxyConnector<HttpsConnector<HttpConnector>>>>,
-    Extension(config): Extension<config_proxy::Config>,
+    State(client): State<Client<ProxyConnector<HttpsConnector<HttpConnector>>>>,
+    State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
     req: Request<Body>,
 ) -> Result<Response<Body>,(StatusCode, &'static str)> {

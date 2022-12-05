@@ -1,4 +1,5 @@
-use axum::{async_trait, extract::{FromRequest, RequestParts}, body::{HttpBody}, BoxError, http::StatusCode};
+use axum::{async_trait, extract::FromRequest, body::{HttpBody}, BoxError, http::StatusCode};
+use http::{Request, request::Parts};
 use hyper::{header::{self, HeaderName}, Method, Uri, HeaderMap};
 use jwt_simple::prelude::{Token, RS256PublicKey, RSAPublicKeyLike, RS256KeyPair, Claims, Duration, RSAKeyPairLike, KeyMetadata, Base64, VerificationOptions};
 use openssl::base64;
@@ -14,30 +15,31 @@ const ERR_BODY: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Body is invalid.
 const ERR_FROM: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "\"from\" field in message does not match your certificate.");
 
 #[async_trait]
-impl<B: HttpBody + Send + Sync,T> FromRequest<B> for MsgSigned<T>
+impl<S: Send + Sync, B: HttpBody + Send + Sync,T> FromRequest<S,B> for MsgSigned<T>
 where
     // these trait bounds are copied from `impl FromRequest for axum::Json`
     // T: DeserializeOwned,
     // B: axum::body::HttpBody + Send,
     B::Data: Send,
     B::Error: Into<BoxError>,
+    B: HttpBody + 'static,
     T: Serialize + DeserializeOwned + MsgWithBody
 {
     type Rejection = (StatusCode, &'static str);
 
-    async fn from_request(req: &mut RequestParts<B>) -> Result<Self,Self::Rejection> {
-        let body = req.take_body().ok_or(ERR_BODY)?;
+    async fn from_request(req: Request<B>, _state: &S) -> Result<Self,Self::Rejection> {
+        let (parts, body) = req.into_parts();
         let bytes = hyper::body::to_bytes(body).await.map_err(|_| ERR_BODY)?;
         let token_without_extended_signature = std::str::from_utf8(&bytes).map_err(|e| {
             warn!("Unable to parse token_without_extended_signature as UTF-8: {}", e);
             ERR_SIG
         })?;
-        verify_with_extended_header(req, Some(token_without_extended_signature)).await
+        verify_with_extended_header(&parts, Some(token_without_extended_signature)).await
     }
 }
 
 #[async_trait]
-impl<B: Send + Sync> FromRequest<B> for MsgSigned<MsgEmpty>
+impl<S,B> FromRequest<S,B> for MsgSigned<MsgEmpty>
 where
     // these trait bounds are copied from `impl FromRequest for axum::Json`
     // T: DeserializeOwned,
@@ -45,11 +47,14 @@ where
     // B::Data: Send,
     // B::Error: Into<BoxError>,
     // T: Serialize + DeserializeOwned + Msg
+    S: Send + Sync,
+    B: Send + 'static,
 {
     type Rejection = (StatusCode, &'static str);
 
-    async fn from_request(req: &mut RequestParts<B>) -> Result<Self,Self::Rejection> {
-        verify_with_extended_header(req, None).await
+    async fn from_request(req: Request<B>, _state: &S) -> Result<Self, Self::Rejection> {
+        let (parts, _) = req.into_parts();
+        verify_with_extended_header(&parts, None).await
     }
 }
 
@@ -75,8 +80,8 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
     Ok((public, pubkey, content))
 }
 
-async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestParts<B>, token_without_extended_signature: Option<&str>) -> Result<MsgSigned<M>,(StatusCode, &'static str)> {
-    let token_with_extended_signature = std::str::from_utf8(req.headers().get(header::AUTHORIZATION).ok_or_else(|| {
+async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, token_without_extended_signature: Option<&str>) -> Result<MsgSigned<M>,(StatusCode, &'static str)> {
+    let token_with_extended_signature = std::str::from_utf8(req.headers.get(header::AUTHORIZATION).ok_or_else(|| {
         warn!("Missing Authorization header (in verify_with_extended_header)");
         ERR_SIG
         })?
@@ -113,7 +118,7 @@ async fn verify_with_extended_header<B,M: Msg + DeserializeOwned>(req: &RequestP
         return Err(ERR_SIG);
     }
     let digest_claimed = digest_claimed.as_str().unwrap();
-    let digest_actual = make_extra_fields_digest(req.method(), req.uri(), req.headers())
+    let digest_actual = make_extra_fields_digest(&req.method, &req.uri, &req.headers)
         .map_err(|e| {
             warn!("Got error in make_extra_fields_digest: {}", e);
             ERR_SIG

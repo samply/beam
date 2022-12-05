@@ -11,9 +11,7 @@ shared = { path = "../shared", features = ["config-for-proxy"] }
 
 tokio = { version = "1", features = ["full"] }
 async-recursion = "1.0.0"
-
-# Web Server & clean shutdown
-axum = "0.5.9"
+axum = { version = "0.6", features = ["macros"] }
 hyper = { version = "0.14.19", features = ["full"] }
 
 # for HTTP client
