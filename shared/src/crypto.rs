@@ -54,7 +54,7 @@ impl TryFrom<&X509> for ProxyCertInfo {
     }
 }
 
-pub struct CertificateCache{
+pub(crate) struct CertificateCache{
     serial_to_x509: HashMap<Serial, X509>,
     cn_to_serial: HashMap<ProxyId, Vec<Serial>>,
     update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>,
@@ -219,18 +219,25 @@ impl CertificateCache {
         result
     }
 
-    /// Sets the root certificate, which is usually not avaelable at static time. Must be called before validation
+    /// Sets the root certificate, which is usually not available at static time. Must be called before certificate validation
     pub fn set_root_cert(&mut self, root_certificate: &X509) {
         self.root_cert = Some(root_certificate.clone());
     }
 
     pub async fn set_im_cert(&mut self) {
         self.im_cert = Some(X509::from_pem(&get_im_cert().await.unwrap().as_bytes()).unwrap()); // TODO Unwrap
-        let valid_cert = verify_cert(&self.im_cert.as_ref().unwrap(), &self.root_cert.as_ref().expect("No Root CA set!"))
+        let _ = verify_cert(&self.im_cert.as_ref().expect("No IM certificate provided"), &self.root_cert.as_ref().expect("No root certificate set!"))
             .expect(&format!("The intermediate certificate is invalid. Please send this info to the central beam admin for debugging:\n---BEGIN DEBUG---\n{}\nroot\n{}\n---END DEBUG---", 
-                             String::from_utf8(self.im_cert.as_ref().unwrap().to_text().unwrap()).unwrap(),
-                             String::from_utf8(self.root_cert.as_ref().unwrap().to_text().unwrap()).unwrap()));
+                             String::from_utf8(self.im_cert.as_ref().unwrap().to_text().unwrap_or("Cannot convert IM certificate to text".into())).unwrap_or("Invalid characters in IM certificate".to_string()),
+                             String::from_utf8(self.root_cert.as_ref().unwrap().to_text().unwrap_or("Cannot convert root certificate to text".into())).unwrap_or("Invalid characters in root certificate".to_string())));
+        
     }
+}
+
+/// Wrapper for initializing the CA chain. Must be called *after* config initialization 
+pub async fn init_ca_chain() {
+    CERT_CACHE.write().await.set_root_cert(&config::CONFIG_SHARED.root_cert);
+    CERT_CACHE.write().await.set_im_cert().await;
 }
 
 static CERT_GETTER: OnceCell<Box<dyn GetCerts>> = OnceCell::new();
@@ -251,7 +258,7 @@ pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
 }
 
 #[dynamic(lazy)]
-pub static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
+pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
     let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBeamError>>>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
     let cc2 = cc.clone();
