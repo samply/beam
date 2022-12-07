@@ -1,4 +1,4 @@
-# Samply.Beam 0.4.0 --
+# Samply.Beam 0.4.0 -- 2022-12-07
 
 This newest release of Samply.Beam paves the road to more production safety. We revised the CA deployment and usage, established a clearly defined (and tool supported) certificate enrollment process, and improved the overall stability of the applications. Additionally, the end-to-end encryption is fully operational in this version.
 
@@ -34,9 +34,10 @@ This version fullz implements end/to/end/encrzption between the Beam.Proxies. Th
 
 ## Minor improvement
 
+* The `todo` filter does fetch `claimed` and `tempfailed` tasks, to allow resuming them
 * Improved debug output and logging
 * Updated dependencies
-* Removed `vault-rs` dependency
+* Removed `vault-rs` and `tower` dependencies
 
 # Samply.Beam 0.3.0 -- 2022-09-26
 
