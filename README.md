@@ -1,5 +1,7 @@
 ![Logo](./doc/Logo.svg) <!-- TODO: New Logo -->
 
+[![Build with rust and docker](https://github.com/samply/beam/actions/workflows/rust.yml/badge.svg)](https://github.com/samply/beam/actions/workflows/rust.yml)
+
 Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. It provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation on top of an easy to use REST API.
 
 ## Table of Content
@@ -334,6 +336,8 @@ Date: Mon, 27 Jun 2022 14:26:45 GMT
 ## Development Environment
 
 A dev environment is provided consisting of one broker and two proxies.
+
+> NOTE: The commands in this section will build the beam proxy and broker locally. To build beam, you need to install libssl-dev.
 
 To start the dev setup:
 
