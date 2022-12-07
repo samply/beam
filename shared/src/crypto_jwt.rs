@@ -58,13 +58,12 @@ where
     }
 }
 
-pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
-    // TODO: Make static/const
-    let options = VerificationOptions {
-        accept_future: true,
-        ..Default::default()
-    };
+const VER_OPTIONS: VerificationOptions = VerificationOptions {
+    accept_future: true,
+    ..Default::default()
+};
 
+pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
     let metadata = Token::decode_metadata(token)
         .map_err(|e| SamplyBeamError::RequestValidationFailed(format!("Unable to decode JWT metadata: {}", e)))?;
     let serial = metadata.key_id()
@@ -75,7 +74,7 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
         .map_err(|e| {
             SamplyBeamError::SignEncryptError(format!("Unable to initialize public key: {}", e))
         })?;
-    let content = pubkey.verify_token::<Value>(token, Some(options))
+    let content = pubkey.verify_token::<Value>(token, Some(VER_OPTIONS))
         .map_err(|e| SamplyBeamError::RequestValidationFailed(format!("Unable to verify token and extract claims from JWT: {}", e)))?;
     Ok((public, pubkey, content))
 }
@@ -131,7 +130,7 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
 
     let (custom_without, sig) = if let Some(token_without_extended_signature) = token_without_extended_signature {
         // Check if short token matches the long token
-        let content_without = pubkey.verify_token::<Value>(token_without_extended_signature, None)
+        let content_without = pubkey.verify_token::<Value>(token_without_extended_signature, Some(VER_OPTIONS))
             .map_err(|e| {
                 warn!("Unable to verify short token {}: {}", token_without_extended_signature, e);
                 ERR_SIG
