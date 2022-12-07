@@ -28,6 +28,7 @@ If your current setup relies on the previous behaviour, please check your CA and
 
 This version fully implements end-to-end-encryption between the Beam.Proxies. This breaks downwards compatibility and requires all Beam.Proxies, as well as the central Beam.Broker, to run at least this version (v0.4.0).
 
+
 ## Major changes
 
 * Bugfix: `Wait_count` malfunction. There was an issue, where some results were not returned by the long polling mechanism. The issue is fixed in this version.
