@@ -177,8 +177,10 @@ impl CertificateCache {
                 })
                 .collect();
 
-            if commonnames.is_empty() || verify_cert(&opensslcert, &self.im_cert.as_ref().expect("No intermediate CA cert found")).is_err() {
-                warn!("Certificate with serial {} invalid (no cname or invalid certificate).", serial);
+            if commonnames.is_empty() {
+                warn!("Certificate with serial {} invalid: No CNAME.", serial);
+            } else if let Err(e) = verify_cert(&opensslcert, &self.im_cert.as_ref().expect("No intermediate CA cert found")) {
+                warn!("Certificate with serial {} invalid: {}.", serial, e);
             } else {
                 let cn = commonnames.first()
                     .expect("Internal error: common names empty; this should not happen");
