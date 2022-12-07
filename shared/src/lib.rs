@@ -564,7 +564,6 @@ pub struct MsgTaskRequest {
     pub metadata: Value,
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(deny_unknown_fields)] // TODO: This is meant to deny results with `body` fields inside. Might switch to a version number.
 pub struct EncryptedMsgTaskRequest {
     pub id: MsgId,
     pub from: AppOrProxyId,
@@ -600,7 +599,6 @@ pub struct MsgTaskResult {
     pub metadata: Value,
 }
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-#[serde(deny_unknown_fields)] // TODO: This is meant to deny results with `body` fields inside. Might switch to a version number.
 pub struct EncryptedMsgTaskResult {
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
