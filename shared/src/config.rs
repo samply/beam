@@ -29,7 +29,7 @@ pub static CONFIG_CENTRAL: config_broker::Config = {
 };
 
 #[dynamic(lazy)]
-pub(crate) static CONFIG_SHARED: config_shared::Config = {
+pub static CONFIG_SHARED: config_shared::Config = {
     debug!("Loading config CONFIG_SHARED");
     load()
 };

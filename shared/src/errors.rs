@@ -8,8 +8,8 @@ pub enum SamplyBeamError {
     BindAddr(AddrParseError),
     #[error("Invalid broker address supplied: {0}")]
     WrongBrokerUri(&'static str),
-    #[error("The request could not be validated.")]
-    RequestValidationFailed,
+    #[error("The request could not be validated: {0}.")]
+    RequestValidationFailed(String),
     #[error("Invalid path supplied")]
     InvalidPath,
     #[error("Invalid Client ID: {0}")]
@@ -31,7 +31,9 @@ pub enum SamplyBeamError {
     #[error("Invalid Beam ID: {0}")]
     InvalidBeamId(String),
     #[error("Unable to parse HTTP response: {0}")]
-    HttpParseError(FromUtf8Error)
+    HttpParseError(FromUtf8Error),
+    #[error("X509 certificate invalid: {0}")]
+    CertificateError(&'static str)
 }
 
 impl From<AddrParseError> for SamplyBeamError {

@@ -1,4 +1,4 @@
-use crate::{SamplyBeamError, crypto::{self, load_certificates_from_dir, CryptoPublicPortion, GetCerts, get_cert_and_client_by_cname_as_pemstr}, beam_id::{BrokerId, BeamId, ProxyId}, config::CONFIG_SHARED_CRYPTO};
+use crate::{SamplyBeamError, crypto::{self, load_certificates_from_dir, CryptoPublicPortion, GetCerts, get_all_certs_and_clients_by_cname_as_pemstr}, beam_id::{BrokerId, BeamId, ProxyId}, config::CONFIG_SHARED_CRYPTO};
 use std::{path::PathBuf, rc::Rc, sync::Arc, fs::read_to_string};
 use axum::async_trait;
 use hyper::Uri;
@@ -23,6 +23,10 @@ struct CliArgs {
     #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
     privkey_file: PathBuf,
 
+    /// samply.pki: Path to CA Root certificate
+    #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
+    rootcert_file: PathBuf,
+
     // TODO: The following arguments have been added for compatibility reasons with the proxy config. Find another way to merge configs.
     /// (included for technical reasons)
     #[clap(long, env, value_parser)]
@@ -42,46 +46,61 @@ struct CliArgs {
 }
 
 #[allow(dead_code)]
-pub(crate) struct Config {
+pub struct Config {
     pub(crate) tls_ca_certificates_dir: Option<PathBuf>,
     pub(crate) broker_domain: String,
+    pub root_cert: X509,
+    pub tls_ca_certificates: Vec<X509>
 }
 
-pub(crate) struct ConfigCrypto {
-    pub(crate) privkey_rs256: RS256KeyPair,
-    pub(crate) privkey_rsa: RsaPrivateKey,
-    pub(crate) public: CryptoPublicPortion
+pub struct ConfigCrypto {
+    pub privkey_rs256: RS256KeyPair,
+    pub privkey_rsa: RsaPrivateKey,
+    pub public: CryptoPublicPortion
 }
 
 impl crate::config::Config for Config {
     fn load() -> Result<Self,SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        BrokerId::set_broker_id(&cli_args.broker_url.host().unwrap().to_string());
-    
+        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
+
+        let root_cert = crypto::load_certificates_from_file(cli_args.rootcert_file).unwrap();
         let broker_domain = cli_args.broker_url.host();
         if false {
             todo!() // TODO Tobias: Check if matches certificate, and fail
         }
         let broker_domain = broker_domain.unwrap().to_string();
         let tls_ca_certificates_dir = cli_args.tls_ca_certificates_dir;
-        Ok(Config { broker_domain, tls_ca_certificates_dir })
+        let tls_ca_certificates = crate::crypto::load_certificates_from_dir(tls_ca_certificates_dir.clone())
+            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory: {}", e)))?;
+        Ok(Config { broker_domain, tls_ca_certificates_dir, root_cert, tls_ca_certificates })
     }    
+}
+
+fn get_enrollment_msg(proxy_id: &Option<String>) -> String {
+    let divider = "***************************************************************************\n
+                   ***              Beam Certificate Enrollment Warning                    ***\n
+                   ***************************************************************************";
+    format!(
+        "{}\nIf you are not yet enrolled in the central certificate store, please execute the beam-enroll companion tool (https://github.com/samply/beam-enroll) by executing:\n  docker run --rm -it -v \"$(pwd)\":/data -e PROXY_ID={} samply/beam-enroll\nand follow the steps on the screen.\nAfter your certificate signing request (CSR) has been approved, please restart this Beam.Proxy and this message should disappear.",
+        divider,
+        proxy_id.as_deref().unwrap_or("<proxy_id>")
+    )
 }
 
 pub async fn init_crypto_for_proxy() -> Result<(String, String), SamplyBeamError>{
     let cli_args = CliArgs::parse();
     let crypto = load_crypto_for_proxy(&cli_args).await?;
-    let serial = crypto.public.cert.serial_number().to_bn().unwrap().to_hex_str().unwrap().to_string();
-    let cname = crypto.public.cert.subject_name().entries().next().unwrap().data().as_utf8()?.to_string();
+    let cert_info = crypto::ProxyCertInfo::try_from(&crypto.public.cert)?;
     if CONFIG_SHARED_CRYPTO.set(crypto).is_err() {
         panic!("Tried to initialize crypto twice (init_crypto())");
     }
-    Ok((serial, cname))
+    Ok((cert_info.serial, cert_info.common_name))
 }
 
 async fn load_crypto_for_proxy(cli_args: &CliArgs) -> Result<ConfigCrypto, SamplyBeamError> {
     let privkey_pem = read_to_string(&cli_args.privkey_file)
-        .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to load private key from file {}: {}", cli_args.privkey_file.to_string_lossy(), e)))?
+        .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to load private key from file {}: {}\n{}", cli_args.privkey_file.to_string_lossy(), e, get_enrollment_msg(&cli_args.proxy_id))))?
         .trim().to_string();
     let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
         .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
@@ -91,11 +110,9 @@ async fn load_crypto_for_proxy(cli_args: &CliArgs) -> Result<ConfigCrypto, Sampl
     let proxy_id = cli_args.proxy_id.as_ref()
         .expect("load_crypto() has been called without setting a Proxy ID (maybe in broker?). This should not happen.");
     let proxy_id = ProxyId::new(proxy_id)?;
-    let public = get_cert_and_client_by_cname_as_pemstr(&proxy_id).await;
-    if public.is_none() {
-        return Err(SamplyBeamError::SignEncryptError("Unable to parse your certificate.".into()));
-    }
-    let public = public.unwrap();
+    let publics = get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id).await
+        .ok_or_else(|| SamplyBeamError::SignEncryptError("Unable to parse your certificate.".into()))?;
+    let public = crypto::get_best_own_certificate(publics, &privkey_rsa).ok_or(SamplyBeamError::SignEncryptError("Unable to choose valid, newest certificate for this proxy".into()))?;
     let serial = asn_str_to_vault_str(public.cert.serial_number())?;
     privkey_rs256 = privkey_rs256.with_key_id(&serial);
     let config = ConfigCrypto {

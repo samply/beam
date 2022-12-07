@@ -1,6 +1,6 @@
 [package]
 name = "proxy"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -11,12 +11,8 @@ shared = { path = "../shared", features = ["config-for-proxy"] }
 
 tokio = { version = "1", features = ["full"] }
 async-recursion = "1.0.0"
-
-# Web Server & clean shutdown
-axum = "0.5.9"
+axum = { version = "0.6", features = ["macros"] }
 hyper = { version = "0.14.19", features = ["full"] }
-ctrlc = { version = "3.2.2", features = ["termination"] }
-tower = { version = "0.4.13", features = ["full"] }
 
 # for HTTP client
 hyper-tls = "0.5.0"
@@ -34,6 +30,10 @@ tracing = "0.1.35"
 # Config file parsing
 serde = "1"
 serde_json = "1"
+tokio-retry = "0.3.0"
+
+# Encryption handling
+rsa = "0.7.2"
 
 [build-dependencies]
 build-data = "0"

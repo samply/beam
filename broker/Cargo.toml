@@ -1,6 +1,6 @@
 [package]
 name = "broker"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 license = "Apache-2.0"
 
@@ -18,9 +18,8 @@ uuid = { version = "1.1.2", features = [
 ]}
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-axum = { version = "0.5.9", features = [ "query" ] }
+axum = { version = "0.6", features = [ "query" ] }
 #axum-macros = "0.2.2"
-ctrlc = { version = "3.2.2", features = ["termination"] }
 
 anyhow = "*"
 thiserror = "1.0.31"
@@ -31,8 +30,7 @@ tracing = "0.1.35"
 
 hyper = { version = "0.14.19", features = ["full"] }
 hyper-tls = "0.5.0"
-
-vaultrs = { git = "https://github.com/jmgilman/vaultrs", default-features = false, features = [ "native-tls" ] }# <= Change once update > 0.6.2 is out
+hyper-proxy = "0.9.1"
 
 [build-dependencies]
 build-data = "0"

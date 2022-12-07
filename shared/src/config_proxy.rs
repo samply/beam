@@ -7,6 +7,7 @@ use axum::http::HeaderValue;
 use hyper::Uri;
 use serde::Deserialize;
 use tracing::{info, debug};
+use tokio_retry::strategy::ExponentialBackoff;
 
 use crate::{errors::SamplyBeamError, beam_id::{BeamId, ProxyId, AppId, self, BrokerId}};
 
@@ -17,7 +18,8 @@ pub struct Config {
     pub bind_addr: SocketAddr,
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId,ApiKey>,
-    pub tls_ca_certificates: Vec<X509>
+    pub tls_ca_certificates: Vec<X509>,
+    pub com_retry: ExponentialBackoff,
 }
 
 pub type ApiKey = String;
@@ -48,6 +50,10 @@ pub struct CliArgs {
     /// samply.pki: Path to own secret key
     #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
     pub privkey_file: PathBuf,
+
+    /// samply.pki: Path to CA Root certificate
+    #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
+    rootcert_file: PathBuf,
 
     /// (included for technical reasons)
     #[clap(long,hide(true))]
@@ -81,7 +87,7 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBeamE
 impl crate::config::Config for Config {
     fn load() -> Result<Config,SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        BrokerId::set_broker_id(&cli_args.broker_url.host().unwrap().to_string());
+        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
         let proxy_id = ProxyId::new(&cli_args.proxy_id)
             .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Invalid Beam ID \"{}\" supplied: {}", cli_args.proxy_id, e)))?;
         let api_keys = parse_apikeys(&proxy_id)?;
@@ -90,13 +96,16 @@ impl crate::config::Config for Config {
         }
         let tls_ca_certificates = crate::crypto::load_certificates_from_dir(cli_args.tls_ca_certificates_dir)
             .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory: {}", e)))?;
+        let com_retry = tokio_retry::strategy::ExponentialBackoff::from_millis(50)
+            .max_delay(std::time::Duration::new(10,0)); // 10 seconds max delay
         let config = Config {
             broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
             broker_uri: cli_args.broker_url,
             bind_addr: cli_args.bind_addr,
             proxy_id,
             api_keys,
-            tls_ca_certificates
+            tls_ca_certificates,
+            com_retry
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)
@@ -133,7 +142,7 @@ mod tests {
             std::env::set_var(format!("APP_{i}_KEY"), key);
         }
         const BROKER_ID: &str = "broker.samply.de";
-        BrokerId::set_broker_id(&BROKER_ID.to_string());
+        BrokerId::set_broker_id(BROKER_ID.to_string());
         let parsed = parse_apikeys(&ProxyId::new(&format!("proxy.{BROKER_ID}")).unwrap()).unwrap();
         assert_eq!(parsed.len(), apps.len());
     }
