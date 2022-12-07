@@ -30,6 +30,7 @@ services:
     secrets:
       - pki.secret
       - dummy.pem
+      - root.crt.pem
   proxy1:
     depends_on: [broker]
     build:
@@ -51,6 +52,7 @@ services:
       no_proxy: broker
     secrets:
       - proxy1.pem
+      - root.crt.pem
   proxy2:
     depends_on: [broker]
     build:
@@ -72,6 +74,7 @@ services:
       no_proxy: broker
     secrets:
       - proxy2.pem
+      - root.crt.pem
 secrets:
   pki.secret:
     file: ./pki/pki.secret
@@ -81,3 +84,5 @@ secrets:
     file: ./pki/${PROXY2_ID_SHORT}.priv.pem
   dummy.pem:
     file: ./pki/dummy.priv.pem
+  root.crt.pem:
+    file: ./pki/root.crt.pem

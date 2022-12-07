@@ -354,6 +354,38 @@ Confirm that your setup works by running `./dev/test noci`, which runs the tests
 
 To work with the environment, you may run `./dev/beamdev defaults` to see some helpful values, including the dev default URLs and a working authentication header.
 
+## Production Environment & Certificate Infrastructure
+
+A production system needs to operate a production-hardened central [Hashicorp Vault](https://www.vaultproject.io/) and requires a slightly more involved secret management process to ensure, that no secret is accidentally leaked. We can give no support regarding the vault setup, please see the [official documentation](https://developer.hashicorp.com/vault/docs/secrets/pki). However, our [deployment repositories](https://github.com/samply/beam-deployment) have a basic vault cookbook section, describing a basic setup and the most common operations.
+
+While the development system generates all secrets and certificates locally at startup time, the production system should a) persist the Beam.Proxy certificates at the central CA, and b) allow an easy private key generation and certificate enrollment. As the central components and the Beam.Proxies could be operated by different institutions, (private) key generation must be performed at the sites without involvement of the central CA operators.
+
+Beam.Broker and Beam.Proxy expect the private key as well as the CA root certificate to be present at startup (the location can be changed via the `--rootcert-file` and `--privkey-file` command line parameters, as well as the corresponding environment variables). Furthermore, the certificates for the Beam.Proxy common names corresponding to those private keys must be available in the central CA. That means that the Proxy sites must generate a) a private key, b) a certificate request for signing before operation can commence. There are two possible ways to do that:
+
+### Method 1: Using the Beam Enrollment Companion Tool
+
+We created a [certificate enrollment companion tool](https://github.com/samply/beam-enroll), assisting the enrollment process. Please run the docker image via:
+
+```bash
+docker run --rm -ti -v <output-directory>:/pki samply/beam-enroll:latest --output-file /pki/<proxy_name>.priv.pem --proxy-id <full_proxy_id>
+```
+
+and follow the instructions on the screen. The tool generates the private key file in the given directory and prints the CSR to the console -- ready to be copied into an email to the central CA's administrator without the risk of accidentally sending the wrong, i.e. private, file.
+
+### Method 2: Using OpenSSL (manual)
+
+The manual method requires `openssl` to be installed on the system.
+
+To generate both required files simultaneously using the openssl command line tool, enter:
+
+```bash
+openssl req -nodes -new -newkey rsa:4096 -sha256 -out <proxy_name>.csr.pem
+```
+
+This generates both the private key and the CSR with the given name. Please note, that the private key must remain confidential and at your site!
+
+Next, send the CSR to the central CA's administrator for signing and enrolling the proxy certificate.
+
 ### Logging
 
 Both the Broker and the Proxy respect the log level in the `RUST_LOG` environment variable. E.g., `RUST_LOG=debug` enables debug outputs. Warning: the `trace` log level is *very* noisy.
@@ -370,6 +402,7 @@ The data is symmetrically encrypted using the Autheticated Encryption with Authe
 
 - [X] API Key authentication of local applications
 - [X] Certificate management
+- [X] Certificate enrollment process
 - [X] End-to-End signatures
 - [X] End-to-End encryption
 - [X] Docker deployment packages: CI/CD

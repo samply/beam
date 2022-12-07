@@ -23,6 +23,10 @@ struct CliArgs {
     #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
     privkey_file: PathBuf,
 
+    /// samply.pki: Path to CA Root certificate
+    #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
+    rootcert_file: PathBuf,
+
     // TODO: The following arguments have been added for compatibility reasons with the proxy config. Find another way to merge configs.
     /// (included for technical reasons)
     #[clap(long, env, value_parser)]
@@ -42,9 +46,11 @@ struct CliArgs {
 }
 
 #[allow(dead_code)]
-pub(crate) struct Config {
+pub struct Config {
     pub(crate) tls_ca_certificates_dir: Option<PathBuf>,
     pub(crate) broker_domain: String,
+    pub root_cert: X509,
+    pub tls_ca_certificates: Vec<X509>
 }
 
 pub struct ConfigCrypto {
@@ -57,15 +63,29 @@ impl crate::config::Config for Config {
     fn load() -> Result<Self,SamplyBeamError> {
         let cli_args = CliArgs::parse();
         BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
-    
+
+        let root_cert = crypto::load_certificates_from_file(cli_args.rootcert_file).unwrap();
         let broker_domain = cli_args.broker_url.host();
         if false {
             todo!() // TODO Tobias: Check if matches certificate, and fail
         }
         let broker_domain = broker_domain.unwrap().to_string();
         let tls_ca_certificates_dir = cli_args.tls_ca_certificates_dir;
-        Ok(Config { broker_domain, tls_ca_certificates_dir })
+        let tls_ca_certificates = crate::crypto::load_certificates_from_dir(tls_ca_certificates_dir.clone())
+            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory: {}", e)))?;
+        Ok(Config { broker_domain, tls_ca_certificates_dir, root_cert, tls_ca_certificates })
     }    
+}
+
+fn get_enrollment_msg(proxy_id: &Option<String>) -> String {
+    let divider = "***************************************************************************\n
+                   ***              Beam Certificate Enrollment Warning                    ***\n
+                   ***************************************************************************";
+    format!(
+        "{}\nIf you are not yet enrolled in the central certificate store, please execute the beam-enroll companion tool (https://github.com/samply/beam-enroll) by executing:\n  docker run --rm -it -v \"$(pwd)\":/data -e PROXY_ID={} samply/beam-enroll\nand follow the steps on the screen.\nAfter your certificate signing request (CSR) has been approved, please restart this Beam.Proxy and this message should disappear.",
+        divider,
+        proxy_id.as_deref().unwrap_or("<proxy_id>")
+    )
 }
 
 pub async fn init_crypto_for_proxy() -> Result<(String, String), SamplyBeamError>{
@@ -80,7 +100,7 @@ pub async fn init_crypto_for_proxy() -> Result<(String, String), SamplyBeamError
 
 async fn load_crypto_for_proxy(cli_args: &CliArgs) -> Result<ConfigCrypto, SamplyBeamError> {
     let privkey_pem = read_to_string(&cli_args.privkey_file)
-        .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to load private key from file {}: {}", cli_args.privkey_file.to_string_lossy(), e)))?
+        .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to load private key from file {}: {}\n{}", cli_args.privkey_file.to_string_lossy(), e, get_enrollment_msg(&cli_args.proxy_id))))?
         .trim().to_string();
     let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
         .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))

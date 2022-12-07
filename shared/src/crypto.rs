@@ -55,7 +55,9 @@ impl TryFrom<&X509> for ProxyCertInfo {
 pub(crate) struct CertificateCache{
     serial_to_x509: HashMap<Serial, X509>,
     cn_to_serial: HashMap<ProxyId, Vec<Serial>>,
-    update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>
+    update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>,
+    root_cert: Option<X509>, // Might not be available at initialization time
+    im_cert: Option<X509> // Might not be available at initialization time
 }
 
 #[async_trait]
@@ -63,6 +65,7 @@ pub trait GetCerts: Sync + Send {
     fn new() -> Result<Self, SamplyBeamError> where Self: Sized;
     async fn certificate_list(&self) -> Result<Vec<String>,SamplyBeamError>;
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String,SamplyBeamError>;
+    async fn im_certificate_as_pem(&self) -> Result<String,SamplyBeamError>;
 }
 
 impl CertificateCache {
@@ -70,7 +73,9 @@ impl CertificateCache {
         Ok(Self{
             serial_to_x509: HashMap::new(),
             cn_to_serial: HashMap::new(),
-            update_trigger
+            update_trigger,
+            root_cert: None,
+            im_cert: None,
         })
     }
 
@@ -171,10 +176,10 @@ impl CertificateCache {
                         .expect(&format!("Internal error: Vault returned certificate with invalid common name: {}", x))
                 })
                 .collect();
-            
-            if commonnames.is_empty() || x509_date_valid(&opensslcert).is_err() {
-                warn!("Certificate with serial {} invalid (no cname or invalid date).", serial);
-            } else { // TODO: Check against CA
+
+            if commonnames.is_empty() || verify_cert(&opensslcert, &self.im_cert.as_ref().expect("No intermediate CA cert found")).is_err() {
+                warn!("Certificate with serial {} invalid (no cname or invalid certificate).", serial);
+            } else {
                 let cn = commonnames.first()
                     .expect("Internal error: common names empty; this should not happen");
                 self.serial_to_x509.insert(serial.clone(), opensslcert);
@@ -211,6 +216,26 @@ impl CertificateCache {
         }
         result
     }
+
+    /// Sets the root certificate, which is usually not available at static time. Must be called before certificate validation
+    pub fn set_root_cert(&mut self, root_certificate: &X509) {
+        self.root_cert = Some(root_certificate.clone());
+    }
+
+    pub async fn set_im_cert(&mut self) {
+        self.im_cert = Some(X509::from_pem(&get_im_cert().await.unwrap().as_bytes()).unwrap()); // TODO Unwrap
+        let _ = verify_cert(&self.im_cert.as_ref().expect("No IM certificate provided"), &self.root_cert.as_ref().expect("No root certificate set!"))
+            .expect(&format!("The intermediate certificate is invalid. Please send this info to the central beam admin for debugging:\n---BEGIN DEBUG---\n{}\nroot\n{}\n---END DEBUG---", 
+                             String::from_utf8(self.im_cert.as_ref().unwrap().to_text().unwrap_or("Cannot convert IM certificate to text".into())).unwrap_or("Invalid characters in IM certificate".to_string()),
+                             String::from_utf8(self.root_cert.as_ref().unwrap().to_text().unwrap_or("Cannot convert root certificate to text".into())).unwrap_or("Invalid characters in root certificate".to_string())));
+        
+    }
+}
+
+/// Wrapper for initializing the CA chain. Must be called *after* config initialization 
+pub async fn init_ca_chain() {
+    CERT_CACHE.write().await.set_root_cert(&config::CONFIG_SHARED.root_cert);
+    CERT_CACHE.write().await.set_im_cert().await;
 }
 
 static CERT_GETTER: OnceCell<Box<dyn GetCerts>> = OnceCell::new();
@@ -226,8 +251,12 @@ pub async fn get_serial_list() -> Result<Vec<String>, SamplyBeamError> {
     CERT_GETTER.get().unwrap().certificate_list().await
 }
 
+pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
+    CERT_GETTER.get().unwrap().im_certificate_as_pem().await
+}
+
 #[dynamic(lazy)]
-static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
+pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
     let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBeamError>>>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
     let cc2 = cc.clone();
@@ -335,6 +364,19 @@ fn extract_x509(cert: &X509) -> Option<CryptoPublicPortion> {
     })
 }
 
+/// Verify whether the certificate is signed by root_ca_cert and the dates are valid
+pub fn verify_cert(certificate: &X509, root_ca_cert: &X509) -> Result<bool,SamplyBeamError> {
+    let client = certificate.verify(root_ca_cert.public_key()?.as_ref())?;
+    let date = x509_date_valid(&certificate)?;
+    let result = client && date; // TODO: Check if actually constant time
+    if result { 
+        Ok(true)
+    } else {
+        Err(SamplyBeamError::VaultError("Invalid Certificate".to_string()))
+    }
+}
+
+
 pub(crate) fn hash(data: &[u8]) -> Result<[u8; 32],SamplyBeamError> {
     let mut hasher = Sha256::new();
     hasher.update(&data);
@@ -383,6 +425,15 @@ pub fn x509_date_valid(cert: &X509) -> Result<bool, ErrorStack> {
     let startdate = asn1_time_to_system_time(cert.not_before())?;
     let now = SystemTime::now();
     return Ok(expirydate > now && now > startdate);
+}
+
+pub fn load_certificates_from_file(ca_file: PathBuf) -> Result<X509,SamplyBeamError> {
+    let file = ca_file.as_path();
+    let content = std::fs::read(file)
+        .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Can not load certificate {}: {}",file.to_string_lossy(), e)))?;
+    let cert = X509::from_pem(&content)
+        .map_err(|e| SamplyBeamError::ConfigurationFailed( format!("Unable to read certificate from file {}: {}", file.to_string_lossy(), e)));
+    cert
 }
 
 pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, std::io::Error> {
