@@ -26,7 +26,7 @@ If your current setup relies on the previous behaviour, please check your CA and
 
 ### End-to-end encryption
 
-This version fullz implements end/to/end/encrzption between the Beam.Proxies. This breaks downwards compatibility and requires all Beam.Proxies, as well as the central Beam.Broker, to run at least this version (v0.4.0).
+This version fully implements end-to-end-encryption between the Beam.Proxies. This breaks downwards compatibility and requires all Beam.Proxies, as well as the central Beam.Broker, to run at least this version (v0.4.0).
 
 ## Major changes
 
