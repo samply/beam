@@ -1,19 +1,17 @@
-use aes_gcm::aead::generic_array::GenericArray;
 use axum::{Json, http::Request, body::Body, async_trait};
 
 use once_cell::sync::OnceCell;
 use static_init::dynamic;
 use tokio::{sync::{RwLock, mpsc, oneshot}};
 use tracing::{debug, warn, info, error};
-use std::{path::{Path, PathBuf}, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string};
-use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PublicKeyParts, PaddingScheme, pkcs1::DecodeRsaPublicKey};
+use std::{path::{Path, PathBuf}, error::Error, time::{SystemTime, Duration}, collections::HashMap, sync::Arc, fs::read_to_string, borrow::BorrowMut};
+use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PublicKeyParts, PaddingScheme, pkcs1::DecodeRsaPublicKey, pkcs8::DecodePublicKey};
 use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 
-use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId}, config_shared::ConfigCrypto, crypto};
+use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId, AppOrProxyId}, config_shared::ConfigCrypto, crypto};
 
 type Serial = String;
-const SIGNATURE_LENGTH: u16 = 256;
 
 pub(crate) struct ProxyCertInfo {
     pub(crate) proxy_name: String,
@@ -279,6 +277,19 @@ pub async fn get_cert_and_client_by_serial_as_pemstr(serial: &str) -> Option<Cry
     }
 }
 
+pub async fn get_newest_certs_for_cnames_as_pemstr(cnames: Vec<ProxyId>) -> Option<Vec<CryptoPublicPortion>> {
+    let mut result: Vec<CryptoPublicPortion> = Vec::new(); // No fancy map/iter, bc of async
+    for id in cnames {
+        let certs = get_all_certs_and_clients_by_cname_as_pemstr(&id).await;
+        if let Some(certificates) = certs {
+            if let Some(best_candidate) = get_best_other_certificate(&certificates) {
+                result.push(best_candidate);
+            }
+        };
+    }
+    (!result.is_empty()).then_some(result)
+}
+
 fn extract_x509(cert: &X509) -> Option<CryptoPublicPortion> {
     // Public key
     let pubkey = cert.public_key();
@@ -332,95 +343,9 @@ pub(crate) fn hash(data: &[u8]) -> Result<[u8; 32],SamplyBeamError> {
     Ok(digest)
 }
 
-/// Sign a message with private key. Prepends signature to payload
-pub(crate) fn sign(data: &[u8], private_key: &RsaPrivateKey) -> Result<Vec<u8>, SamplyBeamError> {
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    let digest = hasher.finalize();
-    let mut sig = private_key.sign(PaddingScheme::new_pkcs1v15_sign(Some(rsa::hash::Hash::SHA2_256)), &digest)
-        .map_err(|_| SamplyBeamError::SignEncryptError("Unable to sign message.".into()))?;
-    assert!(sig.len() as u16 == SIGNATURE_LENGTH); 
-    let mut payload: Vec<u8> = data.to_vec();
-    sig.append(&mut payload);
-    Ok(sig)
+pub fn get_own_privkey() -> &'static RsaPrivateKey {
+    &config::CONFIG_SHARED_CRYPTO.get().unwrap().privkey_rsa
 }
-
-/// Encrypt the given fields in the json object
-pub(crate) async fn encrypt(task: &MsgTaskRequest, fields: &Vec<&str>) -> Result<EncryptedMsgTaskRequest, SamplyBeamError> {
-    // TODO: Refactor and complete
-    let mut symmetric_key = [0;256];
-    let mut nonce = [0;12];
-    openssl::rand::rand_bytes(&mut symmetric_key)?;
-    openssl::rand::rand_bytes(&mut nonce)?;
-
-    //let receiver_certs: Vec<Option<X509>> = {
-        //let mut a = Vec::new();
-        // for receiver_cert in task.to {
-        //     let cert = CERT_CACHE.get_by_cname(&receiver_cert).await;
-        //     a.push(cert);
-        // };
-        //a
-    //};
-
-    // let mut rng = rand::thread_rng();
-    // let padding_scheme = PaddingScheme::new_oaep::<sha2::Sha256>();
-    // let encrypted_keys = receiver_certs.iter()
-    //     .map(|cert| match cert {
-    //         Some(c) => Some(c.public_key()?.public_key_to_pem()?),
-    //         None => None,
-    //     })
-    //     .encrypt(&mut rng, PaddingScheme::new_oaep::<sha2::Sha256>(), symmetric_key)
-    //     .or_else(|e| Err(SamplyBrokerError::SignEncryptError(&e.to_string())));
-    Err(SamplyBeamError::SignEncryptError("Not implemented".into()))
-}
-
-/// Encryption method without operation
-async fn nop_encrypt(json: serde_json::Value, fields_: &Vec<&str>) -> Result<serde_json::Value, SamplyBeamError> {
-    Ok(json)
-}
-
-/// Entry point for web framework to encrypt and sing payload
-pub(crate) async fn sign_and_encrypt(req: &mut Request<Body>, encrypt_fields: &Vec<&str>) -> Result<(),SamplyBeamError> {
-    let config_crypto = &config::CONFIG_SHARED_CRYPTO.get().unwrap();
-
-    // Body -> JSON
-    let body_json = serde_json::from_str(r#"{"to": ["recipeint1", "recipient2"],}"#)
-        .or_else(|e| Err(SamplyBeamError::SignEncryptError("Error serializing request".into())))?;
-    let body = req.body_mut();
-
-    // Encrypt Message
-    let encrypted_payload = nop_encrypt(body_json, encrypt_fields).await
-        .or_else(|e| Err(SamplyBeamError::SignEncryptError("Cannot encrypt message".into())))?;
-
-    //Sign Message
-    let signed_message = sign(&encrypted_payload.to_string().as_bytes(), &config_crypto.privkey_rsa)?;
-
-    // Place new Body in Request
-    let new_body = Body::from(signed_message);
-    *req.body_mut() = new_body;
-
-    Ok(())
-}
-
-//FIXME: Fix slice range compile error
-///// Receives a signed payload and returns the verified signer (as ClientID) and the payload
-//async fn validate_and_split(raw_bytes: &[u8]) -> Result<(ClientId, &[u8]),SamplyBrokerError>{
-    //let signature = raw_bytes[0..SIGNATURE_LENGTH];
-    //let payload = raw_bytes[SIGNATURE_LENGTH..];
-    //let mut hasher = Sha256::new();
-    //hasher.update(&payload);
-    //let digest = hasher.finalize();
-    //for (client, cert) in CertificateCache::get_all_cnames_and_certs().await {
-        //let rsa_key = x509_cert_to_rsa_pub_key(&cert);
-        //let result =match rsa_key {
-            //Ok(pub_key) => pub_key.verify(PaddingScheme::new_pkcs1v15_sign(Some(rsa::hash::Hash::SHA2_256)), &digest, signature).or_else(|e| Err(SamplyBrokerError::from(e))),
-            //Err(e) => Err(e)
-        //};
-        //if result.is_ok() {return Ok((client, payload));}
-    //}
-    //Err(SamplyBrokerError::SignEncryptError("Invalid Signature"))
-//}
-
 /* Utility Functions */
 
 /// Extracts the pem-encoded public key from a x509 certificate
@@ -432,28 +357,28 @@ fn x509_cert_to_x509_public_key(cert: &X509) -> Result<Vec<u8>, SamplyBeamError>
 }
 
 /// Converts the x509 pem-encoded public key to the rsa public key
-fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, SamplyBeamError> {
+pub fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, SamplyBeamError> {
     let rsa_key = 
         RsaPublicKey::from_pkcs1_pem(
             std::str::from_utf8(cert_key)
-            .or_else(|e| Err(SamplyBeamError::SignEncryptError("Invalid character in certificate public key".into())))?)
-        .or_else(|e| Err(SamplyBeamError::SignEncryptError("Can not extract public rsa key from certificate".into())));
+            .or_else(|e| Err(SamplyBeamError::SignEncryptError(format!("Invalid character in certificate public key because {}",e))))?)
+        .or_else(|e| Err(SamplyBeamError::SignEncryptError(format!("Can not extract public rsa key from certificate because {}",e))));
     rsa_key
 }
 
 /// Convenience function to extract a rsa public key from a x509 certificate. Calls x509_cert_to_x509_public_key and x509_public_key_to_rsa_pub_key internally.
-fn x509_cert_to_rsa_pub_key(cert: &X509) -> Result<RsaPublicKey, SamplyBeamError> {
+pub fn x509_cert_to_rsa_pub_key(cert: &X509) -> Result<RsaPublicKey, SamplyBeamError> {
     x509_public_key_to_rsa_pub_key(&x509_cert_to_x509_public_key(cert)?)
 }
 
 /// Converts the asn.1 time (e.g., from a certificate exiration date) to rust's SystemTime. From https://github.com/sfackler/rust-openssl/issues/1157#issuecomment-1016737160
-fn asn1_time_to_system_time(time: &Asn1TimeRef) -> Result<SystemTime, ErrorStack> {
+pub fn asn1_time_to_system_time(time: &Asn1TimeRef) -> Result<SystemTime, ErrorStack> {
     let unix_time = Asn1Time::from_unix(0)?.diff(time)?;
     Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(unix_time.days as u64 * 86400 + unix_time.secs as u64))
 }
 
 /// Checks if SystemTime::now() is between the not_before and the not_after dates of a x509 certificate
-fn x509_date_valid(cert: &X509) -> Result<bool, ErrorStack> {
+pub fn x509_date_valid(cert: &X509) -> Result<bool, ErrorStack> {
     let expirydate = asn1_time_to_system_time(cert.not_after())?;
     let startdate = asn1_time_to_system_time(cert.not_before())?;
     let now = SystemTime::now();
@@ -478,7 +403,7 @@ pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, 
 }
 
 /// Checks whether or not a x509 certificate matches a private key by comparing the (public) modulus
-fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,ErrorStack>{
+pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,ErrorStack>{
     let cert_rsa = cert.public_key()?.rsa()?;
     let cert_mod = cert_rsa.n();
     let key_mod = key.n();
@@ -499,13 +424,40 @@ fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,ErrorSt
 
 /// Selecs the best fitting certificate from a vector of certs according to:
 /// 1) Does it match the private key?
-/// 2) Select the newest of the remaining
-pub(crate) fn get_best_certificate(publics: impl Into<Vec<CryptoPublicPortion>>, private_rsa: &RsaPrivateKey) -> Option<CryptoPublicPortion> {
+/// 2) Is the current date in the valid date range?
+/// 3) Select the newest of the remaining
+pub(crate) fn get_best_own_certificate(publics: impl Into<Vec<CryptoPublicPortion>>, private_rsa: &RsaPrivateKey) -> Option<CryptoPublicPortion> {
     let mut publics = publics.into();
     debug!("get_best_certificate(): Considering {} certificates: {:?}", publics.len(), publics);
     publics.retain(|c| is_cert_from_privkey(&c.cert,private_rsa).unwrap_or(false)); // retain certs matching the private cert
     debug!("get_best_certificate(): {} certificates match our private key.", publics.len());
-    publics.sort_by(|a,b| b.cert.not_before().compare(a.cert.not_before()).expect("Unable to select newest certificate")); // sort by newest
+    publics.retain(|c| x509_date_valid(&c.cert).unwrap_or(false)); // retain certs with valid dates
     debug!("get_best_certificate(): After sorting, {} certificates remaining.", publics.len());
+    publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
     publics.first().cloned() // If empty vec --> return None
+}
+
+/// Selecs the best fitting certificate from a vector of certs according to:
+/// 1) Is the current date in the valid date range?
+/// 2) Select the newest of the remaining
+pub fn get_best_other_certificate(publics: &Vec<CryptoPublicPortion>) -> Option<CryptoPublicPortion> {
+    let mut publics = publics.to_owned();
+    publics.retain(|c| x509_date_valid(&c.cert).unwrap_or(false)); // retain certs with valid dates
+    publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
+    publics.first().cloned() // If empty vec --> return None
+}
+
+pub async fn get_proxy_public_keys(receivers: impl IntoIterator<Item = &AppOrProxyId>) -> Result<Vec<RsaPublicKey>,SamplyBeamError> {
+    let proxy_receivers: Vec<ProxyId> = receivers
+        .into_iter()
+        .map(|app_or_proxy| match app_or_proxy {
+            AppOrProxyId::ProxyId(id) => id.to_owned(),
+            AppOrProxyId::AppId(id) => id.proxy_id()
+        }).collect();
+    let receivers_crypto_bundle = crypto::get_newest_certs_for_cnames_as_pemstr(proxy_receivers).await;
+    let receivers_keys = match receivers_crypto_bundle {
+        Some(vec) => Ok(vec.iter().map(|crypt_publ| rsa::RsaPublicKey::from_public_key_pem(&crypt_publ.pubkey).expect("Cannot collect recipients' public keys")).collect::<Vec<rsa::RsaPublicKey>>()), // TODO Expect
+        None => Err(SamplyBeamError::SignEncryptError("Cannot gather encryption keys.".into()))
+    }?;
+    Ok(receivers_keys)
 }
