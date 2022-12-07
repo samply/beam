@@ -564,6 +564,7 @@ pub struct MsgTaskRequest {
     pub metadata: Value,
 }
 #[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)] // TODO: This is meant to deny results with `body` fields inside. Might switch to a version number.
 pub struct EncryptedMsgTaskRequest {
     pub id: MsgId,
     pub from: AppOrProxyId,
@@ -599,6 +600,7 @@ pub struct MsgTaskResult {
     pub metadata: Value,
 }
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(deny_unknown_fields)] // TODO: This is meant to deny results with `body` fields inside. Might switch to a version number.
 pub struct EncryptedMsgTaskResult {
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
@@ -613,16 +615,8 @@ pub struct EncryptedMsgTaskResult {
 impl EncMsg<MsgTaskResult> for EncryptedMsgTaskResult {}
 impl DecMsg<EncryptedMsgTaskResult> for MsgTaskResult {}
 
-impl MsgWithBody for EncryptedMsgTaskRequest {
-    // fn get_body(&self) -> &str {
-    //     &self.body
-    // }
-}
-impl MsgWithBody for EncryptedMsgTaskResult {
-    // fn get_body(&self) -> &str {
-    //     self.get_body()
-    // }
-}
+impl MsgWithBody for EncryptedMsgTaskRequest {}
+impl MsgWithBody for EncryptedMsgTaskResult {}
 
 pub trait HasWaitId<I: PartialEq> {
     fn wait_id(&self) -> I;
