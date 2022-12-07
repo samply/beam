@@ -212,7 +212,7 @@ async fn validate_helper_value<M: Msg + DeserializeOwned + std::fmt::Debug>(valu
 fn decryption_helper(value: &mut Value) -> Result<(), SamplyBeamError> {
     if value.is_array() {
         for inner in value.as_array_mut().unwrap() {
-            return decryption_helper(inner);
+            decryption_helper(inner)?;
         }
     } else if value.is_object() {
         if is_message_type::<EncryptedMsgTaskRequest>(value) {
