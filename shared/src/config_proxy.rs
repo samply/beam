@@ -43,10 +43,6 @@ pub struct CliArgs {
     #[clap(long, env, value_parser)]
     pub proxy_id: String,
 
-    /// samply.pki: File containing the authentication token
-    #[clap(long, env, value_parser, default_value = "/run/secrets/pki.secret")]
-    pub pki_apikey_file: PathBuf,
-
     /// samply.pki: Path to own secret key
     #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
     pub privkey_file: PathBuf,
