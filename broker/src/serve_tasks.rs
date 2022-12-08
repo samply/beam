@@ -57,7 +57,7 @@ async fn get_results_for_task(
     task_id: MsgId,
     msg: MsgSigned<MsgEmpty>
 ) -> Result<(StatusCode, Json<Vec<MsgSigned<EncryptedMsgTaskResult>>>), (StatusCode, &'static str)> {
-    debug!("get_results_for_task called by {}: {:?}, {:?}", msg.get_from(), task_id, block);
+    debug!("get_results_for_task(task={}) called by {}, wait={:?}", task_id.to_string(), msg.get_from(), block);
     let filter_for_me = MsgFilterNoTask { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::Or };
     let (mut results, rx_new_result, rx_deleted_task)  = {
         let tasks = state.tasks.read().await;

@@ -613,16 +613,8 @@ pub struct EncryptedMsgTaskResult {
 impl EncMsg<MsgTaskResult> for EncryptedMsgTaskResult {}
 impl DecMsg<EncryptedMsgTaskResult> for MsgTaskResult {}
 
-impl MsgWithBody for EncryptedMsgTaskRequest {
-    // fn get_body(&self) -> &str {
-    //     &self.body
-    // }
-}
-impl MsgWithBody for EncryptedMsgTaskResult {
-    // fn get_body(&self) -> &str {
-    //     self.get_body()
-    // }
-}
+impl MsgWithBody for EncryptedMsgTaskRequest {}
+impl MsgWithBody for EncryptedMsgTaskResult {}
 
 pub trait HasWaitId<I: PartialEq> {
     fn wait_id(&self) -> I;

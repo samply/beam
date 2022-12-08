@@ -84,7 +84,7 @@ async fn handler_tasks(
 
     let (mut parts, body) = resp.into_parts();
     let mut bytes = body::to_bytes(body).await.map_err(|e| {
-        warn!("Error receiving reply from the broker: {}", e);
+        error!("Error receiving reply from the broker: {}", e);
         ERR_UPSTREAM
     })?;
 
@@ -212,7 +212,7 @@ async fn validate_helper_value<M: Msg + DeserializeOwned + std::fmt::Debug>(valu
 fn decryption_helper(value: &mut Value) -> Result<(), SamplyBeamError> {
     if value.is_array() {
         for inner in value.as_array_mut().unwrap() {
-            return decryption_helper(inner);
+            decryption_helper(inner)?;
         }
     } else if value.is_object() {
         if is_message_type::<EncryptedMsgTaskRequest>(value) {

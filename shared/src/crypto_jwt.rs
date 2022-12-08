@@ -129,9 +129,15 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
         return Err(ERR_SIG);
     }
 
+    // TODO: Make static/const
+    let options = VerificationOptions {
+        accept_future: true,
+        ..Default::default()
+    };
+
     let (custom_without, sig) = if let Some(token_without_extended_signature) = token_without_extended_signature {
         // Check if short token matches the long token
-        let content_without = pubkey.verify_token::<Value>(token_without_extended_signature, None)
+        let content_without = pubkey.verify_token::<Value>(token_without_extended_signature, Some(options))
             .map_err(|e| {
                 warn!("Unable to verify short token {}: {}", token_without_extended_signature, e);
                 ERR_SIG
