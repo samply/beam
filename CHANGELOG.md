@@ -4,7 +4,6 @@ This is a bugfix release. In particular, the following things were addressed:
 
 * An error, where only the first result from multiple was decrypted is fixed.
 * Due to computer time mismatches, sometimes JWTs "from the future" were rejected. The Broker now accepts those tokens. Note, that expired tokens are still rejected.
-* The Broker explicitly rejects unencrypted messages. This is the same behaviour as in version 0.4.0, however the guarantees to never accept malformed messages with unencrypted payloads are strengthened.
 
 # Samply.Beam 0.4.0 -- 2022-12-07
 
