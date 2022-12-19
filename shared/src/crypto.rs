@@ -82,7 +82,10 @@ impl CertificateCache {
     /// Searches cache for a certificate with the given ClientId. If not found, updates cache from central vault. If then still not found, return None
     pub async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<X509> { // TODO: What if multiple certs are found?
         let mut result = Vec::new();
-        Self::update_certificates().await.unwrap_or_else(|e| {warn!("Updating certificates failed: {}",e);()}); // requires write lock.
+        Self::update_certificates().await.unwrap_or_else(|e| { // requires write lock.
+            warn!("Updating certificates failed: {}",e);
+            ()
+        });
         debug!("Getting cert(s) with cname {}", cname);
         { // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
             let cache = CERT_CACHE.read().await;
@@ -126,7 +129,10 @@ impl CertificateCache {
                 _ => ()
             }
         }
-        Self::update_certificates().await.unwrap_or_else(|e| {warn!("Updating certificates failed: {}",e);()}); // requires write lock.
+        Self::update_certificates().await.unwrap_or_else(|e| { // requires write lock.
+            warn!("Updating certificates failed: {}",e);
+            ()
+        });
         let cache = CERT_CACHE.read().await;
         return cache.serial_to_x509.get(serial).cloned();
     }
