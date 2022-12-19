@@ -115,6 +115,7 @@ async fn handler_tasks(
 
     let len = bytes.len();
     let body = Body::from(bytes);
+    _ = parts.headers.remove(hyper::header::USER_AGENT);
     parts.headers.insert(header::CONTENT_LENGTH, len.into());
     parts.headers.insert(hyper::header::SERVER, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
     let resp = Response::from_parts(parts, body);
