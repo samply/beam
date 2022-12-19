@@ -40,14 +40,16 @@ pub(crate) fn router() -> Router {
         .route("/v1/pki/certs/by_serial/:serial", get(get_certificate_by_serial))
 }
 
+#[tracing::instrument(name = "/v1/pki/certs/by_serial/:serial")]
 async fn get_certificate_by_serial(
     Path(serial): Path<String>
 ) -> Result<String, PkiError> {
-    debug!("=> Asked for Serial {serial}");
+    debug!("=> Asked for cert with serial {serial}");
     let cert = shared::crypto::get_cert_and_client_by_serial_as_pemstr(&serial).await
         .ok_or(PkiError::CommunicationWithVault(String::new()))?;
     let pem = cert.cert.to_pem()
         .map_err(|e| PkiError::OpenSslError(e.to_string()))?;
+    debug!("<= Returning requested cert with serial {serial}");
     Ok(String::from_utf8(pem)?)
 }
 
