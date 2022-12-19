@@ -60,7 +60,7 @@ async fn handler_tasks(
     State(client): State<Client<ProxyConnector<HttpsConnector<HttpConnector>>>>,
     State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
-    req: Request<Body>,
+    mut req: Request<Body>,
 ) -> Result<Response<Body>, (StatusCode, &'static str)> {
     let path = req.uri().path();
     let path_query = req
@@ -72,6 +72,10 @@ async fn handler_tasks(
     let target_uri =
         Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
             .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
+
+    // Insert Via header
+    req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
+
     let (body, parts) = encrypt_request(req, &sender).await?;
     let req = sign_request(body, parts, &config, &target_uri).await?;
 
