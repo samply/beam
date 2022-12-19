@@ -10,14 +10,15 @@ use shared::{EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MsgId, HowLongToBl
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace, warn};
 
-use crate::{serve_tasks, serve_health, serve_pki, crypto::GetCertsFromPki};
+use crate::{serve_tasks, serve_health, serve_pki, crypto::GetCertsFromPki, banner};
 
 pub(crate) async fn serve() -> anyhow::Result<()> {
     let app = 
         serve_tasks::router()
         // .merge(serve_pki::router())
         .merge(serve_pki::router())
-        .merge(serve_health::router());
+        .merge(serve_health::router())
+        .layer(axum::middleware::map_response(banner::set_server_header));
 
     // Graceful shutdown handling
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel(1);
