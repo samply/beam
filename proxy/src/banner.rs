@@ -15,8 +15,11 @@ pub(crate) fn print_banner() {
 }
 
 pub(crate) async fn set_server_header<B>(mut response: Response<B>) -> Response<B> {
-    if ! response.headers_mut().contains_key(header::SERVER) {
-        response.headers_mut().insert(header::SERVER, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
-    }
+    let headers = response.headers_mut();
+    let target_header = match headers.contains_key(header::SERVER) {
+        true => header::VIA, // We're relaying for a proxys
+        false => header::SERVER, // We're answering ourselves
+    };
+    headers.insert(target_header, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
     response
 }
