@@ -42,14 +42,14 @@ impl GetCerts for GetCertsFromPki {
             .map_err(|e| SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
-                .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive vault certificate list: {}",e)))?;
+                .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retrieve vault certificate list: {}",e)))?;
             let body: PkiListResponse = serde_json::from_slice(&body_bytes)
                 .map_err(|e| SamplyBeamError::VaultError(format!("Cannot deserialize vault certificate list: {}",e)))?;
             debug!("Got cert list with {} elements",body.data.keys.len());
             return Ok(body.data.keys);
         }
         debug!("No cert list! Status {}", resp.status());
-        Err(SamplyBeamError::VaultError(format!("Cannot retreive certificate list: {}",resp.status())))
+        Err(SamplyBeamError::VaultError(format!("Cannot retrieve certificate list: {}",resp.status())))
     }
 
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String,SamplyBeamError> {
@@ -65,12 +65,12 @@ impl GetCerts for GetCertsFromPki {
             .map_err(|e| SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
-            .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive certificate {}: {}",serial,e)))?;
+                .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retrieve certificate {}: {}",serial,e)))?;
             let body = String::from_utf8(body_bytes.to_vec())
                 .map_err(|e| SamplyBeamError::VaultError(format!("Cannot parse certificate {}: {}",serial,e)))?;
             return Ok(body);
         }
-        Err(SamplyBeamError::VaultError(format!("Cannot retreive certificate {}: {}",serial, resp.status())))
+        Err(SamplyBeamError::VaultError(format!("Cannot retrieve certificate {}: {}",serial, resp.status())))
     }
 
     async fn im_certificate_as_pem(&self) -> Result<String,SamplyBeamError> {
@@ -86,12 +86,12 @@ impl GetCerts for GetCertsFromPki {
             .map_err(|e| SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
-            .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive im-ca certificate: {}",e)))?;
+                .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retrieve im-ca certificate: {}",e)))?;
             let body = String::from_utf8(body_bytes.to_vec())
                 .map_err(|e| SamplyBeamError::VaultError(format!("Cannot parse im-ca certificate: {}",e)))?;
             return Ok(body);
         }
-        Err(SamplyBeamError::VaultError(format!("Cannot retreive im-ca certificate: {}",resp.status())))
+        Err(SamplyBeamError::VaultError(format!("Cannot retrieve im-ca certificate: {}",resp.status())))
     }
 
     fn new() -> Result<Self,SamplyBeamError> {
