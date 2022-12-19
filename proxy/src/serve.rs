@@ -1,12 +1,12 @@
 use std::fmt::Write;
 
-use hyper::{Client, client::HttpConnector};
+use hyper::{Client, client::HttpConnector, header};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use shared::{config, errors::SamplyBeamError, config_shared, config_proxy};
 use tracing::{info, debug, warn, error};
 
-use crate::{serve_health, serve_tasks};
+use crate::{serve_health, serve_tasks, banner};
 
 pub(crate) async fn serve(config: config_proxy::Config, client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> anyhow::Result<()> {
     let router_tasks = serve_tasks::router(&client);
@@ -16,7 +16,8 @@ pub(crate) async fn serve(config: config_proxy::Config, client: Client<ProxyConn
     let app = 
         router_tasks
         .merge(router_health)
-        .layer(axum::middleware::from_fn(shared::middleware::log));
+        .layer(axum::middleware::from_fn(shared::middleware::log))
+        .layer(axum::middleware::map_response(banner::set_server_header));
 
     // Graceful shutdown handling
     let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::channel(1);
