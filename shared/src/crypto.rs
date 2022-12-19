@@ -373,17 +373,17 @@ fn extract_x509(cert: &X509) -> Option<CryptoPublicPortion> {
 }
 
 /// Verify whether the certificate is signed by root_ca_cert and the dates are valid
-pub fn verify_cert(certificate: &X509, root_ca_cert: &X509) -> Result<bool,SamplyBeamError> {
-    let client = certificate.verify(root_ca_cert.public_key()?.as_ref())?;
-    let date = x509_date_valid(&certificate)?;
-    let result = client && date; // TODO: Check if actually constant time
-    if result { 
-        Ok(true)
-    } else {
-        Err(SamplyBeamError::VaultError("Invalid Certificate".to_string()))
+pub fn verify_cert(certificate: &X509, root_ca_cert: &X509) -> Result<(),SamplyBeamError> {
+    let client_ok = certificate.verify(root_ca_cert.public_key()?.as_ref())?;
+    let date_ok = x509_date_valid(&certificate)?;
+
+    match (client_ok, date_ok) {
+        (true, true) => Ok(()), // TODO: Check if actually constant time
+        (true, false) => Err(SamplyBeamError::CertificateError("Certificate's start/end date is invalid (e.g. expired)")),
+        (false, true) => Err(SamplyBeamError::CertificateError("Problem with the certificate's public key.")),
+        (false, false) => Err(SamplyBeamError::CertificateError("Both the cert's date and its public key are invalid."))
     }
 }
-
 
 pub(crate) fn hash(data: &[u8]) -> Result<[u8; 32],SamplyBeamError> {
     let mut hasher = Sha256::new();
