@@ -12,7 +12,7 @@ use tracing::{error, info, debug};
 
 #[derive(Error, Debug)]
 enum PkiError {
-    #[error("Error in communication with PKI. {0}")]
+    #[error("Broker has trouble communicating with PKI. {0}")]
     CommunicationWithVault(String),
     #[error("Error processing certificate: {0}")]
     OpenSslError(String),
