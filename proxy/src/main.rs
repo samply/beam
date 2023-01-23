@@ -5,7 +5,7 @@ use std::time::Duration;
 use hyper::{Client, client::HttpConnector, Uri, Request, StatusCode, body};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use shared::http_proxy::{SamplyHttpClient, self};
+use shared::http_client::{SamplyHttpClient, self};
 use tokio_retry::{Retry, strategy::jitter};
 use shared::{config, config_proxy::Config};
 use shared::errors::SamplyBeamError;
@@ -25,7 +25,7 @@ pub async fn main() -> anyhow::Result<()> {
     banner::print_banner();
 
     let config = config::CONFIG_PROXY.clone();
-    let client = http_proxy::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)))
+    let client = http_client::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)))
         .map_err(SamplyBeamError::HttpProxyProblem)?;
 
     if let Err(err) = get_broker_health(&config, &client).await {

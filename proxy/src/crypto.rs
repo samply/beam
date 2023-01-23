@@ -2,7 +2,7 @@ use axum::{async_trait, Json};
 use hyper::{Client, client::HttpConnector, Uri, StatusCode};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use shared::{crypto::GetCerts, errors::SamplyBeamError, config, config_proxy::Config, http_proxy::SamplyHttpClient};
+use shared::{crypto::GetCerts, errors::SamplyBeamError, config, config_proxy::Config, http_client::SamplyHttpClient};
 use tracing::debug;
 
 pub(crate) struct GetCertsFromBroker {

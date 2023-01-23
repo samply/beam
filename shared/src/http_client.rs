@@ -77,7 +77,7 @@ mod test {
     use hyper_tls::HttpsConnector;
     use openssl::x509::X509;
 
-    use crate::http_proxy::SamplyHttpClient;
+    use crate::http_client::{SamplyHttpClient, self};
 
     const HTTP: &str = "http://ip-api.com/json";
     const HTTPS: &str = "https://ifconfig.me/";
@@ -93,13 +93,13 @@ mod test {
 
     #[tokio::test]
     async fn https() {
-        let client = SamplyHttpClient::build(&get_certs(), None).unwrap();
+        let client = http_client::build(&get_certs(), None).unwrap();
         run(HTTPS.parse().unwrap(), client).await;
     }
 
     #[tokio::test]
     async fn http() {
-        let client = SamplyHttpClient::build(&get_certs(), None).unwrap();
+        let client = http_client::build(&get_certs(), None).unwrap();
         run(HTTP.parse().unwrap(), client).await;
     }
 
@@ -109,7 +109,7 @@ mod test {
             .body(body::Body::empty())
             .unwrap();
 
-        let mut resp = client.request_with_timeout(req).await.unwrap();
+        let mut resp = client.request(req).await.unwrap();
 
         let resp_string = body::to_bytes(resp.body_mut()).await.unwrap();
 

@@ -15,7 +15,7 @@ use serde_json::Value;
 use shared::{
     beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncMsg, DecMsg,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, Msg, MsgEmpty, MsgId, MsgSigned,
-    MsgTaskRequest, MsgTaskResult, crypto, http_proxy::SamplyHttpClient,
+    MsgTaskRequest, MsgTaskResult, crypto, http_client::SamplyHttpClient,
 };
 use tracing::{debug, error, warn};
 

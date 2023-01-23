@@ -5,7 +5,7 @@ use hyper::{Uri, Request, client::HttpConnector, Client, header, body, StatusCod
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use serde::{Serialize, Deserialize};
-use shared::{crypto::GetCerts, errors::SamplyBeamError, config, http_proxy::{SamplyHttpClient, self}};
+use shared::{crypto::GetCerts, errors::SamplyBeamError, config, http_client::{SamplyHttpClient, self}};
 use tracing::debug;
 use tokio::time::timeout;
 use std::time::Duration;
@@ -102,7 +102,7 @@ impl GetCerts for GetCertsFromPki {
             }
             debug!("Loaded local certificates: {}", certs.join(" "));
         }
-        let hyper_client = http_proxy::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)))
+        let hyper_client = http_client::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)))
             .map_err(SamplyBeamError::HttpProxyProblem)?;
         let pki_realm = config::CONFIG_CENTRAL.pki_realm.clone();
 
