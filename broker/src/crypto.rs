@@ -79,7 +79,7 @@ impl GetCerts for GetCertsFromPki {
             }?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
-            .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive certificate {}: {}",serial,e)))?;
+                .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive certificate {}: {}",serial,e)))?;
             let body = String::from_utf8(body_bytes.to_vec())
                 .map_err(|e| SamplyBeamError::VaultError(format!("Cannot parse certificate {}: {}",serial,e)))?;
             return Ok(body);
@@ -106,7 +106,7 @@ impl GetCerts for GetCertsFromPki {
             }?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
-            .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive im-ca certificate: {}",e)))?;
+                .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive im-ca certificate: {}",e)))?;
             let body = String::from_utf8(body_bytes.to_vec())
                 .map_err(|e| SamplyBeamError::VaultError(format!("Cannot parse im-ca certificate: {}",e)))?;
             return Ok(body);
