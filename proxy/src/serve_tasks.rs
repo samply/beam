@@ -15,7 +15,7 @@ use serde_json::Value;
 use shared::{
     beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncMsg, DecMsg,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, Msg, MsgEmpty, MsgId, MsgSigned,
-    MsgTaskRequest, MsgTaskResult, crypto,
+    MsgTaskRequest, MsgTaskResult, crypto, http_proxy::SamplyHttpClient,
 };
 use tracing::{debug, error, warn};
 
@@ -23,11 +23,11 @@ use crate::auth::AuthenticatedApp;
 
 #[derive(Clone, FromRef)]
 struct TasksState {
-    client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>,
+    client: SamplyHttpClient,
     config: config_proxy::Config
 }
 
-pub(crate) fn router(client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Router {
+pub(crate) fn router(client: &SamplyHttpClient) -> Router {
     let config = config::CONFIG_PROXY.clone();
     let state = TasksState {
         client: client.clone(),
@@ -57,7 +57,7 @@ const ERR_FAKED_FROM: (StatusCode, &str) = (
 );
 
 async fn handler_tasks(
-    State(client): State<Client<ProxyConnector<HttpsConnector<HttpConnector>>>>,
+    State(client): State<SamplyHttpClient>,
     State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
     req: Request<Body>,

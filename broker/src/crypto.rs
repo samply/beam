@@ -5,14 +5,14 @@ use hyper::{Uri, Request, client::HttpConnector, Client, header, body, StatusCod
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use serde::{Serialize, Deserialize};
-use shared::{crypto::GetCerts, errors::SamplyBeamError, config};
+use shared::{crypto::GetCerts, errors::SamplyBeamError, config, http_proxy::{SamplyHttpClient, self}};
 use tracing::debug;
 use tokio::time::timeout;
 use std::time::Duration;
 
 pub struct GetCertsFromPki {
     pki_realm: String,
-    hyper_client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>
+    hyper_client: SamplyHttpClient
 }
 
 #[derive(Debug,Deserialize,Clone,Hash)]
@@ -28,20 +28,6 @@ struct PkiListResponse {
     warnings: Option<String>,
     auth: Option<String>,
 }
-
-impl GetCertsFromPki {
-    async fn get_with_timeout(&self, req: Request<Body>) -> Result<Response<Body>, SamplyBeamError> {
-        let request_future = self.hyper_client.request(req);
-        return match timeout(Duration::from_millis(30000), request_future).await {
-            Ok(x) => match x {
-                Ok(x) => Ok(x),
-                Err(e) => Err(SamplyBeamError::HttpRequestError(e)),
-            },
-            Err(e) => Err(SamplyBeamError::HttpTimeoutError(e))
-        };
-    }
-}
-
 #[async_trait]
 impl GetCerts for GetCertsFromPki {
     async fn certificate_list(&self) -> Result<Vec<String>,SamplyBeamError> {
@@ -53,7 +39,7 @@ impl GetCerts for GetCertsFromPki {
             .header("User-Agent", env!("SAMPLY_USER_AGENT"))
             .uri(uri)
             .body(body::Body::empty()).expect("Cannot create Cert List Request"); //TODO Unwrap
-        let resp = self.get_with_timeout(req).await?;
+        let resp = self.hyper_client.request(req).await?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
                 .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive vault certificate list: {}",e)))?;
@@ -75,7 +61,7 @@ impl GetCerts for GetCertsFromPki {
             .uri(uri)
             .header("User-Agent", env!("SAMPLY_USER_AGENT"))
             .body(body::Body::empty()).unwrap(); //TODO Unwrap
-        let resp = self.get_with_timeout(req).await?;
+        let resp = self.hyper_client.request(req).await?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
                 .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive certificate {}: {}",serial,e)))?;
@@ -95,7 +81,7 @@ impl GetCerts for GetCertsFromPki {
             .uri(uri)
             .header("User-Agent", env!("SAMPLY_USER_AGENT"))
             .body(body::Body::empty()).unwrap(); //TODO Unwrap
-        let resp = self.get_with_timeout(req).await?;
+        let resp = self.hyper_client.request(req).await?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
                 .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive im-ca certificate: {}",e)))?;
@@ -116,7 +102,7 @@ impl GetCerts for GetCertsFromPki {
             }
             debug!("Loaded local certificates: {}", certs.join(" "));
         }
-        let hyper_client = shared::http_proxy::build_hyper_client(&config::CONFIG_SHARED.tls_ca_certificates)
+        let hyper_client = http_proxy::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)))
             .map_err(SamplyBeamError::HttpProxyProblem)?;
         let pki_realm = config::CONFIG_CENTRAL.pki_realm.clone();
 
