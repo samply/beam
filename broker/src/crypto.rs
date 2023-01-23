@@ -7,6 +7,8 @@ use hyper_tls::HttpsConnector;
 use serde::{Serialize, Deserialize};
 use shared::{crypto::GetCerts, errors::SamplyBeamError, config};
 use tracing::debug;
+use tokio::time::timeout;
+use std::time::Duration;
 
 pub struct GetCertsFromPki {
     pki_realm: String,
@@ -38,8 +40,14 @@ impl GetCerts for GetCertsFromPki {
             .header("User-Agent", env!("SAMPLY_USER_AGENT"))
             .uri(uri)
             .body(body::Body::empty()).expect("Can not create Cert List Request"); //TODO Unwrap
-        let resp = self.hyper_client.request(req).await
-            .map_err(|e| SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))?;
+        let request_future = self.hyper_client.request(req);
+        let resp = match timeout(Duration::from_millis(30000), request_future).await {
+            Ok(result) => match result {
+                Ok(response) => Ok(response),
+                Err(e) => Err(SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))
+            },
+            Err(_) => Err(SamplyBeamError::VaultError("Cannoct connect to vault: timeout after 30s".into()))
+            }?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
                 .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive vault certificate list: {}",e)))?;
@@ -61,8 +69,14 @@ impl GetCerts for GetCertsFromPki {
             .uri(uri)
             .header("User-Agent", env!("SAMPLY_USER_AGENT"))
             .body(body::Body::empty()).unwrap(); //TODO Unwrap
-        let resp = self.hyper_client.request(req).await
-            .map_err(|e| SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))?;
+        let request_future = self.hyper_client.request(req);
+        let resp = match timeout(Duration::from_millis(30000), request_future).await {
+            Ok(result) => match result {
+                Ok(response) => Ok(response),
+                Err(e) => Err(SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))
+            },
+            Err(_) => Err(SamplyBeamError::VaultError("Cannoct connect to vault: timeout after 30s".into()))
+            }?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
             .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive certificate {}: {}",serial,e)))?;
@@ -82,8 +96,14 @@ impl GetCerts for GetCertsFromPki {
             .uri(uri)
             .header("User-Agent", env!("SAMPLY_USER_AGENT"))
             .body(body::Body::empty()).unwrap(); //TODO Unwrap
-        let resp = self.hyper_client.request(req).await
-            .map_err(|e| SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))?;
+        let request_future = self.hyper_client.request(req);
+        let resp = match timeout(Duration::from_millis(30000), request_future).await {
+            Ok(result) => match result {
+                Ok(response) => Ok(response),
+                Err(e) => Err(SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))
+            },
+            Err(_) => Err(SamplyBeamError::VaultError("Cannoct connect to vault: timeout after 30s".into()))
+            }?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
             .map_err(|e| SamplyBeamError::VaultError(format!("Cannot retreive im-ca certificate: {}",e)))?;
