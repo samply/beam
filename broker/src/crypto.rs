@@ -39,14 +39,14 @@ impl GetCerts for GetCertsFromPki {
             .header("X-Vault-Token",&config::CONFIG_CENTRAL.pki_token)
             .header("User-Agent", env!("SAMPLY_USER_AGENT"))
             .uri(uri)
-            .body(body::Body::empty()).expect("Can not create Cert List Request"); //TODO Unwrap
+            .body(body::Body::empty()).expect("Cannot create Cert List Request"); //TODO Unwrap
         let request_future = self.hyper_client.request(req);
         let resp = match timeout(Duration::from_millis(30000), request_future).await {
             Ok(result) => match result {
                 Ok(response) => Ok(response),
                 Err(e) => Err(SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))
             },
-            Err(_) => Err(SamplyBeamError::VaultError("Cannoct connect to vault: timeout after 30s".into()))
+            Err(_) => Err(SamplyBeamError::VaultError("Cannot connect to vault: timeout after 30s".into()))
             }?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
@@ -75,7 +75,7 @@ impl GetCerts for GetCertsFromPki {
                 Ok(response) => Ok(response),
                 Err(e) => Err(SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))
             },
-            Err(_) => Err(SamplyBeamError::VaultError("Cannoct connect to vault: timeout after 30s".into()))
+            Err(_) => Err(SamplyBeamError::VaultError("Cannot connect to vault: timeout after 30s".into()))
             }?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
@@ -102,7 +102,7 @@ impl GetCerts for GetCertsFromPki {
                 Ok(response) => Ok(response),
                 Err(e) => Err(SamplyBeamError::VaultError(format!("Cannot connect to vault: {}",e)))
             },
-            Err(_) => Err(SamplyBeamError::VaultError("Cannoct connect to vault: timeout after 30s".into()))
+            Err(_) => Err(SamplyBeamError::VaultError("Cannot connect to vault: timeout after 30s".into()))
             }?;
         if resp.status() == StatusCode::OK {
             let body_bytes = body::to_bytes(resp.into_body()).await
