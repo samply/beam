@@ -48,7 +48,7 @@ pub mod config_broker;
 pub mod config_proxy;
 
 pub mod beam_id;
-pub mod http_proxy;
+pub mod http_client;
 pub mod middleware;
 
 pub mod examples;
