@@ -1,11 +1,8 @@
 #![allow(unused_imports)]
 
-use std::time::Duration;
-
 use hyper::{Client, client::HttpConnector, Uri, Request, StatusCode, body};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use shared::http_client::{SamplyHttpClient, self};
 use tokio_retry::{Retry, strategy::jitter};
 use shared::{config, config_proxy::Config};
 use shared::errors::SamplyBeamError;
@@ -25,7 +22,7 @@ pub async fn main() -> anyhow::Result<()> {
     banner::print_banner();
 
     let config = config::CONFIG_PROXY.clone();
-    let client = http_client::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)))
+    let client = shared::http_proxy::build_hyper_client(&config::CONFIG_SHARED.tls_ca_certificates)
         .map_err(SamplyBeamError::HttpProxyProblem)?;
 
     if let Err(err) = get_broker_health(&config, &client).await {
@@ -45,7 +42,7 @@ pub async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(),SamplyBeamError> {
+async fn init_crypto(config: Config, client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Result<(),SamplyBeamError> {
     shared::crypto::init_cert_getter(crypto::build_cert_getter(config.clone(), client.clone())?);
     shared::crypto::init_ca_chain().await;
     
@@ -62,7 +59,7 @@ async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(),Samp
     Ok(())
 }
 
-async fn get_broker_health(config: &Config, client: &SamplyHttpClient) -> Result<(), SamplyBeamError> {
+async fn get_broker_health(config: &Config, client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Result<(), SamplyBeamError> {
     let mut counter: u32 = 0;
     let function = ||{
         let uri = Uri::builder().scheme(config.broker_uri.scheme().unwrap().as_str()).authority(config.broker_uri.authority().unwrap().to_owned()).path_and_query("/v1/health").build().map_err(|e| SamplyBeamError::HttpRequestBuildError(e)).unwrap(); // TODO Unwrap
