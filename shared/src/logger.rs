@@ -11,9 +11,9 @@ pub fn init_logger() -> Result<(), SetGlobalDefaultError>{
         },
         _ => {
             if cfg!(debug_assertions) {
-                "hyper=warn,rustify=warn".to_string()
+                "info,hyper=warn".to_string()
             } else {
-                "hyper=warn,rustify=warn".to_string()
+                "info,hyper=warn".to_string()
             }
         }
     };

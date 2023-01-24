@@ -374,7 +374,7 @@ where
             ));
         }
 
-        // Retreive fields to encryp and remove from msg
+        // Retrieve fields to encryp and remove from msg
         let mut json_to_encrypt = cleartext_json.clone();
         json_to_encrypt.retain(|k, _| FIELDS_TO_ENCRYPT.contains(&k.as_str()));
         let mut encrypted_json = cleartext_json;

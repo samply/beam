@@ -64,7 +64,7 @@ impl crate::config::Config for Config {
         let cli_args = CliArgs::parse();
         BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
 
-        let root_cert = crypto::load_certificates_from_file(cli_args.rootcert_file).unwrap();
+        let root_cert = crypto::load_certificates_from_file(cli_args.rootcert_file)?;
         let broker_domain = cli_args.broker_url.host();
         if false {
             todo!() // TODO Tobias: Check if matches certificate, and fail

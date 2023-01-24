@@ -5,7 +5,7 @@ use httpdate::fmt_http_date;
 use hyper::{
     body,
     client::{connect::Connect, HttpConnector},
-    header, Body, Client, Request, StatusCode, Uri,
+    header, Body, Client, Request, StatusCode, Uri, service::Service,
 };
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
@@ -60,7 +60,7 @@ async fn handler_tasks(
     State(client): State<SamplyHttpClient>,
     State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
-    req: Request<Body>,
+    mut req: Request<Body>,
 ) -> Result<Response<Body>, (StatusCode, &'static str)> {
     let path = req.uri().path();
     let path_query = req
@@ -72,6 +72,10 @@ async fn handler_tasks(
     let target_uri =
         Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
             .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
+
+    // Insert Via header
+    req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
+
     let (body, parts) = encrypt_request(req, &sender).await?;
     let req = sign_request(body, parts, &config, &target_uri).await?;
 
@@ -115,7 +119,6 @@ async fn handler_tasks(
     let len = bytes.len();
     let body = Body::from(bytes);
     parts.headers.insert(header::CONTENT_LENGTH, len.into());
-    parts.headers.insert(hyper::header::USER_AGENT, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
     let resp = Response::from_parts(parts, body);
 
     Ok(resp)
