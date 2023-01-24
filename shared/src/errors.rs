@@ -1,6 +1,7 @@
 use std::{net::AddrParseError, str::Utf8Error, string::FromUtf8Error};
 
 use openssl::error::ErrorStack;
+use tokio::time::error::Elapsed;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SamplyBeamError {
@@ -33,7 +34,9 @@ pub enum SamplyBeamError {
     #[error("Unable to parse HTTP response: {0}")]
     HttpParseError(FromUtf8Error),
     #[error("X509 certificate invalid: {0}")]
-    CertificateError(&'static str)
+    CertificateError(&'static str),
+    #[error("Timeout executing HTTP request: {0}")]
+    HttpTimeoutError(Elapsed),
 }
 
 impl From<AddrParseError> for SamplyBeamError {
