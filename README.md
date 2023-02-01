@@ -414,7 +414,7 @@ The data is symmetrically encrypted using the Autheticated Encryption with Authe
 - [X] Broker-side filtering using pre-defined criteria
 - [ ] Broker-side filtering of the unencrypted metadata fields with JSON queries
 - [ ] Integration of OAuth2 (in discussion)
-- [ ] Facilitation of direct socket connections
+- [ ] In addition to messages and tasks, also facilitate direct socket connections
 - [ ] Deliver usage metrics
 - [x] Helpful dev environment
 - [x] Expiration of tasks and results
