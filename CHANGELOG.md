@@ -1,3 +1,13 @@
+# Samply.Beam 0.4.2 -- 2023-02-01
+
+In this first minor relase of the year, the following minor improvements were implemented:
+
+* The default log level is now "info", instead of "error"
+* The error handling, especially regarding proxy certificate validation, has been improved
+* Additional internal retry amd timeout mechanisms, e.g. for the communication between Proxy and Broker, and the Broker and Vault, are in place.
+* Beam.Broker and Beam.Proxy now set the appropriate header fields, such as VIA and SERVER.
+* Improvements to internal code quality and documentation
+
 # Samply.Beam 0.4.1 -- 2022-12-08
 
 This is a bugfix release. In particular, the following things were addressed:

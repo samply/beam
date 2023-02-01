@@ -161,7 +161,7 @@ Tasks are represented in the following structure:
 - `body`: Description of work to be done. Not interpreted by the Broker.
 - `failure_strategy`: Advises each client how to handle failures. Possible values `discard`, `retry`.
 - `failure_strategy.retry`: How often to retry (`max_tries`) a failed task and how long to wait in between each try (`backoff_millisecs`).
-- `ttl`: Time-to-live in seconds. Once this reaches zero, the broker will expunge the task along with its results.
+- `ttl`: Time-to-live in milliseconds. Once this reaches zero, the broker will expunge the task along with its results.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Result](#result) for more examples) and can be handled by the broker (thus intentionally not encrypted).
 
 ### Result
@@ -412,8 +412,10 @@ The data is symmetrically encrypted using the Autheticated Encryption with Authe
 - [X] Docker deployment packages: CI/CD
 - [ ] Docker deployment packages: Documentation
 - [X] Broker-side filtering using pre-defined criteria
-- [ ] Broker-side filtering of the unencrypted fields with JSON queries
+- [ ] Broker-side filtering of the unencrypted metadata fields with JSON queries
 - [ ] Integration of OAuth2 (in discussion)
+- [ ] In addition to messages and tasks, also facilitate direct socket connections
+- [ ] Deliver usage metrics
 - [x] Helpful dev environment
 - [x] Expiration of tasks and results
 - [x] Support TLS-terminating proxies
