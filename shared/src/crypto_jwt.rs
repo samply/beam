@@ -155,7 +155,7 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
                 warn!("Unable to unpack custom_without to JSON value, returning ERR_BODY: {}", e);
                 ERR_BODY
         })?;
-        let sig = if let Some(sig) = token_with_extended_signature.rsplit_once('.') {sig.1} else {warn!("Cannot split signature from body token"); return Err(ERR_SIG);};
+        let sig = if let Some(sig) = token_without_extended_signature.rsplit_once('.') {sig.1} else {warn!("Cannot split signature from body token"); return Err(ERR_SIG);};
         (custom_without, sig)
     } else {
         let msg_empty = MsgEmpty {
