@@ -155,7 +155,8 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
                 warn!("Unable to unpack custom_without to JSON value, returning ERR_BODY: {}", e);
                 ERR_BODY
         })?;
-        (custom_without, token_without_extended_signature)
+        let sig = if let Some(sig) = token_with_extended_signature.rsplit_once('.') {sig.1} else {warn!("Cannot split signature from body token"); return Err(ERR_SIG);};
+        (custom_without, sig)
     } else {
         let msg_empty = MsgEmpty {
             from: sender_claimed.clone(),
@@ -167,26 +168,24 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
         )
     };
     let sender_actual = custom_without.get_from();
-    if !(sig.is_empty() && token_without_extended_signature.is_some()) {
-        let sig = if let Some(sig) = sig.rsplit_once('.') {sig.1} else {warn!("Cannot split signature from body token"); return Err(ERR_SIG);};
-    
- 
-    // Check if header claims is matching the body token
-    let digest_actual = make_extra_fields_digest(&req.method, &req.uri, &req.headers, &sig, &sender_actual)
-    .map_err(|e| {
-        warn!("Got error in make_extra_fields_digest: {}", e);
-        ERR_SIG
-    })?.sig;
+    if !(sig.is_empty() && token_without_extended_signature.is_none()) { // Not a MsgEmpty
 
-    if digest_actual != digest_claimed {
-        warn!("Digests did not match: expected {}, received {}", digest_claimed, digest_actual);
-        return Err(ERR_SIG);
-    }
+        // Check if header claims is matching the body token
+        let digest_actual = make_extra_fields_digest(&req.method, &req.uri, &req.headers, &sig, &sender_actual)
+        .map_err(|e| {
+            warn!("Got error in make_extra_fields_digest: {}", e);
+            ERR_SIG
+        })?.sig;
 
-    if sender_actual.to_owned() != sender_claimed {
-        warn!("Sender did not match: expected {}, received {}", sender_claimed, sender_actual);
-        return Err(ERR_SIG);
-    }
+        if digest_actual != digest_claimed {
+            warn!("Digests did not match: expected {}, received {}", digest_claimed, digest_actual);
+            return Err(ERR_SIG);
+        }
+
+        if sender_actual.to_owned() != sender_claimed {
+            warn!("Sender did not match: expected {}, received {}", sender_claimed, sender_actual);
+            return Err(ERR_SIG);
+        }
     }
 
     // Check if Messages' "from" attribute can be signed by the proxy
