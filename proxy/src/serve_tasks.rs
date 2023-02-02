@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime};
 use axum::{Router, routing::any, response::Response, http::{HeaderValue, request::Parts}, extract::{State, FromRef}};
 use httpdate::fmt_http_date;
 use hyper::{
-    body,
+    body, body::HttpBody,
     client::{connect::Connect, HttpConnector},
     header, Body, Client, Request, StatusCode, Uri, service::Service,
 };
@@ -116,8 +116,8 @@ async fn handler_tasks(
         }
     }
 
-    let len = bytes.len();
     let body = Body::from(bytes);
+    let len = body.size_hint().exact().ok_or_else(|| {error!("Cannot calculate length of request"); ERR_BODY})?;
     parts.headers.insert(header::CONTENT_LENGTH, len.into());
     let resp = Response::from_parts(parts, body);
 
@@ -154,8 +154,8 @@ async fn sign_request(
         error!("Crypto failed: {}", e);
         ERR_INTERNALCRYPTO
     })?;
-    let length = token_without_extended_signature.len();
     let body: Body = token_without_extended_signature.into();
+    let length = body.size_hint().exact().ok_or_else(|| {error!("Cannot calculate length of request"); ERR_BODY})?;
     let mut auth_header = String::from("SamplyJWT ");
     auth_header.push_str(&token_with_extended_signature);
     parts.uri = target_uri.clone();
