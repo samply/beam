@@ -166,9 +166,12 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
              ""
         )
     };
-    let sig = if let Some(sig) = sig.rsplit_once('.') {sig.1} else {warn!("Cannot split signature from body token"); return Err(ERR_SIG);};
-    // Check if header claims is matching the body token
     let sender_actual = custom_without.get_from();
+    if !(sig.is_empty() && token_without_extended_signature.is_some()) {
+        let sig = if let Some(sig) = sig.rsplit_once('.') {sig.1} else {warn!("Cannot split signature from body token"); return Err(ERR_SIG);};
+    
+ 
+    // Check if header claims is matching the body token
     let digest_actual = make_extra_fields_digest(&req.method, &req.uri, &req.headers, &sig, &sender_actual)
     .map_err(|e| {
         warn!("Got error in make_extra_fields_digest: {}", e);
@@ -184,7 +187,7 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
         warn!("Sender did not match: expected {}, received {}", sender_claimed, sender_actual);
         return Err(ERR_SIG);
     }
-
+    }
 
     // Check if Messages' "from" attribute can be signed by the proxy
     if ! custom_without.get_from().can_be_signed_by(&proxy_public_info.beam_id) {
