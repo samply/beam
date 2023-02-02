@@ -199,7 +199,20 @@ pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBeamError
         Claims::with_custom_claims::<Value>(json, Duration::from_hours(1)); // TODO: Make variable
 
     let token = privkey.sign(claims)
-        .map_err(|_| SamplyBeamError::SignEncryptError("Unable to sign JWT".into()))?;
+        .map_err(|e| SamplyBeamError::SignEncryptError(format!("Unable to sign JWT: {}",e)))?;
+    
+    Ok(token)
+}
+
+// TODO: Unify with json version above
+pub async fn sign_str_to_jwt(input: &str) -> Result<String,SamplyBeamError> {
+    let privkey = &config::CONFIG_SHARED_CRYPTO.get().unwrap().privkey_rs256;
+    
+    let claims = 
+        Claims::with_custom_claims::<String>(input.into(), Duration::from_hours(1)); // TODO: Make variable
+
+    let token = privkey.sign(claims)
+        .map_err(|e| SamplyBeamError::SignEncryptError(format!("Unable to sign JWT: {}",e)))?;
     
     Ok(token)
 }
