@@ -118,7 +118,7 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
         return Err(ERR_SIG);
     }
     let digest_claimed = digest_claimed.as_str().unwrap();
-    let digest_actual = make_extra_fields_digest(&req.method, &req.uri, &req.headers)
+    let digest_actual = make_extra_fields_digest(&req.method, &req.uri, &req.headers, "tsra") // FIXME 
         .map_err(|e| {
             warn!("Got error in make_extra_fields_digest: {}", e);
             ERR_SIG
@@ -204,7 +204,7 @@ pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBeamError
     Ok(token)
 }
 
-pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap) -> Result<String,SamplyBeamError> {
+pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap, sig: &str) -> Result<String,SamplyBeamError> {
     const HEADERS_TO_SIGN: [HeaderName; 1] = [
         // header::HOST, // Host header differs from proxy to broker
         header::DATE,
@@ -221,6 +221,7 @@ pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap)
             return Err(SamplyBeamError::SignEncryptError("Required header field not present".into()));
         }
     }
+    buf.append(&mut sig.as_bytes().to_vec());
 
     let digest = crypto::hash(&buf)?;
     let digest = base64::encode_block(&digest);
