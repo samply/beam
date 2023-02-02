@@ -166,6 +166,7 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
              ""
         )
     };
+    let sig = if let Some(sig) = sig.rsplit_once('.') {sig.1} else {warn!("Cannot split signature from body token"); return Err(ERR_SIG);};
     // Check if header claims is matching the body token
     let sender_actual = custom_without.get_from();
     let digest_actual = make_extra_fields_digest(&req.method, &req.uri, &req.headers, &sig, &sender_actual)
