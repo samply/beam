@@ -145,7 +145,7 @@ async fn sign_request(
     );
     let digest = crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig)
         .map_err(|_| ERR_INTERNALCRYPTO)?;
-    let token_with_extended_signature = crypto_jwt::sign_str_to_jwt(&digest).await.map_err(|e| {
+    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest).await.map_err(|e| {
         error!("Crypto failed: {}", e);
         ERR_INTERNALCRYPTO
     })?;

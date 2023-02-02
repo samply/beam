@@ -122,7 +122,7 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
         .map_err(|e| {
             warn!("Got error in make_extra_fields_digest: {}", e);
             ERR_SIG
-        })?;
+        })?.sig;
     
     if digest_actual != digest_claimed {
         warn!("Digests did not match: expected {}, received {}", digest_claimed, digest_actual);
@@ -204,20 +204,13 @@ pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBeamError
     Ok(token)
 }
 
-// TODO: Unify with json version above
-pub async fn sign_str_to_jwt(input: &str) -> Result<String,SamplyBeamError> {
-    let privkey = &config::CONFIG_SHARED_CRYPTO.get().unwrap().privkey_rs256;
-    
-    let claims = 
-        Claims::with_custom_claims::<String>(input.into(), Duration::from_hours(1)); // TODO: Make variable
-
-    let token = privkey.sign(claims)
-        .map_err(|e| SamplyBeamError::SignEncryptError(format!("Unable to sign JWT: {}",e)))?;
-    
-    Ok(token)
+#[derive(Serialize, Deserialize)]
+pub struct HeaderClaim{
+    #[serde(rename = "s")] //safes two bytes 
+    sig: String,
 }
 
-pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap, sig: &str) -> Result<String,SamplyBeamError> {
+pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap, sig: &str) -> Result<HeaderClaim,SamplyBeamError> {
     const HEADERS_TO_SIGN: [HeaderName; 1] = [
         // header::HOST, // Host header differs from proxy to broker
         header::DATE,
@@ -239,5 +232,5 @@ pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap,
     let digest = crypto::hash(&buf)?;
     let digest = base64::encode_block(&digest);
 
-    Ok(digest)
+    Ok(HeaderClaim{sig: digest})
 }
