@@ -77,7 +77,10 @@ async fn handler_tasks(
     req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
 
     let (body, parts) = encrypt_request(req, &sender).await?;
-    let req = sign_request(body, parts, &config, &target_uri).await?;
+    let sender = if let Some(object) = body.as_object() {object.get("from")} else {return Err((StatusCode::BAD_REQUEST, "Cannot parse body for signing's sake"));};
+    if sender.is_none() {return Err((StatusCode::BAD_REQUEST, "Cannot parse from field for signing's sake"));};
+    let sender: AppOrProxyId = if let Ok(sender) = serde_json::from_value(sender.unwrap().to_owned()) {sender} else { return Err((StatusCode::BAD_REQUEST, "Cannot deserialize AppOrProxyId from from field"));};
+    let req = sign_request(body, parts, &config, &target_uri, sender).await?;
 
     let resp = client.request(req).await.map_err(|e| {
         warn!("Request to broker failed: {}", e.to_string());
@@ -130,6 +133,7 @@ async fn sign_request(
     mut parts: Parts,
     config: &config_proxy::Config,
     target_uri: &Uri,
+    from: AppOrProxyId,
 ) -> Result<Request<Body>, (StatusCode, &'static str)> {
 
     let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body).await.map_err(|e| {
@@ -143,7 +147,7 @@ async fn sign_request(
         HeaderValue::from_str(&fmt_http_date(SystemTime::now()))
             .expect("Internal error: Unable to format system time"),
     );
-    let digest = crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig)
+    let digest = crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig, &from)
         .map_err(|_| ERR_INTERNALCRYPTO)?;
     let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest).await.map_err(|e| {
         error!("Crypto failed: {}", e);

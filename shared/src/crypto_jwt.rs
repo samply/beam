@@ -7,7 +7,7 @@ use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use static_init::dynamic;
 use tracing::{debug, error, warn};
-use crate::{BeamId, errors::SamplyBeamError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::ProxyId};
+use crate::{BeamId, errors::SamplyBeamError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -159,14 +159,8 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
         })?;
         (custom_without, token_without_extended_signature)
     } else {
-        // TODO: We need to fetch the message from the custom_with
-        let msg = serde_json::from_value::<M>(content_with.custom)
-            .map_err(|e| {
-                warn!("Unable to unpack custom_without to JSON value, returning ERR_SIG: {}", e);
-                ERR_SIG
-            })?;
         let msg_empty = MsgEmpty {
-            from: msg.get_from().clone(),
+            from: sender_claimed.clone(),
         };
         let serialized = serde_json::to_string(&msg_empty).unwrap(); // known input
         (
@@ -174,6 +168,24 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
              ""
         )
     };
+    // Check if header claims is matching the body token
+    let sender_actual = custom_without.get_from();
+    let digest_actual = make_extra_fields_digest(&req.method, &req.uri, &req.headers, &sig, &sender_actual)
+    .map_err(|e| {
+        warn!("Got error in make_extra_fields_digest: {}", e);
+        ERR_SIG
+    })?.sig;
+
+    if digest_actual != digest_claimed {
+        warn!("Digests did not match: expected {}, received {}", digest_claimed, digest_actual);
+        return Err(ERR_SIG);
+    }
+
+    if sender_actual.to_owned() != sender_claimed {
+        warn!("Sender did not match: expected {}, received {}", sender_claimed, sender_actual);
+        return Err(ERR_SIG);
+    }
+
 
     // Check if Messages' "from" attribute can be signed by the proxy
     if ! custom_without.get_from().can_be_signed_by(&proxy_public_info.beam_id) {
@@ -206,11 +218,13 @@ pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBeamError
 
 #[derive(Serialize, Deserialize)]
 pub struct HeaderClaim{
-    #[serde(rename = "s")] //safes two bytes 
+    #[serde(rename = "s")] //safes 2 bytes 
     sig: String,
+    #[serde(rename = "f")] //safes 3 bytes 
+    from: AppOrProxyId,
 }
 
-pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap, sig: &str) -> Result<HeaderClaim,SamplyBeamError> {
+pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap, sig: &str, from: &AppOrProxyId) -> Result<HeaderClaim,SamplyBeamError> {
     const HEADERS_TO_SIGN: [HeaderName; 1] = [
         // header::HOST, // Host header differs from proxy to broker
         header::DATE,
@@ -228,9 +242,10 @@ pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap,
         }
     }
     buf.append(&mut sig.as_bytes().to_vec());
+    buf.append(&mut from.to_string().as_bytes().to_vec());
 
     let digest = crypto::hash(&buf)?;
     let digest = base64::encode_block(&digest);
 
-    Ok(HeaderClaim{sig: digest})
+    Ok(HeaderClaim{sig: digest, from: from.to_owned()})
 }
