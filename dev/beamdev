@@ -70,7 +70,7 @@ function build_rust() {
 function build_docker() {
     BACK=$(pwd)
     cd $SD
-    docker compose build --build-arg TARGETARCH=$ARCH
+    docker-compose build --build-arg TARGETARCH=$ARCH
     cd $BACK
 }
 
@@ -91,7 +91,7 @@ function start {
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     [ -x ../artifacts/binaries-$ARCH ] || build_rust
-    docker compose up --no-recreate --abort-on-container-exit
+    docker-compose up --no-recreate --abort-on-container-exit
 }
 
 function start_bg {
@@ -99,7 +99,7 @@ function start_bg {
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     [ -x ../artifacts/binaries-$ARCH ] || build_rust
-    docker compose up --no-recreate -d
+    docker-compose up --no-recreate -d
     for ADDR in $P1 $P2; do
         TRIES=1
         while [ $TRIES -ne 0 ]; do
@@ -114,7 +114,7 @@ function start_bg {
                 ((TRIES=TRIES+1))
                 if [ $TRIES -ge 30 ]; then
                     echo "ERROR: $ADDR not available after 30 seconds. Giving up and printing docker compose logs."
-                    docker compose logs
+                    docker-compose logs
                     exit 5
                 fi
             fi
@@ -136,7 +136,7 @@ function stop {
 }
 
 function clean {
-    docker compose down
+    docker-compose down
     rm -fv pki/*.pem pki/*.json pki/pki.secret
     pki/pki clean
 }
