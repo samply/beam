@@ -7,7 +7,7 @@ use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use static_init::dynamic;
 use tracing::{debug, error, warn};
-use crate::{BeamId, errors::SamplyBeamError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::ProxyId};
+use crate::{BeamId, errors::SamplyBeamError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -62,6 +62,7 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
     // TODO: Make static/const
     let options = VerificationOptions {
         accept_future: true,
+        max_token_length: Some(1024*1024*10), //10MB
         ..Default::default()
     };
 
@@ -92,50 +93,53 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
             })?;
     let token_with_extended_signature = token_with_extended_signature.trim_start_matches("SamplyJWT ");
     
-    let (proxy_public_info, pubkey, mut content_with) 
+    let (proxy_public_info, pubkey, mut header_claims) 
         = extract_jwt(token_with_extended_signature).await
         .map_err(|e| {
-            warn!("Unable to extract JWT: {}. The full JWT was: {}", e, token_with_extended_signature);
+            warn!("Unable to extract header JWT: {}. The full JWT was: {}", e, token_with_extended_signature);
             ERR_SIG
         })?;
     
     // Check extra digest
 
-    let custom = content_with.custom.as_object_mut();
+    let custom = header_claims.custom.as_object_mut();
     if custom.is_none() {
         warn!("Received a request with empty JWT custom claims");
         return Err(ERR_SIG);
     }
     let custom = custom.unwrap();
-    let digest_claimed = custom.remove("extra_fields_digest");
+    let digest_claimed = custom.get("s");
+
     if digest_claimed.is_none() {
-        warn!("Received a request but had an empty digest_claimed");
+        warn!("Received a request but had an empty header signature");
         return Err(ERR_SIG);
     }
     let digest_claimed = digest_claimed.unwrap();
     if ! digest_claimed.is_string() {
-        warn!("Received a request but digest_claimed was not a valid string");
+        warn!("Received a request but header signature was not a valid string");
         return Err(ERR_SIG);
     }
     let digest_claimed = digest_claimed.as_str().unwrap();
-    let digest_actual = make_extra_fields_digest(&req.method, &req.uri, &req.headers)
-        .map_err(|e| {
-            warn!("Got error in make_extra_fields_digest: {}", e);
-            ERR_SIG
-        })?;
-    
-    if digest_actual != digest_claimed {
-        warn!("Digests did not match: expected {}, received {}", digest_claimed, digest_actual);
+    let sender_claimed = custom.get("f");
+    if sender_claimed.is_none() {
+        warn!("Received a request but had an empty header signature");
         return Err(ERR_SIG);
     }
+    let sender_claimed = sender_claimed.unwrap().to_owned();
+    let sender_claimed = serde_json::from_value::<AppOrProxyId>(sender_claimed).map_err(|e| {
+        warn!("Recieved a request with an invalid SenderID in header token: {}", e);
+        ERR_SIG
+    })?;
 
     // TODO: Make static/const
     let options = VerificationOptions {
         accept_future: true,
+        max_token_length: Some(1024*1024*10), //10MB
         ..Default::default()
     };
 
     let (custom_without, sig) = if let Some(token_without_extended_signature) = token_without_extended_signature {
+        
         // Check if short token matches the long token
         let content_without = pubkey.verify_token::<Value>(token_without_extended_signature, Some(options))
             .map_err(|e| {
@@ -148,25 +152,16 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
             return Err(ERR_SIG);
         }
         let custom_without = custom_without.unwrap();
-        if custom_without != custom {
-            warn!("Long token was verified correctly, but short token's content did not match.");
-            return Err(ERR_SIG);
-        }
         let custom_without = serde_json::from_value::<M>(Value::Object(custom_without.clone()))
             .map_err(|e| {
                 warn!("Unable to unpack custom_without to JSON value, returning ERR_BODY: {}", e);
                 ERR_BODY
         })?;
-        (custom_without, token_without_extended_signature)
+        let sig = if let Some(sig) = token_without_extended_signature.rsplit_once('.') {sig.1} else {warn!("Cannot split signature from body token"); return Err(ERR_SIG);};
+        (custom_without, sig)
     } else {
-        // TODO: We need to fetch the message from the custom_with
-        let msg = serde_json::from_value::<M>(content_with.custom)
-            .map_err(|e| {
-                warn!("Unable to unpack custom_without to JSON value, returning ERR_SIG: {}", e);
-                ERR_SIG
-            })?;
         let msg_empty = MsgEmpty {
-            from: msg.get_from().clone(),
+            from: sender_claimed.clone(),
         };
         let serialized = serde_json::to_string(&msg_empty).unwrap(); // known input
         (
@@ -174,6 +169,26 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
              ""
         )
     };
+    let sender_actual = custom_without.get_from();
+    if !(sig.is_empty() && token_without_extended_signature.is_none()) { // Not a MsgEmpty
+
+        // Check if header claims is matching the body token
+        let digest_actual = make_extra_fields_digest(&req.method, &req.uri, &req.headers, &sig, &sender_actual)
+        .map_err(|e| {
+            warn!("Got error in make_extra_fields_digest: {}", e);
+            ERR_SIG
+        })?.sig;
+
+        if digest_actual != digest_claimed {
+            warn!("Digests did not match: expected {}, received {}", digest_claimed, digest_actual);
+            return Err(ERR_SIG);
+        }
+
+        if sender_actual.to_owned() != sender_claimed {
+            warn!("Sender did not match: expected {}, received {}", sender_claimed, sender_actual);
+            return Err(ERR_SIG);
+        }
+    }
 
     // Check if Messages' "from" attribute can be signed by the proxy
     if ! custom_without.get_from().can_be_signed_by(&proxy_public_info.beam_id) {
@@ -199,12 +214,20 @@ pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBeamError
         Claims::with_custom_claims::<Value>(json, Duration::from_hours(1)); // TODO: Make variable
 
     let token = privkey.sign(claims)
-        .map_err(|_| SamplyBeamError::SignEncryptError("Unable to sign JWT".into()))?;
+        .map_err(|e| SamplyBeamError::SignEncryptError(format!("Unable to sign JWT: {}",e)))?;
     
     Ok(token)
 }
 
-pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap) -> Result<String,SamplyBeamError> {
+#[derive(Serialize, Deserialize)]
+pub struct HeaderClaim{
+    #[serde(rename = "s")] //safes 2 bytes 
+    sig: String,
+    #[serde(rename = "f")] //safes 3 bytes 
+    from: AppOrProxyId,
+}
+
+pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap, sig: &str, from: &AppOrProxyId) -> Result<HeaderClaim,SamplyBeamError> {
     const HEADERS_TO_SIGN: [HeaderName; 1] = [
         // header::HOST, // Host header differs from proxy to broker
         header::DATE,
@@ -221,9 +244,11 @@ pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap)
             return Err(SamplyBeamError::SignEncryptError("Required header field not present".into()));
         }
     }
+    buf.append(&mut sig.as_bytes().to_vec());
+    buf.append(&mut from.to_string().as_bytes().to_vec());
 
     let digest = crypto::hash(&buf)?;
     let digest = base64::encode_block(&digest);
 
-    Ok(digest)
+    Ok(HeaderClaim{sig: digest, from: from.to_owned()})
 }

@@ -113,7 +113,7 @@ function start_bg {
                 sleep 1
                 ((TRIES=TRIES+1))
                 if [ $TRIES -ge 30 ]; then
-                    echo "ERROR: $ADDR not available after 30 seconds. Giving up and printing docker-compose logs."
+                    echo "ERROR: $ADDR not available after 30 seconds. Giving up and printing docker compose logs."
                     docker-compose logs
                     exit 5
                 fi
@@ -195,11 +195,23 @@ function curl_post {
     echo "$JSON"
 }
 
+function curl_post_file {
+    APP_ID="$1"
+    FILENAME="@${2}"
+    shift 2
+    BODY_FILE=$(mktemp)
+    JSON=$(curl -s -H 'Expect: 100-continue' -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID $APP_KEY" -d $FILENAME -w %{json} -o $BODY_FILE $@)
+    BODY=$(cat $BODY_FILE | sed 's/\"/\\\"/g')
+    JSON=$(echo "$JSON" | jq ". + {\"body\": \"${BODY}\" }")
+    rm $BODY_FILE
+    echo "$JSON"
+}
+
 function task_with_ttl {
     sed "s/\[TTL\]/$1/g"
 }
 
-export -f curl_get curl_post curl_put start stop clean testing fail success task_with_ttl
+export -f curl_get curl_post curl_post_file curl_put start stop clean testing fail success task_with_ttl
 
 check_prereqs
 

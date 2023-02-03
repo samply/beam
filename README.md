@@ -211,7 +211,7 @@ A failed task:
 
 ### Create task
 
-Create a new task to be worked on by defined workers.
+Create a new task to be worked on by defined workers. Currently, the body is restricted to 10MB in size. 
 
 Method: `POST`  
 URL: `/v1/tasks`  
@@ -262,7 +262,7 @@ Date: Mon, 27 Jun 2022 14:05:59 GMT
 
 ### Create a result
 
-Create or update a result of a task.
+Create or update a result of a task. Currently, the body is restricted to 10MB in size.
 
 Method: `PUT`  
 URL: `/v1/tasks/<task_id>/results/<app_id>`  
@@ -419,6 +419,13 @@ The data is symmetrically encrypted using the Autheticated Encryption with Authe
 - [x] Helpful dev environment
 - [x] Expiration of tasks and results
 - [x] Support TLS-terminating proxies
+
+## Latest version: Samply.Beam 0.5.0 -- 2023-02-03
+
+This new major release of Samply.Beam introduces a breaking change in how cryptographic signatures are represented in the HTTP messages, allowing for more efficient, larger payloads.
+This change is incompatible with older versions of Samply.Beam, so please update both your broker and your clients.
+
+For the full changelog, please see [CHANGELOG.md](CHANGELOG.md).
 
 ## Cryptography Notice
 
