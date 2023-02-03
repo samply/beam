@@ -422,7 +422,7 @@ The data is symmetrically encrypted using the Autheticated Encryption with Authe
 
 ## Latest version: Samply.Beam 0.5.0 -- 2023-02-03
 
-This new major release of Samply.Beam introduces a breaking change in the signature system. While the signatures will chainge again in the future, the current release allows for more efficient, larger payloads.
+This new major release of Samply.Beam introduces a breaking change in how cryptographic signatures are represented in the HTTP messages, allowing for more efficient, larger payloads.
 This change is incapatible with older versions of Samply.Beam, so please update both your broker and your clients.
 
 For the full changelog, please see [CHANGELOG.md](CHANGELOG.md),
