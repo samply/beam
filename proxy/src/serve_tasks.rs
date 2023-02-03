@@ -77,7 +77,19 @@ async fn handler_tasks(
     req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
 
     let (body, parts) = encrypt_request(req, &sender).await?;
-    let req = sign_request(body, parts, &config, &target_uri).await?;
+
+    let err = (StatusCode::BAD_REQUEST, "Cannot parse body for signing's sake");
+    let sender = match body.as_object() {
+        Some(object) => object.get("from"),
+        None => return Err(err),
+    };
+    let Some(sender) = sender else {
+        return Err(err);
+    };
+    let Ok(sender) = serde_json::from_value::<AppOrProxyId>(sender.to_owned()) else {
+        return Err((StatusCode::BAD_REQUEST, "Cannot deserialize AppOrProxyId from from field"));
+    };
+    let req = sign_request(body, parts, &config, &target_uri, sender).await?;
 
     let resp = client.request(req).await.map_err(|e| {
         warn!("Request to broker failed: {}", e.to_string());
@@ -130,27 +142,23 @@ async fn sign_request(
     mut parts: Parts,
     config: &config_proxy::Config,
     target_uri: &Uri,
+    from: AppOrProxyId,
 ) -> Result<Request<Body>, (StatusCode, &'static str)> {
 
     let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body).await.map_err(|e| {
         error!("Crypto failed: {}", e);
         ERR_INTERNALCRYPTO
     })?;
+    let (_, sig) = token_without_extended_signature.rsplit_once('.').ok_or_else(||{error!("Cannot get initial token's signature. Token: {}",token_without_extended_signature); ERR_INTERNALCRYPTO})?;
     let mut headers_mut = parts.headers;
     headers_mut.insert(
         header::DATE,
         HeaderValue::from_str(&fmt_http_date(SystemTime::now()))
             .expect("Internal error: Unable to format system time"),
     );
-    let digest = crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut)
+    let digest = crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig, &from)
         .map_err(|_| ERR_INTERNALCRYPTO)?;
-    body.as_object_mut()
-        .ok_or_else(|| {
-            warn!("Unable to read body as JSON map");
-            ERR_BODY
-        })?
-        .insert("extra_fields_digest".to_string(), Value::String(digest));
-    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&body).await.map_err(|e| {
+    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest).await.map_err(|e| {
         error!("Crypto failed: {}", e);
         ERR_INTERNALCRYPTO
     })?;
