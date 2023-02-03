@@ -1,3 +1,9 @@
+# Samply.Beam 0.5.0 -- 2023-02-03
+
+This new major release of Samply.Beam introduces a breaking change in the signature system. While the signatures will chainge again in the future, the current release allows for more efficient, larger payloads.
+This change is incapatible with older versions of Samply.Beam, so please update both your broker and your clients.
+
+
 # Samply.Beam 0.4.2 -- 2023-02-01
 
 In this first minor relase of the year, the following minor improvements were implemented:
