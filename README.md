@@ -420,7 +420,7 @@ The data is symmetrically encrypted using the Autheticated Encryption with Authe
 - [x] Expiration of tasks and results
 - [x] Support TLS-terminating proxies
 
-## Changes in the last version (0.5.0)
+## Latest version: Samply.Beam 0.5.0 -- 2023-02-03
 
 This new major release of Samply.Beam introduces a breaking change in the signature system. While the signatures will chainge again in the future, the current release allows for more efficient, larger payloads.
 This change is incapatible with older versions of Samply.Beam, so please update both your broker and your clients.
