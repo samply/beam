@@ -1,7 +1,7 @@
 # Samply.Beam 0.5.0 -- 2023-02-03
 
 This new major release of Samply.Beam introduces a breaking change in how cryptographic signatures are represented in the HTTP messages, allowing for more efficient, larger payloads.
-This change is incapatible with older versions of Samply.Beam, so please update both your broker and your clients.
+This change is incompatible with older versions of Samply.Beam, so please update both your broker and your clients.
 
 
 # Samply.Beam 0.4.2 -- 2023-02-01
