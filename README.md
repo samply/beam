@@ -211,7 +211,7 @@ A failed task:
 
 ### Create task
 
-Create a new task to be worked on by defined workers.
+Create a new task to be worked on by defined workers. Currently, the body is restricted to 10MB in size. 
 
 Method: `POST`  
 URL: `/v1/tasks`  
@@ -262,7 +262,7 @@ Date: Mon, 27 Jun 2022 14:05:59 GMT
 
 ### Create a result
 
-Create or update a result of a task.
+Create or update a result of a task. Currently, the body is restricted to 10MB in size.
 
 Method: `PUT`  
 URL: `/v1/tasks/<task_id>/results/<app_id>`  
