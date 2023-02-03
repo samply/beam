@@ -62,6 +62,7 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
     // TODO: Make static/const
     let options = VerificationOptions {
         accept_future: true,
+        max_token_length: Some(1024*1024*10), //10MB
         ..Default::default()
     };
 
@@ -133,6 +134,7 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
     // TODO: Make static/const
     let options = VerificationOptions {
         accept_future: true,
+        max_token_length: Some(1024*1024*10), //10MB
         ..Default::default()
     };
 
