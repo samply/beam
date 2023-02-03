@@ -77,9 +77,18 @@ async fn handler_tasks(
     req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
 
     let (body, parts) = encrypt_request(req, &sender).await?;
-    let sender = if let Some(object) = body.as_object() {object.get("from")} else {return Err((StatusCode::BAD_REQUEST, "Cannot parse body for signing's sake"));};
-    if sender.is_none() {return Err((StatusCode::BAD_REQUEST, "Cannot parse from field for signing's sake"));};
-    let sender: AppOrProxyId = if let Ok(sender) = serde_json::from_value(sender.unwrap().to_owned()) {sender} else { return Err((StatusCode::BAD_REQUEST, "Cannot deserialize AppOrProxyId from from field"));};
+
+    let err = (StatusCode::BAD_REQUEST, "Cannot parse body for signing's sake");
+    let sender = match body.as_object() {
+        Some(object) => object.get("from"),
+        None => return Err(err),
+    };
+    let Some(sender) = sender else {
+        return Err(err);
+    };
+    let Ok(sender) = serde_json::from_value::<AppOrProxyId>(sender.to_owned()) else {
+        return Err((StatusCode::BAD_REQUEST, "Cannot deserialize AppOrProxyId from from field"));
+    };
     let req = sign_request(body, parts, &config, &target_uri, sender).await?;
 
     let resp = client.request(req).await.map_err(|e| {
