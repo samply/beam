@@ -16,6 +16,7 @@ use tracing::info;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {    
+    shared::logger::init_logger()?;
     shared::config::prepare_env();
 
     let cert_getter = crypto::build_cert_getter()?;
@@ -24,7 +25,6 @@ pub async fn main() -> anyhow::Result<()> {
     #[cfg(debug_assertions)]
     if shared::examples::print_example_objects() { return Ok(()); }
     
-    shared::logger::init_logger()?;
     banner::print_banner();
 
     let _ = config::CONFIG_CENTRAL.bind_addr; // Initialize config
