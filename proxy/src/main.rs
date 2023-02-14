@@ -50,7 +50,7 @@ async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(),Samp
     shared::crypto::init_ca_chain().await;
     
     let _public_info = shared::crypto::get_all_certs_and_clients_by_cname_as_pemstr(&config.proxy_id).await
-        .ok_or_else(|| SamplyBeamError::VaultError(format!("Unable to fetch your certificate from vault. Is your Proxy ID really {}?", config.proxy_id)))?;
+        .ok_or_else(|| SamplyBeamError::VaultOtherError(format!("Unable to fetch your certificate from vault. Is your Proxy ID really {}?", config.proxy_id)))?;
 
     let (serial, cname) = shared::config_shared::init_crypto_for_proxy().await?;
     if cname != config.proxy_id.to_string() {
