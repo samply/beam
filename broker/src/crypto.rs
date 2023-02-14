@@ -73,7 +73,11 @@ impl GetCertsFromPki {
                 continue;
             };
             match resp.status() {
-                x if x.is_success() => return Ok(resp),
+                code if code.is_success() => return Ok(resp),
+                code if code.is_client_error() || code.is_redirection() => {
+                    error!("Samply.PKI: Vault reported client-side Error (code {}), not retrying.", code);
+                    return Err(SamplyBeamError::VaultOtherError(format!("Samply.PKI: Vault reported client-side error (code {})", code)));
+                }
                 code => {
                     match self.check_vault_health().await {
                         Err(SamplyBeamError::VaultSealed) => {
@@ -82,11 +86,11 @@ impl GetCertsFromPki {
                         },
                         Err(SamplyBeamError::VaultRedirectError(code,location)) => {
                             let err = SamplyBeamError::VaultRedirectError(code,location);
-                            error!("Samply.PKI permanent communication error; aborting: {err}");
+                            error!("Samply.PKI asked to redirect; aborting: {err}");
                             return Err(err);
                         }
                         Err(e) => {
-                            warn!("Samply.PKI: Got error from Vault: {}; Statuscode {}; retrying (attempt {})", e, code, tries);
+                            warn!("Samply.PKI: Got error from Vault: {}; status code {}; retrying (attempt {})", e, code, tries);
                             continue;
                         }
                         Ok(()) => {
