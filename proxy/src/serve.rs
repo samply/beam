@@ -32,7 +32,7 @@ pub(crate) async fn serve(config: config_proxy::Config, client: SamplyHttpClient
 
     let mut apps_joined = String::new();
     config.api_keys.keys().for_each(|k| write!(apps_joined, "{} ", k.to_string().split('.').next().unwrap()).unwrap());
-    info!("This is Proxy {} listening on {}. {} apps are known: {}", config.proxy_id, config.bind_addr, config.api_keys.len(), apps_joined);
+    info!("Startup complete. This is Proxy {} listening on {}. {} apps are known: {}", config.proxy_id, config.bind_addr, config.api_keys.len(), apps_joined);
     
     axum::Server::bind(&config.bind_addr)
         .serve(app.into_make_service())
