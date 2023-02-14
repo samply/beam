@@ -69,7 +69,7 @@ impl GetCertsFromPki {
                 .body(body::Body::empty()).unwrap(); //TODO Unwrap
             let resp = self.hyper_client.request(req).await;
             let Ok(resp) = resp else {
-                warn!("Samply.PKI: Unable to communicate to vault: {}; retrying (attempt {})", resp.unwrap_err(), tries+2);
+                warn!("Samply.PKI: Unable to communicate to vault: {}; retrying (failed attempt #{})", resp.unwrap_err(), tries+2);
                 continue;
             };
             match resp.status() {
@@ -81,7 +81,7 @@ impl GetCertsFromPki {
                 code => {
                     match self.check_vault_health().await {
                         Err(SamplyBeamError::VaultSealed) => {
-                            warn!("Samply.PKI: Vault is still sealed; retrying (attempt {})", tries);
+                            warn!("Samply.PKI: Vault is still sealed; retrying (failed attempt {})", tries);
                             continue;
                         },
                         Err(SamplyBeamError::VaultRedirectError(code,location)) => {
@@ -90,7 +90,7 @@ impl GetCertsFromPki {
                             return Err(err);
                         }
                         Err(e) => {
-                            warn!("Samply.PKI: Got error from Vault: {}; status code {}; retrying (attempt {})", e, code, tries);
+                            warn!("Samply.PKI: Got error from Vault: {}; status code {}; retrying (failed attempt #{})", e, code, tries);
                             continue;
                         }
                         Ok(()) => {
