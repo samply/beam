@@ -25,7 +25,7 @@ pub async fn main() -> anyhow::Result<()> {
     banner::print_banner();
 
     let config = config::CONFIG_PROXY.clone();
-    let client = http_client::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)))
+    let client = http_client::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)), Some(Duration::from_secs(20)))
         .map_err(SamplyBeamError::HttpProxyProblem)?;
 
     if let Err(err) = get_broker_health(&config, &client).await {

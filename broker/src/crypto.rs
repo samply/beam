@@ -150,7 +150,7 @@ impl GetCerts for GetCertsFromPki {
             }
             debug!("Loaded local certificates: {}", certs.join(" "));
         }
-        let hyper_client = http_client::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)))
+        let hyper_client = http_client::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)), Some(Duration::from_secs(20)))
             .map_err(SamplyBeamError::HttpProxyProblem)?;
         let pki_realm = config::CONFIG_CENTRAL.pki_realm.clone();
 
