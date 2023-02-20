@@ -46,8 +46,8 @@ async fn get_certificate_by_serial(
 ) -> Result<String, PkiError> {
     debug!("=> Asked for cert with serial {serial}");
     let cert = match tokio::time::timeout(std::time::Duration::new(10,0), shared::crypto::get_cert_and_client_by_serial_as_pemstr(&serial)).await {
-        Ok(certificate) => certificate.ok_or(PkiError::CommunicationWithVault(format!("Cannot retreive certificate for serial {serial}"))),
-        Err(e) => Err(PkiError::CommunicationWithVault(format!("Cannot request for certificate with serial {serial} timed out: {e}")))
+        Ok(certificate) => certificate.ok_or(PkiError::CommunicationWithVault(format!("Cannot retrieve certificate for serial {serial}"))),
+        Err(e) => Err(PkiError::CommunicationWithVault(format!("Request for certificate with serial {serial} timed out: {e}")))
     }?;
     let pem = cert.cert.to_pem()
         .map_err(|e| PkiError::OpenSslError(e.to_string()))?;
