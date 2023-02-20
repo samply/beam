@@ -31,7 +31,7 @@ pub(crate) async fn serve() -> anyhow::Result<()> {
         }
     });
 
-    info!("Listening for requests on {}", config::CONFIG_CENTRAL.bind_addr);
+    info!("Startup complete. Listening for requests on {}", config::CONFIG_CENTRAL.bind_addr);
     axum::Server::bind(&config::CONFIG_CENTRAL.bind_addr)
         .serve(app.into_make_service())
         .with_graceful_shutdown(async {
