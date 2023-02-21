@@ -74,13 +74,6 @@ function build_docker() {
     cd $BACK
 }
 
-function build() {
-  if [ ! -e $SD/../../artifacts/binaries-$ARCH/proxy ]; then
-    build_rust
-  fi
-  build_docker
-}
-
 function clean() {
     stop
     rm -rfv artifacts/
@@ -90,7 +83,7 @@ function start {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    [ -x ../artifacts/binaries-$ARCH ] || build_rust
+    [ -x ../artifacts/binaries-$ARCH ] || (build_rust && build_docker)
     docker-compose up --no-recreate --abort-on-container-exit
 }
 
@@ -98,7 +91,7 @@ function start_bg {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    [ -x ../artifacts/binaries-$ARCH ] || build_rust
+    [ -x ../artifacts/binaries-$ARCH ] || (build_rust && build_docker)
     docker-compose up --no-recreate -d
     for ADDR in $P1 $P2; do
         TRIES=1
@@ -224,7 +217,7 @@ export TAG=${TAG:-localbuild}
 
 case "$1" in
   build)
-    build
+    build_rust && build_docker
     ;;
   start)
     start

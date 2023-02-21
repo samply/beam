@@ -1,3 +1,7 @@
+# Samply.Beam 0.5.1 -- 2023-02-xx
+
+This release improves reliability in connections to the underlying PKI (Hashicorp Vault).
+
 # Samply.Beam 0.5.0 -- 2023-02-03
 
 This new major release of Samply.Beam introduces a breaking change in how cryptographic signatures are represented in the HTTP messages, allowing for more efficient, larger payloads.

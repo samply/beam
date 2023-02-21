@@ -1,5 +1,6 @@
 use std::{net::AddrParseError, str::Utf8Error, string::FromUtf8Error};
 
+use http::StatusCode;
 use openssl::error::ErrorStack;
 use tokio::time::error::Elapsed;
 
@@ -17,8 +18,16 @@ pub enum SamplyBeamError {
     InvalidClientIdString(String),
     #[error("Signing / encryption failed: {0}")]
     SignEncryptError(String),
-    #[error("Communication with Samply.PKI failed: {0}")]
-    VaultError(String),
+    #[error("Samply.PKI error: Vault is still sealed.")]
+    VaultSealed,
+    #[error("Samply.PKI error: Unable to connect to Vault: {0}")]
+    VaultUnreachable(hyper::Error),
+    #[error("Samply.PKI error: Vault has not been initialized, yet.")]
+    VaultNotInitialized,
+    #[error("Samply.PKI error: Vault has asked with code {0} to redirect to {1}; this should not happen.")]
+    VaultRedirectError(StatusCode, String),
+    #[error("Samply.PKI error: {0}")]
+    VaultOtherError(String),
     #[error("Unable to read config: {0}. Please check your environment and parameters.")]
     ConfigurationFailed(String),
     #[error("Internal synchronization error: {0}")]

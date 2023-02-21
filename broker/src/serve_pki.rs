@@ -8,7 +8,7 @@ use hyper_tls::HttpsConnector;
 use serde::{Serialize, Deserialize};
 use shared::{config::CONFIG_CENTRAL, errors::SamplyBeamError};
 use thiserror::Error;
-use tracing::{error, info, debug};
+use tracing::{error, info, debug, log::warn};
 
 #[derive(Error, Debug)]
 enum PkiError {
@@ -45,8 +45,20 @@ async fn get_certificate_by_serial(
     Path(serial): Path<String>
 ) -> Result<String, PkiError> {
     debug!("=> Asked for cert with serial {serial}");
-    let cert = shared::crypto::get_cert_and_client_by_serial_as_pemstr(&serial).await
-        .ok_or(PkiError::CommunicationWithVault(String::new()))?;
+    let cert = match tokio::time::timeout(std::time::Duration::new(10,0), shared::crypto::get_cert_and_client_by_serial_as_pemstr(&serial)).await {
+        Ok(certificate) => {
+            certificate.ok_or_else(|| {
+                let err = format!("Cannot retrieve certificate for serial {serial}");
+                warn!("{err}");
+                PkiError::CommunicationWithVault(err)
+            })
+        },
+        Err(e) => {
+            let err = format!("Request for certificate with serial {serial} timed out: {e}");
+            error!("{err}");
+            Err(PkiError::CommunicationWithVault(err))
+        }
+    }?;
     let pem = cert.cert.to_pem()
         .map_err(|e| PkiError::OpenSslError(e.to_string()))?;
     debug!("<= Returning requested cert with serial {serial}");

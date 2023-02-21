@@ -15,10 +15,11 @@ use crate::{config, errors::SamplyBeamError, BeamId};
 
 pub type SamplyHttpClient = Client<TimeoutConnector<ProxyConnector<HttpsConnector<HttpConnector>>>>;
 
-pub fn build(ca_certificates: &Vec<X509>, timeout: Option<Duration>) -> Result<SamplyHttpClient, std::io::Error> {
+pub fn build(ca_certificates: &Vec<X509>, timeout: Option<Duration>, keepalive: Option<Duration>) -> Result<SamplyHttpClient, std::io::Error> {
     let mut http = HttpConnector::new();
     http.set_connect_timeout(Some(Duration::from_secs(1)));
     http.enforce_http(false);
+    http.set_keepalive(keepalive);
     let https = HttpsConnector::new_with_connector(http);
     let proxy_connector = connector()
         .map_err(|e| panic!("Unable to build HTTP client: {}", e)).unwrap();
@@ -93,13 +94,13 @@ mod test {
 
     #[tokio::test]
     async fn https() {
-        let client = http_client::build(&get_certs(), None).unwrap();
+        let client = http_client::build(&get_certs(), None, None).unwrap();
         run(HTTPS.parse().unwrap(), client).await;
     }
 
     #[tokio::test]
     async fn http() {
-        let client = http_client::build(&get_certs(), None).unwrap();
+        let client = http_client::build(&get_certs(), None, None).unwrap();
         run(HTTP.parse().unwrap(), client).await;
     }
 

@@ -24,7 +24,7 @@ impl GetCertsFromBroker {
         if ! req.status().is_success() {
             match req.status() {
                 StatusCode::NOT_FOUND => Ok(String::new()),
-                x => Err(SamplyBeamError::VaultError(format!("Got code {x}, error message: {}", resp)))
+                x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}, error message: {}", resp)))
             }
         } else {
             Ok(resp)
@@ -40,11 +40,11 @@ impl GetCertsFromBroker {
         let mut req = self.client.get(uri).await?;
         let resp = hyper::body::to_bytes(req.body_mut()).await?;
         let json: Vec<String> = serde_json::from_slice(&resp)
-            .map_err(|e| SamplyBeamError::VaultError(format!("Unable to parse vault reply: {}", e)))?;
+            .map_err(|e| SamplyBeamError::VaultOtherError(format!("Unable to parse vault reply: {}", e)))?;
         if ! req.status().is_success() {
             match req.status() {
                 StatusCode::NOT_FOUND => Ok(json),
-                x => Err(SamplyBeamError::VaultError(format!("Got code {x}")))
+                x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}")))
             }
         } else {
             Ok(json)
