@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, net::SocketAddr};
 
 use axum::{
     http::{StatusCode, header},
@@ -33,7 +33,7 @@ pub(crate) async fn serve() -> anyhow::Result<()> {
 
     info!("Startup complete. Listening for requests on {}", config::CONFIG_CENTRAL.bind_addr);
     axum::Server::bind(&config::CONFIG_CENTRAL.bind_addr)
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(async {
             shutdown_rx.recv().await;
             info!("Shutting down.");
