@@ -111,7 +111,7 @@ impl GetCertsFromPki {
 impl GetCerts for GetCertsFromPki {
     async fn certificate_list(&self) -> Result<Vec<String>,SamplyBeamError> {
         debug!("Getting Cert List");
-        let resp = self.resilient_vault_request(&Method::from_bytes("LIST".as_bytes()).unwrap(), &format!("{}/certs",&config::CONFIG_CENTRAL.pki_realm), None).await?;
+        let resp = self.resilient_vault_request(&Method::from_bytes("LIST".as_bytes()).unwrap(), &format!("{}/certs",&config::CONFIG_CENTRAL.pki_realm), Some(100)).await?;
         let body_bytes = body::to_bytes(resp.into_body()).await
             .map_err(|e| SamplyBeamError::VaultOtherError(format!("Cannot retrieve vault certificate list: {}",e)))?;
         let body: PkiListResponse = serde_json::from_slice(&body_bytes)
@@ -122,7 +122,7 @@ impl GetCerts for GetCertsFromPki {
 
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String,SamplyBeamError> {
         debug!("Getting Cert with serial {}",serial);
-        let resp = self.resilient_vault_request(&Method::GET, &format!("{}/cert/{}/raw/pem",&self.pki_realm, serial), None).await?;
+        let resp = self.resilient_vault_request(&Method::GET, &format!("{}/cert/{}/raw/pem",&self.pki_realm, serial), Some(100)).await?;
         let body_bytes = body::to_bytes(resp.into_body()).await
             .map_err(|e| SamplyBeamError::VaultOtherError(format!("Cannot retrieve certificate {}: {}",serial,e)))?;
         let body = String::from_utf8(body_bytes.to_vec())
@@ -132,7 +132,7 @@ impl GetCerts for GetCertsFromPki {
 
     async fn im_certificate_as_pem(&self) -> Result<String,SamplyBeamError> {
         debug!("Getting IM CA Cert");
-        let resp = self.resilient_vault_request(&Method::GET, &format!("{}/ca/pem", self.pki_realm), None).await?;
+        let resp = self.resilient_vault_request(&Method::GET, &format!("{}/ca/pem", self.pki_realm), Some(100)).await?;
         let body_bytes = body::to_bytes(resp.into_body()).await
             .map_err(|e| SamplyBeamError::VaultOtherError(format!("Cannot retrieve im-ca certificate: {}",e)))?;
         let body = String::from_utf8(body_bytes.to_vec())
