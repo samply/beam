@@ -62,6 +62,7 @@ async fn handler_tasks(
     AuthenticatedApp(sender): AuthenticatedApp,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, (StatusCode, &'static str)> {
+    dbg!(&req);
     let path = req.uri().path();
     let path_query = req
         .uri()

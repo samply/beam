@@ -81,7 +81,6 @@ async fn get_results_for_task(
         wait_for_results_for_task(&mut results, &block, rx, &filter_for_me, rx_deleted_task, &task_id).await;
     }
     let statuscode = wait_get_statuscode(&results, &block);
-    dbg!(&results);
     Ok((statuscode, Json(results)))
 }
 
