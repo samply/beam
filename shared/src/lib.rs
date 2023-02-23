@@ -563,7 +563,7 @@ pub struct MsgTaskRequest {
     pub results: HashMap<AppOrProxyId, MsgSigned<MsgTaskResult>>,
     pub metadata: Value,
 }
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct EncryptedMsgTaskRequest {
     pub id: MsgId,
     pub from: AppOrProxyId,
@@ -598,7 +598,7 @@ pub struct MsgTaskResult {
     pub body: Option<String>,
     pub metadata: Value,
 }
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct EncryptedMsgTaskResult {
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
@@ -860,5 +860,34 @@ mod tests {
 
         assert_eq!(msg_p1_decr, msg_p2_decr);
         assert_eq!(msg, msg_p1_decr);
+    }
+}
+
+impl std::fmt::Debug for EncryptedMsgTaskRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EncryptedMsgTaskRequest")
+            .field("id", &self.id)
+            .field("from", &self.from)
+            .field("to", &self.to)
+            .field("encrypted (#bytes)", &self.encrypted.len())
+            .field("encryption_keys (#)", &self.encryption_keys.len())
+            .field("expire", &self.expire)
+            .field("failure_strategy", &self.failure_strategy)
+            .field("metadata", &self.metadata)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for EncryptedMsgTaskResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EncryptedMsgTaskResult")
+        .field("from", &self.from)
+        .field("to", &self.to)
+        .field("task", &self.task)
+        .field("status", &self.status)
+        .field("encrypted (#bytes)", &self.encrypted.len())
+        .field("encryption_keys (#)", &self.encryption_keys.len())
+        .field("metadata", &self.metadata)
+        .finish()
     }
 }
