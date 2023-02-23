@@ -406,7 +406,7 @@ where
         );
 
         let serialized_string = serde_json::Value::from(encrypted_json.clone()).to_string();
-        let result: M =
+        let result =
             serde_json::from_str(&serialized_string).or(Err(SamplyBeamError::SignEncryptError(
                 "Encryption error: Cannot deserialize message".into(),
             )))?;
@@ -567,7 +567,7 @@ pub struct EncryptedMsgTaskRequest {
     pub id: MsgId,
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
-    pub encrypted: Vec<u8>,
+    pub encrypted: String,
     pub encryption_keys: Vec<Vec<u8>>,
     #[serde(with = "serialize_time", rename = "ttl")]
     pub expire: SystemTime,
@@ -604,7 +604,7 @@ pub struct EncryptedMsgTaskResult {
     pub task: MsgId,
     #[serde(flatten)]
     pub status: WorkStatus,
-    pub encrypted: Vec<u8>,
+    pub encrypted: String,
     pub encryption_keys: Vec<Vec<u8>>,
     pub metadata: Value,
 }
