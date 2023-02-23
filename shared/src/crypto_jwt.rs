@@ -34,7 +34,7 @@ where
             warn!("Unable to parse token_without_extended_signature as UTF-8: {}", e);
             ERR_SIG
         })?;
-        verify_with_extended_header(&parts, Some(token_without_extended_signature)).await
+        verify_with_extended_header(&parts, Some(token_without_extended_signature)).await.map_err(|e|{warn!("Verification failed: {:?}, request header: {:?}",e, parts); e})
     }
 }
 
