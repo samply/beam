@@ -71,8 +71,8 @@ async fn get_results_for_task(
         let results = task.msg.results.values().cloned().collect();
         let rx_new_result = match would_wait_for_elements(&results, &block) {
             true => Some(state.new_result_tx.read().await.get(&task_id)
-                        .unwrap_or_else(|| panic!("Internal error: No new_result_tx found for task {}", task_id))
-                        .subscribe()),
+                .unwrap_or_else(|| panic!("Internal error: No new_result_tx found for task {}", task_id))
+                .subscribe()),
             false => None,
         };
         (results, rx_new_result, state.removed_task_rx.subscribe())
@@ -81,6 +81,7 @@ async fn get_results_for_task(
         wait_for_results_for_task(&mut results, &block, rx, &filter_for_me, rx_deleted_task, &task_id).await;
     }
     let statuscode = wait_get_statuscode(&results, &block);
+    dbg!(&results);
     Ok((statuscode, Json(results)))
 }
 
@@ -223,9 +224,6 @@ async fn get_tasks(
     if from.is_none() && to.is_none() {
         return Err((StatusCode::BAD_REQUEST, "Please supply either \"from\" or \"to\" query parameter."));
     }
-    debug!(?from);
-    debug!(?to);
-    debug!(?msg);
     if (from.is_some() && *from.as_ref().unwrap() != msg.msg.from) 
     || (to.is_some() && *to.as_ref().unwrap() != msg.msg.from) { // Rewrite in Rust 1.64: https://github.com/rust-lang/rust/pull/94927
         return Err((StatusCode::UNAUTHORIZED, "You can only list messages created by you (from) or directed to you (to)."));
