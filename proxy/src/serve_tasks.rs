@@ -17,7 +17,7 @@ use shared::{
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, Msg, MsgEmpty, MsgId, MsgSigned,
     MsgTaskRequest, MsgTaskResult, crypto, http_client::SamplyHttpClient,
 };
-use tracing::{debug, error, warn};
+use tracing::{debug, error, warn, trace};
 
 use crate::auth::AuthenticatedApp;
 
@@ -119,9 +119,9 @@ async fn handler_tasks(
                 return Err(ERR_VALIDATION);
             }
             decryption_helper(&mut json).or( Err(ERR_INTERNALCRYPTO))?;
-            debug!("Decrypted Msg: {:#?}",json);
+            trace!("Decrypted Msg: {:#?}",json);
             bytes = serde_json::to_vec(&json).unwrap().into();
-            debug!(
+            trace!(
                 "Validated and stripped signature: \"{}\"",
                 std::str::from_utf8(&bytes).unwrap_or("Unable to parse string as UTF-8")
             );
