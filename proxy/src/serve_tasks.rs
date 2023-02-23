@@ -5,7 +5,7 @@ use httpdate::fmt_http_date;
 use hyper::{
     body, body::HttpBody,
     client::{connect::Connect, HttpConnector},
-    header, Body, Client, Request, StatusCode, Uri, service::Service,
+    header::{self}, Body, Client, Request, StatusCode, Uri, service::Service,
 };
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
@@ -98,11 +98,28 @@ async fn handler_tasks(
 
     // Check reply's signature
 
-    let (mut parts, body) = resp.into_parts();
-    let mut bytes = body::to_bytes(body).await.map_err(|e| {
-        error!("Error receiving reply from the broker: {}. Headers: {:?}", e, parts);
-        ERR_UPSTREAM
-    })?;
+    let (mut parts, mut body) = resp.into_parts();
+    let expected_length = 
+        parts.headers.get(header::CONTENT_LENGTH)
+        .ok_or((StatusCode::BAD_GATEWAY, "Broker did not give us CONTENT_LENGTH header."))?
+        .to_str().map_err(|_| (StatusCode::BAD_GATEWAY, "Broker gave us invalid CONTENT_LENGTH header."))?
+        .parse::<usize>().map_err(|_| (StatusCode::BAD_GATEWAY, "Broker gave us invalid CONTENT_LENGTH header."))?;
+    let mut bytes = Vec::new();
+    while let Some(chunk) = body.data().await {
+        match chunk {
+            Ok(chunk) => {
+                bytes.extend(chunk);
+            },
+            Err(e) => {
+                error!("Error receiving reply from the broker: {}. Headers: {:?}", e, parts);
+                return Err(ERR_UPSTREAM);
+            }
+        }
+    }
+    if bytes.len() != expected_length {
+        error!("Expected {} bytes in HTTP body, got {}", expected_length, bytes.len());
+        return Err(ERR_UPSTREAM);
+    }
 
     // TODO: Always return application/jwt from server.
     if !bytes.is_empty() {
