@@ -115,7 +115,7 @@ async fn handler_tasks(
         } else {
             let mut json = json.unwrap();
             if !validate_and_remove_signatures(&mut json).await {
-                warn!("The answer was valid JSON but we were unable to validate and remove its signature. The osffending JSON was: {}", json);
+                warn!("The answer was valid JSON but we were unable to validate and remove its signature. The offending JSON was: {}", json);
                 return Err(ERR_VALIDATION);
             }
             decryption_helper(&mut json).or( Err(ERR_INTERNALCRYPTO))?;
