@@ -34,7 +34,7 @@ where
             warn!("Unable to parse token_without_extended_signature as UTF-8: {}", e);
             ERR_SIG
         })?;
-        verify_with_extended_header(&parts, Some(token_without_extended_signature)).await.map_err(|e|{warn!("Verification failed: {:?}, request header: {:?}",e, parts); e})
+        verify_with_extended_header(&parts, Some(token_without_extended_signature)).await
     }
 }
 
@@ -96,7 +96,7 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
     let (proxy_public_info, pubkey, mut header_claims) 
         = extract_jwt(token_with_extended_signature).await
         .map_err(|e| {
-            warn!("Unable to extract header JWT: {}. The full JWT was: {}", e, token_with_extended_signature);
+            warn!("Unable to extract header JWT: {}. The full JWT was: {}. The header was: {:?}", e, token_with_extended_signature, req);
             ERR_SIG
         })?;
     
