@@ -66,6 +66,7 @@ async fn get_certificate_by_serial(
     Ok(String::from_utf8(pem)?)
 }
 
+#[tracing::instrument(name = "/v1/pki/certs/im-ca")]
 async fn get_im_cert(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Result<String, PkiError> {
     debug!("=> Asked for IM CA Cert by {addr}");
     let cert = shared::crypto::get_im_cert().await
@@ -73,6 +74,7 @@ async fn get_im_cert(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Result<Strin
     Ok(cert)
 }
 
+#[tracing::instrument(name = "/v1/pki/certs")]
 async fn get_certificate_list(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Result<Json<Vec<String>>,PkiError> {
     debug!("Asked for all certificates by {addr}");
     let list = shared::crypto::get_serial_list().await

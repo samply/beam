@@ -58,6 +58,7 @@ where
     }
 }
 
+#[tracing::instrument]
 pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
     // TODO: Make static/const
     let options = VerificationOptions {
@@ -81,6 +82,7 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
     Ok((public, pubkey, content))
 }
 
+#[tracing::instrument]
 async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, token_without_extended_signature: Option<&str>) -> Result<MsgSigned<M>,(StatusCode, &'static str)> {
     let token_with_extended_signature = std::str::from_utf8(req.headers.get(header::AUTHORIZATION).ok_or_else(|| {
         warn!("Missing Authorization header (in verify_with_extended_header)");
