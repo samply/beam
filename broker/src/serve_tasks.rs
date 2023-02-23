@@ -1,6 +1,7 @@
-use std::{collections::HashMap, sync::Arc, mem::Discriminant};
+use std::{collections::HashMap, sync::Arc, mem::Discriminant, net::SocketAddr};
 
 use axum::{
+    extract::ConnectInfo,
     http::{StatusCode, header},
     routing::{get, post, put},
     Json, Router, extract::{Query, Path, State}, response::IntoResponse
@@ -52,12 +53,14 @@ impl Default for TasksState {
 
 // GET /v1/tasks/:task_id/results
 async fn get_results_for_task(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<TasksState>,
     block: HowLongToBlock,
     task_id: MsgId,
-    msg: MsgSigned<MsgEmpty>
+    msg: MsgSigned<MsgEmpty>,
+
 ) -> Result<(StatusCode, Json<Vec<MsgSigned<EncryptedMsgTaskResult>>>), (StatusCode, &'static str)> {
-    debug!("get_results_for_task(task={}) called by {}, wait={:?}", task_id.to_string(), msg.get_from(), block);
+    debug!("get_results_for_task(task={}) called by {} with IP {addr}, wait={:?}", task_id.to_string(), msg.get_from(), block);
     let filter_for_me = MsgFilterNoTask { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::Or };
     let (mut results, rx_new_result, rx_deleted_task)  = {
         let tasks = state.tasks.read().await;
@@ -204,6 +207,7 @@ enum FilterParam {
 /// GET /v1/tasks
 /// Will retrieve tasks that are at least FROM or TO the supplied parameters.
 async fn get_tasks(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     block: HowLongToBlock,
     Query(taskfilter): Query<TaskFilter>,
     State(state): State<TasksState>,
@@ -224,6 +228,7 @@ async fn get_tasks(
         return Err((StatusCode::BAD_REQUEST, "Please supply either \"from\" or \"to\" query parameter."));
     }
     debug!(?from);
+    debug!("IP: {addr}");
     debug!(?to);
     debug!(?msg);
     if (from.is_some() && *from.as_ref().unwrap() != msg.msg.from) 
@@ -375,13 +380,14 @@ impl<'a, M: Msg> MsgFilterTrait<M> for MsgFilterNoTask<'a> {
 
 // POST /v1/tasks
 async fn post_task(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<TasksState>,
-    msg: MsgSigned<EncryptedMsgTaskRequest>
+    msg: MsgSigned<EncryptedMsgTaskRequest>,
 ) -> Result<(StatusCode, impl IntoResponse), (StatusCode, String)> {
     // let id = MsgId::new();
     // msg.id = id;
     // TODO: Check if ID is taken
-    debug!("Client {} is creating task {:?}", msg.msg.from, msg);
+    debug!("Client {} with IP {addr} is creating task {:?}", msg.msg.from, msg);
     let (new_tx, _) = tokio::sync::broadcast::channel(256);
     {
         let mut tasks = state.tasks.write().await;
@@ -403,11 +409,12 @@ async fn post_task(
 
 // PUT /v1/tasks/:task_id/results/:app_id
 async fn put_result(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path((task_id, app_id)): Path<(MsgId,AppOrProxyId)>,
     State(state): State<TasksState>,
-    result: MsgSigned<EncryptedMsgTaskResult>
+    result: MsgSigned<EncryptedMsgTaskResult>,
 ) -> Result<StatusCode, (StatusCode, &'static str)> {
-    debug!("Called: Task {:?}, {:?}", task_id, result);
+    debug!("Called: Task {:?}, {:?} by {addr}", task_id, result);
     if task_id != result.msg.task {
         return Err((StatusCode::BAD_REQUEST, "Task IDs supplied in path and payload do not match."));
     }
