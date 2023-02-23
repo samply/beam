@@ -100,7 +100,7 @@ async fn handler_tasks(
 
     let (mut parts, body) = resp.into_parts();
     let mut bytes = body::to_bytes(body).await.map_err(|e| {
-        error!("Error receiving reply from the broker: {}", e);
+        error!("Error receiving reply from the broker: {}. Headers: {:?}", e, parts);
         ERR_UPSTREAM
     })?;
 
