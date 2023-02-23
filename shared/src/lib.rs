@@ -4,6 +4,7 @@ use axum::async_trait;
 use beam_id::{AppId, AppOrProxyId, BeamId, ProxyId};
 use crypto_jwt::extract_jwt;
 use errors::SamplyBeamError;
+use openssl::base64;
 use serde_json::{json, Value};
 use sha2::Sha256;
 use static_init::dynamic;
@@ -215,15 +216,11 @@ where
                 .ok_or(SamplyBeamError::SignEncryptError(
                     "Decryption error: No encrypted payload found".into(),
                 ))?;
-        let encrypted: Vec<u8> = encrypted_field
-            .as_array()
-            .ok_or(SamplyBeamError::SignEncryptError(
-                "Decryption error: Encrypted payload not readable".into(),
-            ))?
-            .iter()
-            .map(|v| v.as_u64().unwrap() as u8) //TODO unwrap
-            .collect();
-        //.as_bytes();
+        let encrypted = encrypted_field.as_str()
+            .ok_or(SamplyBeamError::JsonParseError("field \"encrypted\" does not contain a valid string"))?;
+        let encrypted = base64::decode_block(encrypted)
+            .map_err(|_| SamplyBeamError::DecryptError("field \"encrypted\" is not base64 encoded"))?;
+
         let to_array_index: usize = encrypted_json
             .get("to")
             .ok_or(SamplyBeamError::SignEncryptError(
@@ -374,7 +371,7 @@ where
             ));
         }
 
-        // Retrieve fields to encryp and remove from msg
+        // Retrieve fields to encrypt and remove from msg
         let mut json_to_encrypt = cleartext_json.clone();
         json_to_encrypt.retain(|k, _| FIELDS_TO_ENCRYPT.contains(&k.as_str()));
         let mut encrypted_json = cleartext_json;
@@ -396,11 +393,13 @@ where
             SamplyBeamError::SignEncryptError("Encryption error: Can not encrypt data.".into()),
         ))?;
 
-        //Prepend Nonce to ciphertext
+        // Prepend Nonce to ciphertext
         let mut nonce_and_ciphertext = nonce.to_vec();
         nonce_and_ciphertext.append(&mut ciphertext);
 
-        //Add Encrypted fields to msg
+        let nonce_and_ciphertext = base64::encode_block(&nonce_and_ciphertext);
+
+        // Add Encrypted fields to msg
         encrypted_json.insert(
             String::from("encrypted"),
             serde_json::Value::from(nonce_and_ciphertext),
