@@ -299,7 +299,6 @@ async fn encrypt_request(
     if msg.get_from() != sender {
         return Err(ERR_FAKED_FROM);
     }
-    debug!("before encrypt_msg");
     // What Message is sent?
     if is_message_type::<MsgTaskRequest>(&body){
         let body = encrypt_msg::<EncryptedMsgTaskRequest, MsgTaskRequest>(&body).await.map_err(|e| {
