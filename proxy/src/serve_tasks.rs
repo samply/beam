@@ -111,7 +111,7 @@ async fn handler_tasks(
                 bytes.extend(chunk);
             },
             Err(e) => {
-                error!("Error receiving reply from the broker: {}. Headers: {:?}", e, parts);
+                error!("Error receiving reply from the broker: {}. Headers: {:?}. {} bytes read so far: {}", e, parts, bytes.len(), std::str::from_utf8(&bytes).unwrap_or("(unable to read body)"));
                 return Err(ERR_UPSTREAM);
             }
         }
