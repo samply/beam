@@ -117,7 +117,11 @@ async fn handler_tasks(
         }
     }
     if bytes.len() != expected_length {
-        error!("Expected {} bytes in HTTP body, got {}", expected_length, bytes.len());
+        error!(
+            "Expected {} bytes in HTTP body, got {}. Offending body was: {}",
+            expected_length,
+            bytes.len(),
+            std::str::from_utf8(&bytes).unwrap_or("(unable to read body)"));
         return Err(ERR_UPSTREAM);
     }
 
