@@ -9,7 +9,7 @@ use axum::{
 use serde::{Deserialize};
 use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId, WorkStatus, EncryptedMsgTaskRequest, EncryptedMsgTaskResult};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
-use tracing::{debug, info, trace, error, warn};
+use tracing::{debug, info, trace, error, warn, instrument};
 
 use crate::expire;
 
@@ -206,6 +206,7 @@ enum FilterParam {
 
 /// GET /v1/tasks
 /// Will retrieve tasks that are at least FROM or TO the supplied parameters.
+ #[instrument(skip_all, fields(addr = addr.ip().to_string(), from = msg.get_from().to_string()))]
 async fn get_tasks(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     block: HowLongToBlock,
