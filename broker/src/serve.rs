@@ -15,7 +15,6 @@ use crate::{serve_tasks, serve_health, serve_pki, crypto::GetCertsFromPki, banne
 pub(crate) async fn serve() -> anyhow::Result<()> {
     let app = 
         serve_tasks::router()
-        // .merge(serve_pki::router())
         .merge(serve_pki::router())
         .merge(serve_health::router())
         .layer(axum::middleware::map_response(banner::set_server_header));

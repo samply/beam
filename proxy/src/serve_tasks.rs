@@ -91,6 +91,7 @@ async fn handler_tasks(
     };
     let req = sign_request(body, parts, &config, &target_uri, sender).await?;
 
+    trace!("Requesting: {:?}", req);
     let resp = client.request(req).await.map_err(|e| {
         warn!("Request to broker failed: {}", e.to_string());
         (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
@@ -109,8 +110,9 @@ async fn handler_tasks(
         let json = serde_json::from_slice::<Value>(&bytes);
         if json.is_err() {
             warn!(
-                "Answer is no valid JSON; returning as-is to client: \"{}\"",
-                std::str::from_utf8(&bytes).unwrap_or_default()
+                "Answer is no valid JSON; returning as-is to client: \"{}\". Headers: {:?}",
+                std::str::from_utf8(&bytes).unwrap_or("(unable to parse)"),
+                parts
             );
         } else {
             let mut json = json.unwrap();
@@ -129,8 +131,11 @@ async fn handler_tasks(
     }
 
     let body = Body::from(bytes);
-    let len = body.size_hint().exact().ok_or_else(|| {error!("Cannot calculate length of request"); ERR_BODY})?;
-    parts.headers.insert(header::CONTENT_LENGTH, len.into());
+
+    if let Some(header) = parts.headers.remove(header::CONTENT_LENGTH) {
+        debug!("Removed header: \"{}: {}\"", header::CONTENT_LENGTH, header.to_str().unwrap_or("(invalid value)"));
+    }
+
     let resp = Response::from_parts(parts, body);
 
     Ok(resp)
@@ -138,7 +143,7 @@ async fn handler_tasks(
 
 // TODO: This could be a middleware
 async fn sign_request(
-    mut body: Value,
+    body: Value,
     mut parts: Parts,
     config: &config_proxy::Config,
     target_uri: &Uri,
@@ -163,12 +168,18 @@ async fn sign_request(
         ERR_INTERNALCRYPTO
     })?;
     let body: Body = token_without_extended_signature.into();
-    let length = body.size_hint().exact().ok_or_else(|| {error!("Cannot calculate length of request"); ERR_BODY})?;
     let mut auth_header = String::from("SamplyJWT ");
     auth_header.push_str(&token_with_extended_signature);
     parts.uri = target_uri.clone();
     headers_mut.insert(header::HOST, config.broker_host_header.clone());
-    headers_mut.insert(header::CONTENT_LENGTH, length.into());
+
+    let length = body.size_hint().exact().ok_or_else(|| {error!("Cannot calculate length of request"); ERR_BODY})?;
+    if let Some(old) = headers_mut.insert(
+        header::CONTENT_LENGTH,
+        length.into()) {
+            debug!("Exchanged old Content-Length header ({}) with new one ({})", old.to_str().unwrap_or("(header invalid)"), length);
+    }
+
     headers_mut.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_str("application/jwt").unwrap(),
