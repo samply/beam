@@ -1,7 +1,22 @@
 # Samply.Beam 0.6.0 -- 2023-02-xx
 
-This release improves efficiency in network communication with an base64 encoding of ciphertexts and encryption keys.
-Also, reliability in connections from the broker to the underlying PKI (Hashicorp Vault) is improved.
+This release improves efficiency in network communication with an base64 encoding of ciphertexts and encryption keys. Because of this internal API change, both the Beam.Proxys and the Beam.Broker need to run a 0.6.x version. However, the external API has not changed and does not require any action on the user's side.
+
+## Breaking changes
+
+* Improvement of internal message efficiency:
+In previous releases, the encrypted payload and the encapsulated encryption keys, both fields byte arrays, were encoded as JSON arrays of the ASCII representation of the corresponding decimal numbers. This, of course, potentially quadrupples the payload size. We chose a base64-string encoding for those fields to strike a balance against network efficiency and encoding performance. Other encoding types, such as base85, turned out be (depending on the payload) around 1300% slower.
+* The log level for the hyper component (HTTP handling) is now set to `warn`, except if explicitly specified otherwise, e.g., by setting `RUST_LOG="debug,hyper=debug"`.
+
+## Major changes
+
+* We improved the resilience of the communication between the Beam.Broker and the central PKI (Hashicorp Vault) by a more explicit retry mechanism and improved logging.
+
+## Minor improvement
+
+* Bugfix: We fixed a bug, where the logging engine might be initialized and and lost some startup messages.
+* We improved the dev build script to avoid out-of-sync binary and docker image generation.
+* The logging was improved throughout the board. Some Information were reduced in severity to `trace` level.
 
 # Samply.Beam 0.5.0 -- 2023-02-03
 
