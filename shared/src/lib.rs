@@ -201,8 +201,7 @@ where
             SamplyBeamError::SignEncryptError(format!(
                 "Decryption error: Cannot deserialize message because {}",
                 e
-            ))
-})?;
+            ))})?;
         let mut encrypted_json = binding
             .as_object()
             .ok_or(SamplyBeamError::SignEncryptError(
@@ -257,13 +256,13 @@ where
                 .ok_or(SamplyBeamError::SignEncryptError(
                     "Decryption error: Cannot read 'encrypted_keys' array".into(),
                 ))?[to_array_index]
-                .as_array()
+                .as_str()
                 .ok_or(SamplyBeamError::SignEncryptError(
                     "Decryption error: Encryption key is not readable".into(),
-                ))?
-                .iter()
-                .map(|v| v.as_u64().unwrap() as u8) //TODO unwrap
-                .collect();
+                ))
+                .map(|v| base64::decode_block(v).unwrap())
+                .map_err(|e| SamplyBeamError::SignEncryptError(format!("Decryption error: Encryption key is invalid: {e}")))?; //TODO unwrap
+
         // Cryptographic Operations
         let cipher_engine = XChaCha20Poly1305::new_from_slice(&my_priv_key.decrypt(
             rsa::PaddingScheme::new_oaep::<sha2::Sha256>(),
@@ -378,13 +377,16 @@ where
             _ = encrypted_json.remove(f);
         }
 
-        // Add encrypted key to msg
+        // Add encrypted keys (converted to base64) to msg
         encrypted_json.insert(
             String::from("encryption_keys"),
-            serde_json::Value::from(encrypted_keys),
+            serde_json::Value::from_iter(encrypted_keys
+                .iter()
+                .map(|key| base64::encode_block(key))
+            )
         );
 
-        // Encrypt fields content
+        // Encrypt fields' content
         let cipher = XChaCha20Poly1305::new(&symmetric_key);
         let plain_value = serde_json::Value::from(json_to_encrypt);
         let plaintext = plain_value.to_string();
@@ -539,13 +541,14 @@ pub struct MsgTaskRequest {
     pub results: HashMap<AppOrProxyId, MsgSigned<MsgTaskResult>>,
     pub metadata: Value,
 }
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct EncryptedMsgTaskRequest {
     pub id: MsgId,
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub encrypted: String,
-    pub encryption_keys: Vec<Vec<u8>>,
+    pub encryption_keys: Vec<String>,
     #[serde(with = "serialize_time", rename = "ttl")]
     pub expire: SystemTime,
     pub failure_strategy: FailureStrategy,
@@ -582,7 +585,7 @@ pub struct EncryptedMsgTaskResult {
     #[serde(flatten)]
     pub status: WorkStatus,
     pub encrypted: String,
-    pub encryption_keys: Vec<Vec<u8>>,
+    pub encryption_keys: Vec<String>,
     pub metadata: Value,
 }
 
