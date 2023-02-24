@@ -8,14 +8,21 @@ use tracing::{info, warn, span, Level, instrument};
 const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 
 pub async fn log(ConnectInfo(info): ConnectInfo<SocketAddr>, req: Request<Body>, next: Next<Body>) -> Response {
-    let mut line = format!("({}) <= {} {}", get_ip(&req, &info), req.method(), req.uri());
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let ip = get_ip(&req, &info);
+
     let resp = next.run(req).await;
-    #[allow(clippy::format_push_string)] // see https://github.com/rust-lang/rust-clippy/issues/9077
-    line.push_str(&format!(" || => {}", resp.status()));
+
+    let line = format!("{} {} {} {}",
+        ip,
+        resp.status().as_u16(),
+        method,
+        uri);
     if resp.status().is_success() {
-        info!("{}", line);
+        info!(target: "in", "{}", line);
     } else {
-        warn!("{}", line);
+        warn!(target: "in", "{}", line);
     }
     resp
 }
