@@ -9,7 +9,6 @@ use serde_json::{json, Value};
 use sha2::Sha256;
 use static_init::dynamic;
 use tracing::debug;
-//use aes_gcm::{NewAead, aead::Aead, Aes256Gcm};
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     XChaCha20Poly1305, XNonce,
@@ -422,19 +421,9 @@ pub trait Msg: Serialize {
     fn get_metadata(&self) -> &Value;
 }
 
-pub trait MsgWithBody: Msg {
-    // fn get_body(&self) -> &str;
-}
-impl MsgWithBody for MsgTaskRequest {
-    // fn get_body(&self) -> &str {
-    //     &self.body
-    // }
-}
-impl MsgWithBody for MsgTaskResult {
-    // fn get_body(&self) -> &str {
-    //     self.get_body()
-    // }
-}
+pub trait MsgWithBody: Msg {}
+impl MsgWithBody for MsgTaskRequest {}
+impl MsgWithBody for MsgTaskResult {}
 
 impl<M: Msg> Msg for MsgSigned<M> {
     fn get_from(&self) -> &AppOrProxyId {
@@ -505,18 +494,6 @@ impl Msg for EncryptedMsgTaskResult {
         &self.metadata
     }
 }
-
-// impl From<MsgSigned<MsgTaskRequest>> for MsgTaskRequest {
-//     fn from(x: MsgSigned<MsgTaskRequest>) -> Self {
-//         x.msg
-//     }
-// }
-
-// impl From<MsgSigned<MsgTaskResult>> for MsgTaskResult {
-//     fn from(x: MsgSigned<MsgTaskResult>) -> Self {
-//         x.msg
-//     }
-// }
 
 mod serialize_time {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
