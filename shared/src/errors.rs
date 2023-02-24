@@ -16,6 +16,10 @@ pub enum SamplyBeamError {
     InvalidPath,
     #[error("Invalid Client ID: {0}")]
     InvalidClientIdString(String),
+    #[error("Unable to parse JSON: {0}")]
+    JsonParseError(&'static str),
+    #[error("Decryption error: {0}")]
+    DecryptError(&'static str),
     #[error("Signing / encryption failed: {0}")]
     SignEncryptError(String),
     #[error("Samply.PKI error: Vault is still sealed.")]

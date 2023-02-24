@@ -239,7 +239,7 @@ fn decryption_helper(value: &mut Value) -> Result<(), SamplyBeamError> {
 }
 
 // Once specialization becomes stable, implement in Msg trait (see https://stackoverflow.com/questions/60138397/how-to-test-for-type-equality-in-rust)
-fn is_message_type<M: Msg + DeserializeOwned + std::fmt::Debug>(value: &Value) -> bool {
+fn is_message_type<M: Msg + DeserializeOwned>(value: &Value) -> bool {
     let value = value.clone();
     match serde_json::from_value::<M>(value) {
         Ok(_msg) => true,
@@ -301,11 +301,17 @@ async fn encrypt_request(
     }
     // What Message is sent?
     if is_message_type::<MsgTaskRequest>(&body){
-        let body = encrypt_msg::<EncryptedMsgTaskRequest, MsgTaskRequest>(&body).await.map_err(|_| ERR_INTERNALCRYPTO)?;
+        let body = encrypt_msg::<EncryptedMsgTaskRequest, MsgTaskRequest>(&body).await.map_err(|e| {
+            warn!("Unable to encrypt message: {e}");
+            ERR_INTERNALCRYPTO
+        })?;
         Ok((body, parts))
     }
     else if is_message_type::<MsgTaskResult>(&body){
-        let body = encrypt_msg::<EncryptedMsgTaskResult, MsgTaskResult>(&body).await.map_err(|_| ERR_INTERNALCRYPTO)?;
+        let body = encrypt_msg::<EncryptedMsgTaskResult, MsgTaskResult>(&body).await.map_err(|e| {
+            warn!("Unable to encrypt message: {e}");
+            ERR_INTERNALCRYPTO
+        })?;
         Ok((body, parts))
     } else {
         Ok((body, parts))
