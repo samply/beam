@@ -45,7 +45,7 @@ async fn get_certificate_by_serial(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(serial): Path<String>
 ) -> Result<String, PkiError> {
-    debug!("=> Asked for cert with serial {serial} by {addr}");
+    debug!("() => Asked for cert with serial {serial} by {addr}");
     let cert = match tokio::time::timeout(std::time::Duration::new(10,0), shared::crypto::get_cert_and_client_by_serial_as_pemstr(&serial)).await {
         Ok(certificate) => {
             certificate.ok_or_else(|| {

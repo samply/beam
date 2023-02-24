@@ -17,6 +17,7 @@ pub(crate) async fn serve() -> anyhow::Result<()> {
         serve_tasks::router()
         .merge(serve_pki::router())
         .merge(serve_health::router())
+        .layer(axum::middleware::from_fn(shared::middleware::log))
         .layer(axum::middleware::map_response(banner::set_server_header));
 
     // Graceful shutdown handling
