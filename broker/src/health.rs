@@ -1,18 +1,30 @@
-use std::time::Duration;
+use std::{time::Duration, sync::Arc, fmt::Display};
 
+use serde::Serialize;
+use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-#[derive(thiserror::Error, Debug, Clone, Copy)]
-pub enum VaultStatus {
-    #[error("ok")]
-    Ok,
-    #[error("unknown")]
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Verdict {
+    Healthy,
+    Unhealthy,
     Unknown,
-    #[error("other-error")]
+}
+
+impl Default for Verdict {
+    fn default() -> Self {
+        Verdict::Unknown
+    }
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "lowercase")]
+pub enum VaultStatus {
+    Ok,
+    Unknown,
     OtherError,
-    #[error("locked-or-sealed")]
     LockedOrSealed,
-    #[error("notreachable")]
     Unreachable,
 }
 
@@ -23,7 +35,7 @@ impl Default for VaultStatus {
 }
 
 pub struct Health {
-    vault: VaultStatus
+    pub vault: VaultStatus
 }
 
 pub struct Senders {
@@ -31,19 +43,23 @@ pub struct Senders {
 }
 
 impl Health {
-    pub fn make() -> (Senders, Self) {
-        let mut health = Health {
+    pub fn make() -> (Senders, Arc<RwLock<Self>>) {
+        let health = Health {
             vault: VaultStatus::default()
         };
-        let (vault_tx, mut vault_rx) = tokio::sync::watch::channel(health.vault);
+        let (vault_tx, mut vault_rx) = tokio::sync::watch::channel(VaultStatus::default());
+        let health = Arc::new(RwLock::new(health));
+        let health2 = health.clone();
 
         let vault_watcher = async move {
             while vault_rx.changed().await.is_ok() {
-                health.vault = *vault_rx.borrow();
-                match health.vault {
+                let new_val = vault_rx.borrow().clone();
+                let mut health = health2.write().await;
+                match &new_val {
                     VaultStatus::Ok => info!("Vault connection is now healthy"),
-                    x => warn!("Vault connection is degraded: {x}"),
+                    x => warn!("Vault connection is degraded: {}", serde_json::to_string(x).unwrap_or_default()),
                 }
+                health.vault = new_val;
             }
         };
         tokio::task::spawn(vault_watcher);

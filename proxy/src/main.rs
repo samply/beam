@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use backoff::future::retry_notify;
+use backoff::{ExponentialBackoff, future::retry_notify};
 use hyper::{Client, client::HttpConnector, Method, Uri, Request, StatusCode, body};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
@@ -28,11 +28,15 @@ pub async fn main() -> anyhow::Result<()> {
     let client = http_client::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)), Some(Duration::from_secs(20)))
         .map_err(SamplyBeamError::HttpProxyProblem)?;
 
-    if let Err(err) = get_broker_health(&config, &client).await {
-        error!("Cannot reach Broker: {}", err);
+    if let Err(err) = retry_notify(
+        ExponentialBackoff::default(),
+        || async { Ok(get_broker_health(&config, &client).await?) },
+        |err, dur: Duration| { warn!("Still trying to reach Broker: {}. Retrying in {}s", err, dur.as_secs()); }
+    ).await {
+        error!("Giving up reaching Broker: {}", err);
         std::process::exit(1);
     } else {
-        info!("Connected to Broker: {}",&config.broker_uri);
+        info!("Connected to Broker: {}", &config.broker_uri);
     }
 
     let ec = init_crypto(config.clone(), client.clone()).await;

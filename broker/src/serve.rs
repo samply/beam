@@ -10,13 +10,13 @@ use shared::{EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MsgId, HowLongToBl
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace, warn};
 
-use crate::{serve_tasks, serve_health, serve_pki, banner};
+use crate::{serve_tasks, serve_health, serve_pki, banner, health::Health};
 
-pub(crate) async fn serve() -> anyhow::Result<()> {
+pub(crate) async fn serve(health: Arc<RwLock<Health>>) -> anyhow::Result<()> {
     let app = 
         serve_tasks::router()
         .merge(serve_pki::router())
-        .merge(serve_health::router())
+        .merge(serve_health::router(health))
         .layer(axum::middleware::from_fn(shared::middleware::log))
         .layer(axum::middleware::map_response(banner::set_server_header));
 

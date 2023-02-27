@@ -9,11 +9,12 @@ mod expire;
 mod crypto;
 mod health;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use backoff::{future::{retry, retry_notify}, ExponentialBackoff, ExponentialBackoffBuilder};
 use shared::{*, config::CONFIG_CENTRAL};
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{info, warn};
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {    
@@ -23,6 +24,15 @@ pub async fn main() -> anyhow::Result<()> {
 
     let (senders, health) = health::Health::make();
     let cert_getter = crypto::build_cert_getter(senders.vault)?;
+
+    retry_notify(
+        ExponentialBackoff::default(),
+        || async { 
+            Ok(cert_getter.check_vault_health().await?)
+        },
+        |err, dur: Duration| { warn!("Still waiting for Vault to become ready: {}. Retrying in {}s", err, dur.as_secs()); }
+    ).await?;
+
     shared::crypto::init_cert_getter(cert_getter);
     shared::crypto::init_ca_chain().await;
     #[cfg(debug_assertions)]
@@ -30,7 +40,7 @@ pub async fn main() -> anyhow::Result<()> {
     
     let _ = config::CONFIG_CENTRAL.bind_addr; // Initialize config
 
-    serve::serve().await?;
+    serve::serve(health).await?;
 
     Ok(())
 }
