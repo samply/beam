@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use backon::{Retryable, ConstantBuilder};
+use backoff::future::retry_notify;
 use hyper::{Client, client::HttpConnector, Method, Uri, Request, StatusCode, body};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
@@ -65,22 +65,23 @@ async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(),Samp
 async fn get_broker_health(config: &Config, client: &SamplyHttpClient) -> Result<(), SamplyBeamError> {
     let uri = Uri::builder().scheme(config.broker_uri.scheme().unwrap().as_str()).authority(config.broker_uri.authority().unwrap().to_owned()).path_and_query("/v1/health").build().map_err(|e| SamplyBeamError::HttpRequestBuildError(e)).unwrap(); // TODO Unwrap
 
-    let http_get = ||{
-        let req = Request::builder()
-            .method(Method::GET)
-            .uri(&uri)
-            .header(hyper::header::USER_AGENT, env!("SAMPLY_USER_AGENT"))
-            .body(body::Body::empty()).unwrap(); //TODO Unwrap
-        client.request(req)
-    };
-    let resp = http_get
-        .retry(&ConstantBuilder::default()
-            .with_delay(Duration::from_secs(1))
-            .with_max_times(300))
-        .notify(|err, dur| {
-            warn!("Still trying to reach Broker: {}. Will retry in {} seconds.", err, dur.as_secs());
-        })
-        .await?;
+    let resp = retry_notify(
+        backoff::ExponentialBackoffBuilder::default()
+            .with_max_interval(Duration::from_secs(10))
+            .with_max_elapsed_time(Some(Duration::from_secs(30)))
+            .build(),
+        || async {
+            let req = Request::builder()
+                .method(Method::GET)
+                .uri(&uri)
+                .header(hyper::header::USER_AGENT, env!("SAMPLY_USER_AGENT"))
+                .body(body::Body::empty()).unwrap(); //TODO Unwrap
+            Ok(client.request(req).await?)
+        },
+        |err, b: Duration| {
+            warn!("Unable to connect to Broker: {}. Retrying in {}s", err, b.as_secs());
+        }
+    ).await?;
 
     match resp.status() {
         StatusCode::OK => Ok(()),
