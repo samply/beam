@@ -1,4 +1,4 @@
-use std::fmt::Write;
+use std::{fmt::Write, net::SocketAddr};
 
 use hyper::{Client, client::HttpConnector, header};
 use hyper_proxy::ProxyConnector;
@@ -35,7 +35,7 @@ pub(crate) async fn serve(config: config_proxy::Config, client: SamplyHttpClient
     info!("Startup complete. This is Proxy {} listening on {}. {} apps are known: {}", config.proxy_id, config.bind_addr, config.api_keys.len(), apps_joined);
     
     axum::Server::bind(&config.bind_addr)
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(graceful_waiter(shutdown_rx))
         .await?;
 
