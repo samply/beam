@@ -10,7 +10,7 @@ use shared::{EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MsgId, HowLongToBl
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace, warn};
 
-use crate::{serve_tasks, serve_health, serve_pki, crypto::GetCertsFromPki, banner};
+use crate::{serve_tasks, serve_health, serve_pki, banner};
 
 pub(crate) async fn serve() -> anyhow::Result<()> {
     let app = 

@@ -32,5 +32,7 @@ hyper = { version = "0.14.19", features = ["full"] }
 hyper-tls = "0.5.0"
 hyper-proxy = "0.9.1"
 
+health = "0.2.0"
+
 [build-dependencies]
 build-data = "0"

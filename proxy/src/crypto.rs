@@ -11,6 +11,10 @@ pub(crate) struct GetCertsFromBroker {
 }
 
 impl GetCertsFromBroker {
+    fn new() -> Result<Self,SamplyBeamError> {
+        unimplemented!()
+    }
+
     async fn query(&self, path: String) -> Result<String,SamplyBeamError> {
         let uri = Uri::builder()
             .scheme(self.broker_url.scheme().unwrap().to_owned())
@@ -66,11 +70,6 @@ impl GetCerts for GetCertsFromBroker {
     async fn im_certificate_as_pem(&self) -> Result<String,SamplyBeamError> {
         debug!("Retrieving im ca certificate ...");
         self.query("/v1/pki/certs/im-ca".to_string()).await
-    }
-
-
-    fn new() -> Result<Self,SamplyBeamError> {
-        unimplemented!()
     }
 }
 

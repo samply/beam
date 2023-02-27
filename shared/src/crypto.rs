@@ -62,7 +62,6 @@ pub(crate) struct CertificateCache{
 
 #[async_trait]
 pub trait GetCerts: Sync + Send {
-    fn new() -> Result<Self, SamplyBeamError> where Self: Sized;
     async fn certificate_list(&self) -> Result<Vec<String>,SamplyBeamError>;
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String,SamplyBeamError>;
     async fn im_certificate_as_pem(&self) -> Result<String,SamplyBeamError>;

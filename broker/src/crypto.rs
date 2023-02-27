@@ -1,4 +1,4 @@
-use std::future::Future;
+use std::{future::Future, mem::discriminant};
 
 use axum::{async_trait, http::{uri::Scheme, method}};
 use hyper::{Uri, Request, client::{HttpConnector, ResponseFuture}, Client, header, body, StatusCode, Body, Response, Method};
@@ -10,9 +10,12 @@ use tracing::{debug, warn, error};
 use tokio::time::timeout;
 use std::time::Duration;
 
+use crate::health::{self, VaultStatus};
+
 pub struct GetCertsFromPki {
     pki_realm: String,
-    hyper_client: SamplyHttpClient
+    hyper_client: SamplyHttpClient,
+    health_report_sender: tokio::sync::watch::Sender<health::VaultStatus>
 }
 
 #[derive(Debug,Deserialize,Clone,Hash)]
@@ -30,7 +33,45 @@ struct PkiListResponse {
 }
 
 impl GetCertsFromPki {
-    async fn check_vault_health(&self) -> Result<(), SamplyBeamError> {
+    pub(crate) fn new(health_report_sender: tokio::sync::watch::Sender<health::VaultStatus>) -> Result<Self,SamplyBeamError> {
+        let mut certs: Vec<String> = Vec::new();
+        if let Some(dir) = &config::CONFIG_CENTRAL.tls_ca_certificates_dir {
+            for file in std::fs::read_dir(dir).map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read CA certificates: {}", e)))? {
+                if let Ok(file) = file {
+                    certs.push(file.path().to_str().unwrap().into());
+                }
+            }
+            debug!("Loaded local certificates: {}", certs.join(" "));
+        }
+        let hyper_client = http_client::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)), Some(Duration::from_secs(20)))
+            .map_err(SamplyBeamError::HttpProxyProblem)?;
+        let pki_realm = config::CONFIG_CENTRAL.pki_realm.clone();
+
+        Ok(Self { pki_realm , hyper_client, health_report_sender})
+    }
+
+    pub(crate) async fn check_vault_health(&self) -> Result<(), SamplyBeamError> {
+        let state = self.check_vault_health_helper().await;
+        let monitoring_status = match state {
+            Ok(_) => VaultStatus::Ok,
+            Err(ref e) => match e {
+                SamplyBeamError::VaultSealed | SamplyBeamError::VaultNotInitialized => VaultStatus::LockedOrSealed,
+                SamplyBeamError::VaultUnreachable(_) => VaultStatus::Unreachable,
+                _ => VaultStatus::OtherError
+            }
+        };
+        self.health_report_sender.send_if_modified(|val| {
+            if discriminant(val) != discriminant(&monitoring_status) {
+                *val = monitoring_status;
+                true
+            } else {
+                false
+            }
+        });
+        state
+    }
+
+    async fn check_vault_health_helper(&self) -> Result<(), SamplyBeamError> {
         let url = pki_url_builder("sys/health");
         debug!("Checking Vault's health at URL {url}");
         let health = self.hyper_client.get(url).await;
@@ -56,7 +97,7 @@ impl GetCertsFromPki {
     async fn resilient_vault_request(&self, method: &Method, api_path: &str, max_tries: Option<u32>) -> Result<Response<Body>,SamplyBeamError> {
         debug!("Samply.PKI: Vault request to {api_path}");
         let uri = pki_url_builder(api_path);
-        let max_tries = max_tries.unwrap_or(u32::MAX);
+        let max_tries = max_tries.unwrap_or(20);
         for tries in 0..max_tries {
             if tries > 0 {
                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -139,27 +180,10 @@ impl GetCerts for GetCertsFromPki {
             .map_err(|e| SamplyBeamError::VaultOtherError(format!("Cannot parse im-ca certificate: {}",e)))?;
         return Ok(body);
     }
-
-    fn new() -> Result<Self,SamplyBeamError> {
-        let mut certs: Vec<String> = Vec::new();
-        if let Some(dir) = &config::CONFIG_CENTRAL.tls_ca_certificates_dir {
-            for file in std::fs::read_dir(dir).map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read CA certificates: {}", e)))? {
-                if let Ok(file) = file {
-                    certs.push(file.path().to_str().unwrap().into());
-                }
-            }
-            debug!("Loaded local certificates: {}", certs.join(" "));
-        }
-        let hyper_client = http_client::build(&config::CONFIG_SHARED.tls_ca_certificates, Some(Duration::from_secs(30)), Some(Duration::from_secs(20)))
-            .map_err(SamplyBeamError::HttpProxyProblem)?;
-        let pki_realm = config::CONFIG_CENTRAL.pki_realm.clone();
-
-        Ok(Self { pki_realm , hyper_client})
-    }
 }
 
-pub(crate) fn build_cert_getter() -> Result<GetCertsFromPki,SamplyBeamError> {
-    GetCertsFromPki::new()
+pub(crate) fn build_cert_getter(sender: tokio::sync::watch::Sender<VaultStatus>) -> Result<GetCertsFromPki,SamplyBeamError> {
+    GetCertsFromPki::new(sender)
 }
 
 pub(crate) fn pki_url_builder(location: &str) -> Uri {

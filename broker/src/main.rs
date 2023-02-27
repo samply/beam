@@ -7,10 +7,11 @@ mod serve_pki;
 mod banner;
 mod expire;
 mod crypto;
+mod health;
 
 use std::{collections::HashMap, sync::Arc};
 
-use shared::*;
+use shared::{*, config::CONFIG_CENTRAL};
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -20,7 +21,8 @@ pub async fn main() -> anyhow::Result<()> {
     shared::logger::init_logger()?;
     banner::print_banner();
 
-    let cert_getter = crypto::build_cert_getter()?;
+    let (senders, health) = health::Health::make();
+    let cert_getter = crypto::build_cert_getter(senders.vault)?;
     shared::crypto::init_cert_getter(cert_getter);
     shared::crypto::init_ca_chain().await;
     #[cfg(debug_assertions)]
