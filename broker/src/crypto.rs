@@ -50,6 +50,17 @@ impl GetCertsFromPki {
         Ok(Self { pki_realm , hyper_client, health_report_sender})
     }
 
+    async fn report_vault_health(&self, status: VaultStatus) {
+        self.health_report_sender.send_if_modified(|val| {
+            if discriminant(val) != discriminant(&status) {
+                *val = status;
+                true
+            } else {
+                false
+            }
+        });
+    }
+
     pub(crate) async fn check_vault_health(&self) -> Result<(), SamplyBeamError> {
         let state = self.check_vault_health_helper().await;
         let monitoring_status = match state {
@@ -60,14 +71,7 @@ impl GetCertsFromPki {
                 _ => VaultStatus::OtherError
             }
         };
-        self.health_report_sender.send_if_modified(|val| {
-            if discriminant(val) != discriminant(&monitoring_status) {
-                *val = monitoring_status;
-                true
-            } else {
-                false
-            }
-        });
+        self.report_vault_health(monitoring_status);
         state
     }
 
@@ -97,7 +101,7 @@ impl GetCertsFromPki {
     async fn resilient_vault_request(&self, method: &Method, api_path: &str, max_tries: Option<u32>) -> Result<Response<Body>,SamplyBeamError> {
         debug!("Samply.PKI: Vault request to {api_path}");
         let uri = pki_url_builder(api_path);
-        let max_tries = max_tries.unwrap_or(20);
+        let max_tries = max_tries.unwrap_or(u32::MAX);
         for tries in 0..max_tries {
             if tries > 0 {
                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -111,12 +115,17 @@ impl GetCertsFromPki {
             let resp = self.hyper_client.request(req).await;
             let Ok(resp) = resp else {
                 warn!("Samply.PKI: Unable to communicate to vault: {}; retrying (failed attempt #{})", resp.unwrap_err(), tries+2);
+                self.report_vault_health(VaultStatus::Unreachable).await;
                 continue;
             };
             match resp.status() {
-                code if code.is_success() => return Ok(resp),
+                code if code.is_success() => {
+                    self.report_vault_health(VaultStatus::Ok).await;
+                    return Ok(resp);
+                },
                 code if code.is_client_error() || code.is_redirection() => {
                     error!("Samply.PKI: Vault reported client-side Error (code {}), not retrying.", code);
+                    self.report_vault_health(VaultStatus::OtherError).await;
                     return Err(SamplyBeamError::VaultOtherError(format!("Samply.PKI: Vault reported client-side error (code {})", code)));
                 }
                 code => {

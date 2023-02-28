@@ -10,7 +10,7 @@ use shared::{EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MsgId, HowLongToBl
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace, warn};
 
-use crate::{serve_tasks, serve_health, serve_pki, banner, health::Health};
+use crate::{serve_tasks, serve_health, serve_pki, banner, health::Health, crypto};
 
 pub(crate) async fn serve(health: Arc<RwLock<Health>>) -> anyhow::Result<()> {
     let app = 
