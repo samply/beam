@@ -71,7 +71,7 @@ impl GetCertsFromPki {
                 _ => VaultStatus::OtherError
             }
         };
-        self.report_vault_health(monitoring_status);
+        self.report_vault_health(monitoring_status).await;
         state
     }
 
