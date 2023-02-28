@@ -26,7 +26,7 @@ pub async fn main() -> anyhow::Result<()> {
     let cert_getter = crypto::build_cert_getter(senders.vault)?;
 
     shared::crypto::init_cert_getter(cert_getter);
-    shared::crypto::init_ca_chain().await;
+    tokio::task::spawn(shared::crypto::init_ca_chain());
     #[cfg(debug_assertions)]
     if shared::examples::print_example_objects() { return Ok(()); }
     

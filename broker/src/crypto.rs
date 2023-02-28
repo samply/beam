@@ -104,7 +104,7 @@ impl GetCertsFromPki {
         let max_tries = max_tries.unwrap_or(u32::MAX);
         for tries in 0..max_tries {
             if tries > 0 {
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(Duration::from_secs(3)).await;
             }
             let req = Request::builder()
                 .method(method)
