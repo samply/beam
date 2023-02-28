@@ -25,14 +25,6 @@ pub async fn main() -> anyhow::Result<()> {
     let (senders, health) = health::Health::make();
     let cert_getter = crypto::build_cert_getter(senders.vault)?;
 
-    retry_notify(
-        ExponentialBackoff::default(),
-        || async { 
-            Ok(cert_getter.check_vault_health().await?)
-        },
-        |err, dur: Duration| { warn!("Still waiting for Vault to become ready: {}. Retrying in {}s", err, dur.as_secs()); }
-    ).await?;
-
     shared::crypto::init_cert_getter(cert_getter);
     shared::crypto::init_ca_chain().await;
     #[cfg(debug_assertions)]
