@@ -241,8 +241,9 @@ impl CertificateCache {
 
 /// Wrapper for initializing the CA chain. Must be called *after* config initialization 
 pub async fn init_ca_chain() {
-    CERT_CACHE.write().await.set_root_cert(&config::CONFIG_SHARED.root_cert);
-    CERT_CACHE.write().await.set_im_cert().await;
+    let mut cache = CERT_CACHE.write().await;
+    cache.set_root_cert(&config::CONFIG_SHARED.root_cert);
+    cache.set_im_cert().await;
 }
 
 static CERT_GETTER: OnceCell<Box<dyn GetCerts>> = OnceCell::new();
