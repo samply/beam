@@ -64,42 +64,11 @@ async fn handler_tasks(
     State(client): State<SamplyHttpClient>,
     State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
-    mut req: Request<Body>,
+    req: Request<Body>,
 ) -> Result<Response<Body>, (StatusCode, &'static str)> {
-    let path = req.uri().path();
-    let path_query = req
-        .uri()
-        .path_and_query()
-        .map(|v| v.as_str())
-        .unwrap_or(path);
-
-    let target_uri =
-        Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
-            .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
-
-    // Insert Via header
-    req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
-
-    let (body, parts) = encrypt_request(req, &sender).await?;
-
-    let err = (StatusCode::BAD_REQUEST, "Cannot parse body for signing's sake");
-    let sender = match body.as_object() {
-        Some(object) => object.get("from"),
-        None => return Err(err),
-    };
-    let Some(sender) = sender else {
-        return Err(err);
-    };
-    let Ok(sender) = serde_json::from_value::<AppOrProxyId>(sender.to_owned()) else {
-        return Err((StatusCode::BAD_REQUEST, "Cannot deserialize AppOrProxyId from from field"));
-    };
-    let req = sign_request(body, parts, &config, &target_uri, sender).await?;
-
-    trace!("Requesting: {:?}", req);
-    let resp = client.request(req).await.map_err(|e| {
-        warn!("Request to broker failed: {}", e.to_string());
-        (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
-    })?;
+    // Validate Query, forward to server, get response.
+    
+    let resp = forward_request(req, &config, &sender, &client).await?;
 
     // Check reply's signature
 
@@ -145,28 +114,18 @@ async fn handler_tasks(
     Ok(resp)
 }
 
-async fn handler_tasks_stream(
-    State(client): State<SamplyHttpClient>,
-    State(config): State<config_proxy::Config>,
-    AuthenticatedApp(sender): AuthenticatedApp,
-    mut req: Request<Body>
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>,(StatusCode, &'static str)> {
+async fn forward_request(mut req: Request<Body>, config: &config_proxy::Config, sender: &AppId, client: &SamplyHttpClient) -> Result<hyper::Response<Body>, (StatusCode, &'static str)> {
     let path = req.uri().path();
     let path_query = req
         .uri()
         .path_and_query()
         .map(|v| v.as_str())
         .unwrap_or(path);
-
     let target_uri =
         Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
             .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
-
-    // Insert Via header
     req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
-
     let (body, parts) = encrypt_request(req, &sender).await?;
-
     let err = (StatusCode::BAD_REQUEST, "Cannot parse body for signing's sake");
     let sender = match body.as_object() {
         Some(object) => object.get("from"),
@@ -179,12 +138,23 @@ async fn handler_tasks_stream(
         return Err((StatusCode::BAD_REQUEST, "Cannot deserialize AppOrProxyId from from field"));
     };
     let req = sign_request(body, parts, &config, &target_uri, sender).await?;
-
     trace!("Requesting: {:?}", req);
-    let mut resp = client.request(req).await.map_err(|e| {
+    let resp = client.request(req).await.map_err(|e| {
         warn!("Request to broker failed: {}", e.to_string());
         (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
     })?;
+    Ok(resp)
+}
+
+async fn handler_tasks_stream(
+    State(client): State<SamplyHttpClient>,
+    State(config): State<config_proxy::Config>,
+    AuthenticatedApp(sender): AuthenticatedApp,
+    req: Request<Body>
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>,(StatusCode, &'static str)> {
+    // Validate Query, forward to server, get response.
+    
+    let mut resp = forward_request(req, &config, &sender, &client).await?;
 
     let code = resp.status();
     if ! code.is_success() {
