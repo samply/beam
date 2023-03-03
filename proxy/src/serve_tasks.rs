@@ -1,6 +1,7 @@
-use std::time::{Duration, SystemTime};
+use std::{time::{Duration, SystemTime}, convert::Infallible};
 
-use axum::{Router, routing::any, response::Response, http::{HeaderValue, request::Parts}, extract::{State, FromRef}};
+use axum::{Router, routing::{any, put, get}, response::{Response, Sse, sse::Event}, http::{HeaderValue, request::Parts}, extract::{State, FromRef, BodyStream}, body::Bytes};
+use futures::{stream::{StreamExt, TryStreamExt}, Stream};
 use httpdate::fmt_http_date;
 use hyper::{
     body, body::HttpBody,
@@ -17,6 +18,7 @@ use shared::{
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, Msg, MsgEmpty, MsgId, MsgSigned,
     MsgTaskRequest, MsgTaskResult, crypto, http_client::SamplyHttpClient,
 };
+use tokio::io::BufReader;
 use tracing::{debug, error, warn, trace};
 
 use crate::auth::AuthenticatedApp;
@@ -35,8 +37,10 @@ pub(crate) fn router(client: &SamplyHttpClient) -> Router {
     };
     Router::new()
         // We need both path variants so the server won't send us into a redirect loop (/tasks, /tasks/, ...)
-        .route("/v1/tasks", any(handler_tasks))
-        .route("/v1/tasks/*path", any(handler_tasks))
+        .route("/v1/tasks", get(handler_tasks).post(handler_tasks))
+        .route("/v1/tasks/:task_id/results", get(handler_tasks))
+        .route("/v1/tasks/:task_id/results/stream", get(handler_tasks_stream))
+        .route("/v1/tasks/:task_id/results/:app_id", put(handler_tasks))
         .with_state(state)
 }
 
@@ -141,6 +145,118 @@ async fn handler_tasks(
     Ok(resp)
 }
 
+async fn handler_tasks_stream(
+    State(client): State<SamplyHttpClient>,
+    State(config): State<config_proxy::Config>,
+    AuthenticatedApp(sender): AuthenticatedApp,
+    mut req: Request<Body>
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>,(StatusCode, &'static str)> {
+    let path = req.uri().path();
+    let path_query = req
+        .uri()
+        .path_and_query()
+        .map(|v| v.as_str())
+        .unwrap_or(path);
+
+    let target_uri =
+        Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
+            .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
+
+    // Insert Via header
+    req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
+
+    let (body, parts) = encrypt_request(req, &sender).await?;
+
+    let err = (StatusCode::BAD_REQUEST, "Cannot parse body for signing's sake");
+    let sender = match body.as_object() {
+        Some(object) => object.get("from"),
+        None => return Err(err),
+    };
+    let Some(sender) = sender else {
+        return Err(err);
+    };
+    let Ok(sender) = serde_json::from_value::<AppOrProxyId>(sender.to_owned()) else {
+        return Err((StatusCode::BAD_REQUEST, "Cannot deserialize AppOrProxyId from from field"));
+    };
+    let req = sign_request(body, parts, &config, &target_uri, sender).await?;
+
+    trace!("Requesting: {:?}", req);
+    let mut resp = client.request(req).await.map_err(|e| {
+        warn!("Request to broker failed: {}", e.to_string());
+        (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
+    })?;
+
+    let code = resp.status();
+    if ! code.is_success() {
+        return Err((code, "Got unexpected response code from server."));
+    }
+
+    let outgoing = async_stream::stream! {
+        let incoming = resp
+            .body_mut()
+            .map(|result| result.map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, format!("IO Error: {error}"))))
+            .into_async_read();
+
+        let mut reader = async_sse::decode(incoming);
+
+        while let Some(event) = reader.next().await {
+            if let Err(err) = &event {
+                error!("Got error reading SSE stream: {err}");
+                yield Ok(Event::default()
+                    .event("error")
+                    .data("Error reading SSE stream from Broker."));
+            }
+            let event = event.unwrap();
+            match event {
+                async_sse::Event::Retry(_dur) => {
+                    error!("Got a retry message from the Broker.");
+                },
+                async_sse::Event::Message(msg) => {
+                    // Check reply's signature
+                    // let bytes = Bytes::from(msg.data());
+                    let mut bytes = msg.data().to_vec();
+
+                    // TODO: Always return application/jwt from server.
+                    if !bytes.is_empty() {
+                        let json = serde_json::from_slice::<Value>(&bytes);
+                        if json.is_err() {
+                            warn!(
+                                "Answer is no valid JSON; returning as-is to client: \"{}\".",
+                                std::str::from_utf8(&bytes).unwrap_or("(unable to parse)")
+                            );
+                        } else {
+                            let mut json = json.unwrap();
+                            if !validate_and_remove_signatures(&mut json).await {
+                                warn!("The answer was valid JSON but we were unable to validate and remove its signature. The offending JSON was: {}", json);
+                                // return Err(ERR_VALIDATION);
+                                continue;
+                            }
+                            if let Err(err) = decryption_helper(&mut json) {
+                                warn!("Got an error decrypting Broker's reply: {err}");
+                                continue;
+                            }
+                            trace!("Decrypted Msg: {:#?}",json);
+                            bytes = serde_json::to_vec(&json).unwrap();
+                            trace!(
+                                "Validated and stripped signature: \"{}\"",
+                                std::str::from_utf8(&bytes).unwrap_or("Unable to parse string as UTF-8")
+                            );
+                        }
+                    }
+                    let as_string = std::str::from_utf8(&bytes).unwrap();
+                    let event = Event::default()
+                        .event("new_result")
+                        .data(as_string);
+                    yield Ok(event);
+                },
+            }
+        }
+    };
+    // TODO: Somehow return correct error code (not always possible since headers are sent before long request)
+    let sse = Sse::new(outgoing);
+    Ok(sse)
+}
+
 // TODO: This could be a middleware
 async fn sign_request(
     body: Value,
@@ -173,7 +289,7 @@ async fn sign_request(
     parts.uri = target_uri.clone();
     headers_mut.insert(header::HOST, config.broker_host_header.clone());
 
-    let length = body.size_hint().exact().ok_or_else(|| {error!("Cannot calculate length of request"); ERR_BODY})?;
+    let length = HttpBody::size_hint(&body).exact().ok_or_else(|| {error!("Cannot calculate length of request"); ERR_BODY})?;
     if let Some(old) = headers_mut.insert(
         header::CONTENT_LENGTH,
         length.into()) {
