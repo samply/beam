@@ -1,6 +1,6 @@
 use std::{time::{Duration, SystemTime}, convert::Infallible};
 
-use axum::{Router, routing::{any, put, get}, response::{Response, Sse, sse::Event}, http::{HeaderValue, request::Parts}, extract::{State, FromRef, BodyStream}, body::Bytes};
+use axum::{Router, routing::{any, put, get}, response::{Response, Sse, sse::Event, IntoResponse}, http::{HeaderValue, request::Parts}, extract::{State, FromRef, BodyStream}, body::Bytes};
 use futures::{stream::{StreamExt, TryStreamExt}, Stream};
 use httpdate::fmt_http_date;
 use hyper::{
@@ -151,14 +151,22 @@ async fn handler_tasks_stream(
     State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
     req: Request<Body>
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>,(StatusCode, &'static str)> {
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>,(StatusCode, String)> {
     // Validate Query, forward to server, get response.
     
-    let mut resp = forward_request(req, &config, &sender, &client).await?;
+    let mut resp = forward_request(req, &config, &sender, &client).await
+        .map_err(|err| (err.0, err.1.into()))?;
 
     let code = resp.status();
     if ! code.is_success() {
-        return Err((code, "Got unexpected response code from server."));
+        let bytes = body::to_bytes(resp.into_body())
+            .await
+            .ok();
+        let error_msg = bytes
+            .and_then(|v| String::from_utf8(v.into()).ok())
+            .unwrap_or("(unable to parse reply)".into());
+        warn!("Got unexpected response code from server: {code}. Returning error message as-is: \"{error_msg}\"");
+        return Err((code, error_msg));
     }
 
     let outgoing = async_stream::stream! {
