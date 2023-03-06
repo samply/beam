@@ -8,7 +8,7 @@ use axum::{
 };
 use futures_core::{Stream, stream};
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId, WorkStatus, EncryptedMsgTaskRequest, EncryptedMsgTaskResult};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId, WorkStatus, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, sse_event::SseEventType};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace, error, warn};
 
@@ -117,7 +117,7 @@ async fn get_results_for_task_stream(
     let stream = async_stream::stream! {
         for (_from, result) in &results {
             let event = Ok(Event::default()
-                .event("new_result")
+                .event(SseEventType::NewResult)
                 .json_data(result)
                 .unwrap());
             yield event;
@@ -172,6 +172,10 @@ where M: Clone + HasWaitId<I>
         );
             tokio::select! {
                 _ = tokio::time::sleep_until(wait_until) => {
+                    debug!("SSE: Wait expired.");
+                    yield Ok(Event::default()
+                        .event(SseEventType::WaitExpired)
+                        .data("{}"));
                     running = false;
                 },
                 result = new_result_rx.recv() => {
@@ -180,8 +184,8 @@ where M: Clone + HasWaitId<I>
                             if filter.matches(&req) {
                                 let previous = results.insert(req.get_from().clone(), req.clone());
                                 let event_type = match previous {
-                                    Some(_) => "updated_result",
-                                    None => "new_result"
+                                    Some(_) => SseEventType::UpdatedResult,
+                                    None => SseEventType::NewResult
                                 };
                                 yield Ok(Event::default()
                                     .event(event_type)
@@ -198,7 +202,7 @@ where M: Clone + HasWaitId<I>
                             if deleted_task_id == *task_id {
                                 warn!("Task {} was just deleted while someone was waiting for results. Returning the {} results up to now.", task_id, results.len());
                                 yield Ok(Event::default()
-                                    .event("deleted_task")
+                                    .event(SseEventType::DeletedTask)
                                     .data("{ \"task_id\": \"{deleted_task_id}\" }"));
                                 running = false;
                             }

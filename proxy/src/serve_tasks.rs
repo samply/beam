@@ -1,4 +1,4 @@
-use std::{time::{Duration, SystemTime}, convert::Infallible};
+use std::{time::{Duration, SystemTime}, convert::Infallible, str::FromStr};
 
 use axum::{Router, routing::{any, put, get}, response::{Response, Sse, sse::Event, IntoResponse}, http::{HeaderValue, request::Parts}, extract::{State, FromRef, BodyStream}, body::Bytes};
 use futures::{stream::{StreamExt, TryStreamExt}, Stream};
@@ -16,7 +16,7 @@ use serde_json::Value;
 use shared::{
     beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncMsg, DecMsg,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, Msg, MsgEmpty, MsgId, MsgSigned,
-    MsgTaskRequest, MsgTaskResult, crypto, http_client::SamplyHttpClient,
+    MsgTaskRequest, MsgTaskResult, crypto, http_client::SamplyHttpClient, sse_event::SseEventType,
 };
 use tokio::io::BufReader;
 use tracing::{debug, error, warn, trace};
@@ -178,55 +178,89 @@ async fn handler_tasks_stream(
         let mut reader = async_sse::decode(incoming);
 
         while let Some(event) = reader.next().await {
-            if let Err(err) = &event {
-                error!("Got error reading SSE stream: {err}");
-                yield Ok(Event::default()
-                    .event("error")
-                    .data("Error reading SSE stream from Broker."));
-            }
-            let event = event.unwrap();
+            let event = match event {
+                Ok(event) => event,
+                Err(err) => {
+                    error!("Got error reading SSE stream: {err}");
+                    yield Ok(Event::default()
+                        .event(SseEventType::Error)
+                        .data("Error reading SSE stream from Broker (see Proxy logs for details)."));
+                    continue;
+                }
+            };
             match event {
                 async_sse::Event::Retry(_dur) => {
-                    error!("Got a retry message from the Broker.");
+                    error!("Got a retry message from the Broker, which is not yet supported.");
                 },
-                async_sse::Event::Message(msg) => {
-                    // Check reply's signature
-                    // let bytes = Bytes::from(msg.data());
-                    let mut bytes = msg.data().to_vec();
+                async_sse::Event::Message(event) => {
+                    // Check if this is a message or some control event
+                    let event_type = SseEventType::from_str(event.name()).expect("Error in Infallible");
+                    let mut event_as_bytes = event.into_bytes();
+                    let event_as_str = std::str::from_utf8(&event_as_bytes).unwrap_or("(unable to parse)");
 
-                    // TODO: Always return application/jwt from server.
-                    if !bytes.is_empty() {
-                        let json = serde_json::from_slice::<Value>(&bytes);
-                        if json.is_err() {
-                            warn!(
-                                "Answer is no valid JSON; returning as-is to client: \"{}\".",
-                                std::str::from_utf8(&bytes).unwrap_or("(unable to parse)")
-                            );
-                        } else {
-                            let mut json = json.unwrap();
-                            if !validate_and_remove_signatures(&mut json).await {
-                                warn!("The answer was valid JSON but we were unable to validate and remove its signature. The offending JSON was: {}", json);
-                                // return Err(ERR_VALIDATION);
-                                continue;
-                            }
-                            if let Err(err) = decryption_helper(&mut json) {
-                                warn!("Got an error decrypting Broker's reply: {err}");
-                                continue;
-                            }
-                            trace!("Decrypted Msg: {:#?}",json);
-                            bytes = serde_json::to_vec(&json).unwrap();
-                            trace!(
-                                "Validated and stripped signature: \"{}\"",
-                                std::str::from_utf8(&bytes).unwrap_or("Unable to parse string as UTF-8")
-                            );
+                    match &event_type {
+                        SseEventType::DeletedTask | SseEventType::WaitExpired => {
+                            debug!("SSE: Got {event_type} message, forwarding to App.");
+                            yield Ok(Event::default()
+                                .event(event_type)
+                                .data(event_as_str));
+                            continue;
+                        },
+                        SseEventType::Error => {
+                            warn!("SSE: The Broker has reported an error: {event_as_str}");
+                            yield Ok(Event::default()
+                                .event(event_type)
+                                .data(event_as_str));
+                            continue;
+                        },
+                        SseEventType::Undefined => {
+                            error!("SSE: Got a message without event type -- discarding.");
+                            continue;
+                        },
+                        SseEventType::Unknown(s) => {
+                            error!("SSE: Got unknown event type: {s} -- discarding.");
+                            continue;
+                        }
+                        other => {
+                            warn!("Got \"{other}\" event -- parsing.");
                         }
                     }
-                    let as_string = std::str::from_utf8(&bytes).unwrap();
+                    
+                    // Check reply's signature
+
+                    if !event_as_bytes.is_empty() {
+                        let Ok(mut json) = serde_json::from_slice::<Value>(&event_as_bytes) else {
+                            warn!("Answer is no valid JSON; discarding: \"{event_as_str}\".");
+                            // TODO: For some reason, compiler won't accept the following lines, so we can't inform the App about the problem.
+                            //
+                            // warn!("Answer is no valid JSON; returning as-is to client: \"{event_as_str}\".");
+                            // yield Ok(Event::default()
+                            //     .event(SseEventType::Error)
+                            //     .data(format!("Broker sent invalid JSON: {event_as_str}")));
+                            continue;
+                        };
+                        if !validate_and_remove_signatures(&mut json).await {
+                            warn!("The answer was valid JSON but we were unable to validate and remove its signature. The offending JSON was: {}", json);
+                            // return Err(ERR_VALIDATION);
+                            continue;
+                        }
+                        if let Err(err) = decryption_helper(&mut json) {
+                            warn!("Got an error decrypting Broker's reply: {err}");
+                            continue;
+                        }
+                        trace!("Decrypted Msg: {:#?}",json);
+                        event_as_bytes = serde_json::to_vec(&json).unwrap();
+                        trace!(
+                            "Validated and stripped signature: \"{}\"",
+                            std::str::from_utf8(&event_as_bytes).unwrap_or("Unable to parse string as UTF-8")
+                        );
+                    }
+                    let as_string = std::str::from_utf8(&event_as_bytes).unwrap_or("(garbled_utf8)");
                     let event = Event::default()
-                        .event("new_result")
+                        .event(event_type)
                         .data(as_string);
                     yield Ok(event);
-                },
+                }
             }
         }
     };
