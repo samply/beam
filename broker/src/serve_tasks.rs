@@ -32,7 +32,7 @@ pub(crate) fn router() -> Router {
     });
     Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
-        .route("/v1/tasks/:task_id/results", get(get_results_for_task_wrapper))
+        .route("/v1/tasks/:task_id/results", get(get_results_for_task))
         .route("/v1/tasks/:task_id/results/:app_id", put(put_result))
         .with_state(state)
 }
@@ -53,7 +53,7 @@ impl Default for TasksState {
     }
 }
 
-async fn get_results_for_task_wrapper(
+async fn get_results_for_task(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<TasksState>,
     block: HowLongToBlock,
@@ -72,14 +72,14 @@ async fn get_results_for_task_wrapper(
         get_results_for_task_stream(addr, state, block, task_id, msg).await?
             .into_response()
     } else {
-        get_results_for_task(addr, state, block, task_id, msg).await?
+        get_results_for_task_nostream(addr, state, block, task_id, msg).await?
             .into_response()
     };
     Ok(result)
 }
 
 // GET /v1/tasks/:task_id/results
-async fn get_results_for_task(
+async fn get_results_for_task_nostream(
     addr: SocketAddr,
     state: TasksState,
     block: HowLongToBlock,

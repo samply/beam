@@ -37,9 +37,9 @@ pub(crate) fn router(client: &SamplyHttpClient) -> Router {
     };
     Router::new()
         // We need both path variants so the server won't send us into a redirect loop (/tasks, /tasks/, ...)
-        .route("/v1/tasks", get(handler_task_streamwrapper).post(handler_task_streamwrapper))
-        .route("/v1/tasks/:task_id/results", get(handler_task_streamwrapper))
-        .route("/v1/tasks/:task_id/results/:app_id", put(handler_task_streamwrapper))
+        .route("/v1/tasks", get(handler_task).post(handler_task))
+        .route("/v1/tasks/:task_id/results", get(handler_task))
+        .route("/v1/tasks/:task_id/results/:app_id", put(handler_task))
         .with_state(state)
 }
 
@@ -91,7 +91,7 @@ async fn forward_request(mut req: Request<Body>, config: &config_proxy::Config, 
     Ok(resp)
 }
 
-async fn handler_task_streamwrapper(
+async fn handler_task(
     State(client): State<SamplyHttpClient>,
     State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
@@ -109,7 +109,7 @@ async fn handler_task_streamwrapper(
         handler_tasks_stream(client, config, sender, req).await?
             .into_response()
     } else {
-        handler_tasks(client, config, sender, req).await
+        handler_tasks_nostream(client, config, sender, req).await
             .map_err(|e| (e.0, e.1.to_string()))?
             .into_response()
     };
@@ -117,7 +117,7 @@ async fn handler_task_streamwrapper(
     return Ok(result)
 }
 
-async fn handler_tasks(
+async fn handler_tasks_nostream(
     client: SamplyHttpClient,
     config: config_proxy::Config,
     sender: AppId,
