@@ -6,7 +6,7 @@ use httpdate::fmt_http_date;
 use hyper::{
     body, body::HttpBody,
     client::{connect::Connect, HttpConnector},
-    header, Body, Client, Request, StatusCode, Uri, service::Service,
+    header, Body, Client, Request, StatusCode, Uri, service::Service, HeaderMap,
 };
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
@@ -37,10 +37,9 @@ pub(crate) fn router(client: &SamplyHttpClient) -> Router {
     };
     Router::new()
         // We need both path variants so the server won't send us into a redirect loop (/tasks, /tasks/, ...)
-        .route("/v1/tasks", get(handler_tasks).post(handler_tasks))
-        .route("/v1/tasks/:task_id/results", get(handler_tasks))
-        .route("/v1/tasks/:task_id/results/stream", get(handler_tasks_stream))
-        .route("/v1/tasks/:task_id/results/:app_id", put(handler_tasks))
+        .route("/v1/tasks", get(handler_task_streamwrapper).post(handler_task_streamwrapper))
+        .route("/v1/tasks/:task_id/results", get(handler_task_streamwrapper))
+        .route("/v1/tasks/:task_id/results/:app_id", put(handler_task_streamwrapper))
         .with_state(state)
 }
 
@@ -92,10 +91,36 @@ async fn forward_request(mut req: Request<Body>, config: &config_proxy::Config, 
     Ok(resp)
 }
 
-async fn handler_tasks(
+async fn handler_task_streamwrapper(
     State(client): State<SamplyHttpClient>,
     State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
+    headers: HeaderMap,
+    req: Request<Body>
+) -> Result<Response, (StatusCode, String)> {
+    let found = &headers[header::ACCEPT]
+        .to_str().unwrap_or_default()
+        .split(',')
+        .map(|part| part.trim())
+        .find(|part| *part == "text/event-stream")
+        .is_some();
+
+    let result = if *found {
+        handler_tasks_stream(client, config, sender, req).await?
+            .into_response()
+    } else {
+        handler_tasks(client, config, sender, req).await
+            .map_err(|e| (e.0, e.1.to_string()))?
+            .into_response()
+    };
+
+    return Ok(result)
+}
+
+async fn handler_tasks(
+    client: SamplyHttpClient,
+    config: config_proxy::Config,
+    sender: AppId,
     req: Request<Body>,
 ) -> Result<Response<Body>, (StatusCode, &'static str)> {
     // Validate Query, forward to server, get response.
@@ -147,11 +172,11 @@ async fn handler_tasks(
 }
 
 async fn handler_tasks_stream(
-    State(client): State<SamplyHttpClient>,
-    State(config): State<config_proxy::Config>,
-    AuthenticatedApp(sender): AuthenticatedApp,
+    client: SamplyHttpClient,
+    config: config_proxy::Config,
+    sender: AppId,
     req: Request<Body>
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>,(StatusCode, String)> {
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
     // Validate Query, forward to server, get response.
     
     let mut resp = forward_request(req, &config, &sender, &client).await

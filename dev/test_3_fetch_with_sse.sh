@@ -2,7 +2,7 @@
 
 testing "Fetch existing task with proxy1 (via SSE)"
 
-RET=$(curl_get $APP1_P1 -v $P1/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/stream)
+RET=$(curl_get_sse $APP1_P1 -v $P1/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results)
 CODE=$(echo $RET | jq -r .response_code)
 BODY=$(echo $RET | jq -r .body)
 
@@ -44,7 +44,7 @@ success
 
 testing "Fetch existing task with proxy2 (via SSE)"
 
-RET=$(curl_get $APP1_P2 -v $P2/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/stream)
+RET=$(curl_get_sse $APP1_P2 -v $P2/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results)
 CODE=$(echo $RET | jq -r .response_code)
 BODY=$(echo $RET | jq -r .body)
 

@@ -166,6 +166,17 @@ function curl_get {
     echo "$JSON"
 }
 
+function curl_get_sse {
+    APP_ID="$1"
+    shift
+    BODY_FILE=$(mktemp)
+    JSON=$(curl -s -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID $APP_KEY" -H "Accept: text/event-stream" -w %{json} -o $BODY_FILE $@)
+    BODY=$(cat $BODY_FILE | sed 's/\"/\\\"/g')
+    JSON=$(echo "$JSON" | jq ". + {\"body\": \"${BODY}\" }")
+    rm $BODY_FILE
+    echo "$JSON"
+}
+
 function curl_put {
     APP_ID="$1"
     shift

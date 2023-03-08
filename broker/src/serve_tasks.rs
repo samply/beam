@@ -4,9 +4,10 @@ use axum::{
     extract::ConnectInfo,
     http::{StatusCode, header},
     routing::{get, post, put},
-    Json, Router, extract::{Query, Path, State}, response::{IntoResponse, Sse, sse::Event}
+    Json, Router, extract::{Query, Path, State}, response::{IntoResponse, Sse, sse::Event, Response}
 };
 use futures_core::{Stream, stream};
+use hyper::HeaderMap;
 use serde::{Deserialize};
 use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId, WorkStatus, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, sse_event::SseEventType};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
@@ -31,8 +32,7 @@ pub(crate) fn router() -> Router {
     });
     Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
-        .route("/v1/tasks/:task_id/results", get(get_results_for_task))
-        .route("/v1/tasks/:task_id/results/stream", get(get_results_for_task_stream))
+        .route("/v1/tasks/:task_id/results", get(get_results_for_task_wrapper))
         .route("/v1/tasks/:task_id/results/:app_id", put(put_result))
         .with_state(state)
 }
@@ -53,10 +53,35 @@ impl Default for TasksState {
     }
 }
 
-// GET /v1/tasks/:task_id/results
-async fn get_results_for_task(
+async fn get_results_for_task_wrapper(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<TasksState>,
+    block: HowLongToBlock,
+    task_id: MsgId,
+    headers: HeaderMap,
+    msg: MsgSigned<MsgEmpty>,
+) -> Result<Response, (StatusCode, &'static str)> {
+    let found = &headers[header::ACCEPT]
+        .to_str().unwrap_or_default()
+        .split(',')
+        .map(|part| part.trim())
+        .find(|part| *part == "text/event-stream")
+        .is_some();
+
+    let result = if *found {
+        get_results_for_task_stream(addr, state, block, task_id, msg).await?
+            .into_response()
+    } else {
+        get_results_for_task(addr, state, block, task_id, msg).await?
+            .into_response()
+    };
+    Ok(result)
+}
+
+// GET /v1/tasks/:task_id/results
+async fn get_results_for_task(
+    addr: SocketAddr,
+    state: TasksState,
     block: HowLongToBlock,
     task_id: MsgId,
     msg: MsgSigned<MsgEmpty>
@@ -89,8 +114,8 @@ async fn get_results_for_task(
 
 // GET /v1/tasks/:task_id/results/stream
 async fn get_results_for_task_stream(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<TasksState>,
+    addr: SocketAddr,
+    state: TasksState,
     block: HowLongToBlock,
     task_id: MsgId,
     msg: MsgSigned<MsgEmpty>
