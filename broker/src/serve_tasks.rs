@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc, mem::Discriminant, net::SocketAddr, convert::Infallible};
+use std::{collections::HashMap, sync::Arc, mem::Discriminant, net::SocketAddr, convert::Infallible, fmt::Debug};
 
 use axum::{
     extract::ConnectInfo,
@@ -9,7 +9,7 @@ use axum::{
 use futures_core::{Stream, stream};
 use hyper::HeaderMap;
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId, WorkStatus, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, sse_event::SseEventType};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId, WorkStatus, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, sse_event::SseEventType, errors::SamplyBeamError};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace, error, warn};
 
@@ -141,11 +141,19 @@ async fn get_results_for_task_stream(
 
     let stream = async_stream::stream! {
         for (_from, result) in &results {
-            let event = Ok(Event::default()
+            let event = Event::default()
                 .event(SseEventType::NewResult)
-                .json_data(result)
-                .unwrap());
-            yield event;
+                .json_data(result);
+            yield match event {
+                Ok(event) => Ok(event),
+                Err(err) => {
+                    error!("Unable to serialize message: {}; offending message was {:?}", err, result);
+                    Ok(Event::default()
+                        .event(SseEventType::Error)
+                        .data("Internal error: Unable to serialize message.")
+                    )
+                }
+            };
         }
         if let Some(rx_new_result) = rx_new_result {
             let from = msg.get_from();
@@ -176,7 +184,7 @@ fn wait_get_statuscode<S>(vec: &Vec<S>, block: &HowLongToBlock) -> StatusCode {
 
 async fn wait_for_results_for_task_stream<'a, M: Msg, I: PartialEq>(results: &'a mut HashMap<AppOrProxyId, M>, block: &'a HowLongToBlock, mut new_result_rx: Receiver<M>, filter: &'a MsgFilterNoTask<'a>, mut deleted_task_rx: Receiver<MsgId>, task_id: &'a MsgId)
 -> impl Stream<Item = Result<Event,Infallible>> + 'a
-where M: Clone + HasWaitId<I>
+where M: Clone + HasWaitId<I> + Debug
 {
     let wait_until =
         time::Instant::now() + block.wait_time.unwrap_or(time::Duration::from_secs(31536000));
@@ -212,10 +220,19 @@ where M: Clone + HasWaitId<I>
                                     Some(_) => SseEventType::UpdatedResult,
                                     None => SseEventType::NewResult
                                 };
-                                yield Ok(Event::default()
+                                let event = Event::default()
                                     .event(event_type)
-                                    .json_data(&req)
-                                    .unwrap());
+                                    .json_data(&req);
+                                yield match event {
+                                    Ok(event) => Ok(event),
+                                    Err(err) => {
+                                        error!("Unable to serialize message: {}; offending message was {:?}", err, req);
+                                        Ok(Event::default()
+                                            .event(SseEventType::Error)
+                                            .data("Internal error: Unable to serialize message.")
+                                        )
+                                    }
+                                };
                             }
                         },
                         Err(e) => { panic!("Unable to receive from queue new_result_rx: {}", e); }
