@@ -1,5 +1,6 @@
 use axum::{Json, http::Request, body::Body, async_trait};
 
+use itertools::Itertools;
 use once_cell::sync::OnceCell;
 use static_init::dynamic;
 use tokio::{sync::{RwLock, mpsc, oneshot}};
@@ -86,13 +87,15 @@ impl CertificateCache {
     }
 
     /// Searches cache for a certificate with the given ClientId. If not found, updates cache from central vault. If then still not found, return None
-    pub async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<X509> { // TODO: What if multiple certs are found?
+    pub async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<CertificateCacheEntry> { // TODO: What if multiple certs are found?
         let mut result = Vec::new();
         Self::update_certificates().await.unwrap_or_else(|e| { // requires write lock.
             warn!("Updating certificates failed: {}",e);
             ()
         });
         debug!("Getting cert(s) with cname {}", cname);
+        let mut valid = 0;
+        let mut invalid = 0;
         { // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
             let cache = CERT_CACHE.read().await;
             if let Some(serials) = cache.cn_to_serial.get(cname){
@@ -101,16 +104,23 @@ impl CertificateCache {
                     debug!("Fetching certificate with serial {}", serial);
                     let x509 = cache.serial_to_x509.get(serial);
                     if let Some(x509) = x509 {
-                        if let CertificateCacheEntry::Valid(x509) = x509 {
-                            if ! x509_date_valid(x509).unwrap_or(true) {
-                                let Ok(info) = crypto::ProxyCertInfo::try_from(x509) else {
-                                    warn!("Found invalid x509 certificate -- even unable to parse it.");
-                                    continue;
-                                };
-                                warn!("Found x509 certificate with invalid date: CN={}, serial={}", info.common_name, info.serial);
-                            } else {
-                                debug!("Certificate with serial {} successfully retrieved.", serial);
+                        match x509 {
+                            CertificateCacheEntry::Invalid(reason) => {
                                 result.push(x509.clone());
+                                invalid+=1;
+                            }
+                            CertificateCacheEntry::Valid(x509) => {
+                                if ! x509_date_valid(x509).unwrap_or(true) {
+                                    let Ok(info) = crypto::ProxyCertInfo::try_from(x509) else {
+                                        warn!("Found invalid x509 certificate -- even unable to parse it.");
+                                        continue;
+                                    };
+                                    warn!("Found x509 certificate with invalid date: CN={}, serial={}", info.common_name, info.serial);
+                                } else {
+                                    debug!("Certificate with serial {} successfully retrieved.", serial);
+                                    result.push(CertificateCacheEntry::Valid(x509.clone()));
+                                    valid+=1;
+                                }
                             }
                         }
                     }
@@ -120,25 +130,19 @@ impl CertificateCache {
         if result.is_empty() {
             warn!("Did not find certificate for cname {}, even after update.", cname);
         } else {
-            debug!("Found {} certificate(s) for cname {}.", result.len(), cname);
+            debug!("Found {valid} valid and {invalid} invalid certificate(s) for cname {}.", cname);
         }
         result
     }
 
     /// Searches cache for a certificate with the given Serial. If not found, updates cache from central vault. If then still not found, return None
-    pub async fn get_by_serial(serial: &str) -> Option<X509> {
+    pub async fn get_by_serial(serial: &str) -> Option<CertificateCacheEntry> {
         { // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
             let cache = CERT_CACHE.read().await;
             let cert = cache.serial_to_x509.get(serial);
             match cert { // why is this not done in the second try?
-                Some(CertificateCacheEntry::Valid(certificate)) => {
-                    if x509_date_valid(&certificate).unwrap_or(false) { 
-                        return Some(certificate.clone());
-                    }
-                },
-                Some(CertificateCacheEntry::Invalid(reason)) => {
-                    debug!("Ignoring invalid certificate {serial}: {reason}");
-                    return None;
+                Some(x) => {
+                    return Some(x.clone());
                 },
                 None => ()
             }
@@ -150,11 +154,7 @@ impl CertificateCache {
         let cache = CERT_CACHE.read().await;
         let cert = cache.serial_to_x509.get(serial);
 
-        return if let Some(CertificateCacheEntry::Valid(certificate)) = cert {
-            Some(certificate.clone())
-        } else {
-            None
-        }
+        cert.cloned()
     }
 
     /// Manually update cache from fetching all certs from the central vault
@@ -326,14 +326,11 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
     cc
 };
 
-async fn get_cert_by_serial(serial: &str) -> Option<X509>{
-    match CertificateCache::get_by_serial(serial).await {
-        Some(x) => Some(x.clone()),
-        None => None
-    }
+async fn get_cert_by_serial(serial: &str) -> Option<CertificateCacheEntry>{
+    CertificateCache::get_by_serial(serial).await
 }
 
-async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<X509>{
+async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<CertificateCacheEntry>{
     CertificateCache::get_all_certs_by_cname(cname).await
 }
 
@@ -344,52 +341,58 @@ pub struct CryptoPublicPortion {
     pub pubkey: String,
 }
 
-pub async fn get_all_certs_and_clients_by_cname_as_pemstr(cname: &ProxyId) -> Option<Vec<CryptoPublicPortion>> {
+pub async fn get_all_certs_and_clients_by_cname_as_pemstr(cname: &ProxyId) -> Vec<Result<CryptoPublicPortion,CertificateInvalidReason>> {
     get_all_certs_by_cname(cname).await
         .iter()
-        .map(|c| extract_x509(c))
+        .map(|c| {
+            match c {
+                CertificateCacheEntry::Valid(c) => extract_x509(c),
+                CertificateCacheEntry::Invalid(reason) => Err(reason.clone()),
+            }
+        })
         .collect()
 }
 
-pub async fn get_cert_and_client_by_serial_as_pemstr(serial: &str) -> Option<CryptoPublicPortion> {
-    let cert = get_cert_by_serial(serial).await;
-    if let Some(x) = cert {
-        extract_x509(&x)
-    } else {
-        None
+pub async fn get_cert_and_client_by_serial_as_pemstr(serial: &str) -> Option<Result<CryptoPublicPortion,CertificateInvalidReason>> {
+    match get_cert_by_serial(serial).await {
+        None => None,
+        Some(CertificateCacheEntry::Valid(valid_cert)) => {
+            Some(extract_x509(&valid_cert))
+        },
+        Some(CertificateCacheEntry::Invalid(reason)) => {
+            Some(Err(reason))
+        }
     }
 }
 
-pub async fn get_newest_certs_for_cnames_as_pemstr(cnames: Vec<ProxyId>) -> Option<Vec<CryptoPublicPortion>> {
+pub async fn get_newest_certs_for_cnames_as_pemstr(cnames: impl IntoIterator<Item = &ProxyId>) -> Option<Vec<CryptoPublicPortion>> {
     let mut result: Vec<CryptoPublicPortion> = Vec::new(); // No fancy map/iter, bc of async
     for id in cnames {
-        let certs = get_all_certs_and_clients_by_cname_as_pemstr(&id).await;
-        if let Some(certificates) = certs {
-            if let Some(best_candidate) = get_best_other_certificate(&certificates) {
-                result.push(best_candidate);
-            }
-        };
+        let certs = get_all_certs_and_clients_by_cname_as_pemstr(id).await
+            .into_iter()
+            .flatten()
+            .collect();
+        if let Some(best_candidate) = get_best_other_certificate(&certs) {
+            result.push(best_candidate);
+        }
     }
     (!result.is_empty()).then_some(result)
 }
 
-fn extract_x509(cert: &X509) -> Option<CryptoPublicPortion> {
+fn extract_x509(cert: &X509) -> Result<CryptoPublicPortion, CertificateInvalidReason> {
     // Public key
-    let pubkey = cert.public_key();
-    if pubkey.is_err() {
-        error!(?pubkey);
-        return None;
-    }
-    let pubkey = pubkey.unwrap().public_key_to_pem();
-    if pubkey.is_err() {
-        error!(?pubkey);
-        return None;
-    }
-    let pubkey = std::str::from_utf8(&pubkey.unwrap()).unwrap().to_string();
+    let pubkey = cert.public_key()
+        .map_err(|e| CertificateInvalidReason::InvalidPublicKey)?
+        .public_key_to_pem()
+        .map_err(|e| CertificateInvalidReason::InvalidPublicKey)
+        .and_then(|v| 
+            std::str::from_utf8(&v)
+            .map_err(|e| CertificateInvalidReason::InvalidPublicKey)
+        )?;
 
     let cn = cert.subject_name().entries().next();
     if cn.is_none() {
-        return None;
+        return Err(CertificateInvalidReason::NoCommonName);
     }
     let verified_sender = cn
         .and_then(|s| Some(s.data()))
@@ -399,22 +402,18 @@ fn extract_x509(cert: &X509) -> Option<CryptoPublicPortion> {
         })
         .and_then(|s| Some(s.to_string()));
     let verified_sender = match verified_sender {
-        None => { return None; },
+        None => { return Err(CertificateInvalidReason::InvalidCommonName) },
         Some(x) => {
             match ProxyId::new(&x) {
                 Ok(x) => x,
-                Err(_) => { return None; }
+                Err(err) => { return Err(CertificateInvalidReason::InvalidCommonName); }
             }
         }
     };
-    let cert = cert
-        .to_pem()
-        .ok()?;
-    let cert = X509::from_pem(&cert).ok()?;
-    Some(CryptoPublicPortion {
+    Ok(CryptoPublicPortion {
         beam_id: verified_sender,
-        cert,
-        pubkey,
+        cert: *cert,
+        pubkey: pubkey.into(),
     })
 }
 
@@ -564,7 +563,7 @@ pub async fn get_proxy_public_keys(receivers: impl IntoIterator<Item = &AppOrPro
             AppOrProxyId::ProxyId(id) => id.to_owned(),
             AppOrProxyId::AppId(id) => id.proxy_id()
         }).collect();
-    let receivers_crypto_bundle = crypto::get_newest_certs_for_cnames_as_pemstr(proxy_receivers).await;
+    let receivers_crypto_bundle = crypto::get_newest_certs_for_cnames_as_pemstr(proxy_receivers.iter()).await;
     let receivers_keys = match receivers_crypto_bundle {
         Some(vec) => Ok(vec.iter().map(|crypt_publ| rsa::RsaPublicKey::from_public_key_pem(&crypt_publ.pubkey).expect("Cannot collect recipients' public keys")).collect::<Vec<rsa::RsaPublicKey>>()), // TODO Expect
         None => Err(SamplyBeamError::SignEncryptError("Cannot gather encryption keys.".into()))

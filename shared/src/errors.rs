@@ -86,12 +86,12 @@ pub enum CertificateInvalidReason {
     InvalidCommonName,
     #[error("Unable to read serial")]
     WrongSerial,
-    #[error("{0}")]
-    CertificateError(&'static str),
     #[error("Certificate's start/end date is invalid (e.g. expired)")]
     InvalidDate,
     #[error("Problem with the certificate's public key")]
     InvalidPublicKey,
+    #[error("Internal error: {0}")]
+    InternalError(String),
     #[error("Other problem: {0}")]
-    Other(String)
+    Other(String),
 }
