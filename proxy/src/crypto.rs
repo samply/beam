@@ -3,7 +3,7 @@ use hyper::{Client, client::HttpConnector, Uri, StatusCode};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use shared::{crypto::GetCerts, errors::{SamplyBeamError, CertificateInvalidReason}, config, config_proxy::Config, http_client::SamplyHttpClient};
-use tracing::debug;
+use tracing::{debug, warn, info};
 
 pub(crate) struct GetCertsFromBroker {
     client: SamplyHttpClient,
@@ -21,16 +21,14 @@ impl GetCertsFromBroker {
         let resp = hyper::body::to_bytes(req.body_mut()).await?;
         let resp = String::from_utf8(resp.to_vec())
             .map_err(|e| SamplyBeamError::HttpParseError(e))?;
-        if ! req.status().is_success() {
-            match req.status() {
-                StatusCode::NOT_FOUND => Ok(String::new()),
-                StatusCode::NO_CONTENT => {
-                    Err(SamplyBeamError::CertificateError(CertificateInvalidReason::NotDisclosedByBroker))
-                },
-                x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}, error message: {}", resp)))
-            }
-        } else {
-            Ok(resp)
+        match req.status() {
+            StatusCode::NOT_FOUND => Ok(String::new()),
+            StatusCode::NO_CONTENT => {
+                debug!("Broker rejected to send us invalid certificate on path {path}");
+                Err(SamplyBeamError::CertificateError(CertificateInvalidReason::NotDisclosedByBroker))
+            },
+            StatusCode::OK => Ok(resp),
+            x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}, error message: {}", resp)))
         }
     }
 
@@ -44,16 +42,14 @@ impl GetCertsFromBroker {
         let resp = hyper::body::to_bytes(req.body_mut()).await?;
         let json: Vec<String> = serde_json::from_slice(&resp)
             .map_err(|e| SamplyBeamError::VaultOtherError(format!("Unable to parse vault reply: {}", e)))?;
-        if ! req.status().is_success() {
-            match req.status() {
-                StatusCode::NOT_FOUND => Ok(json),
-                StatusCode::NO_CONTENT => {
-                    Err(SamplyBeamError::CertificateError(CertificateInvalidReason::NotDisclosedByBroker))
-                },
-                x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}")))
-            }
-        } else {
-            Ok(json)
+        match req.status() {
+            StatusCode::NOT_FOUND => Ok(json),
+            StatusCode::NO_CONTENT => {
+                debug!("Broker rejected to send us invalid certificate on path {path}");
+                Err(SamplyBeamError::CertificateError(CertificateInvalidReason::NotDisclosedByBroker))
+            },
+            StatusCode::OK => Ok(json),
+            x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}")))
         }
     }
 }

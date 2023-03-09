@@ -62,7 +62,7 @@ pub(crate) enum CertificateCacheEntry {
 pub(crate) struct CertificateCache{
     serial_to_x509: HashMap<Serial, CertificateCacheEntry>,
     cn_to_serial: HashMap<ProxyId, Vec<Serial>>,
-    update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>,
+    update_trigger: mpsc::Sender<oneshot::Sender<Result<usize,SamplyBeamError>>>,
     root_cert: Option<X509>, // Might not be available at initialization time
     im_cert: Option<X509> // Might not be available at initialization time
 }
@@ -76,7 +76,7 @@ pub trait GetCerts: Sync + Send {
 }
 
 impl CertificateCache {
-    pub fn new(update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>) -> Result<CertificateCache,SamplyBeamError> {
+    pub fn new(update_trigger: mpsc::Sender<oneshot::Sender<Result<usize,SamplyBeamError>>>) -> Result<CertificateCache,SamplyBeamError> {
         Ok(Self{
             serial_to_x509: HashMap::new(),
             cn_to_serial: HashMap::new(),
@@ -91,7 +91,7 @@ impl CertificateCache {
         let mut result = Vec::new();
         Self::update_certificates().await.unwrap_or_else(|e| { // requires write lock.
             warn!("Updating certificates failed: {}",e);
-            ()
+            0
         });
         debug!("Getting cert(s) with cname {}", cname);
         let mut valid = 0;
@@ -149,7 +149,7 @@ impl CertificateCache {
         }
         Self::update_certificates().await.unwrap_or_else(|e| { // requires write lock.
             warn!("Updating certificates failed: {}",e);
-            ()
+            0
         });
         let cache = CERT_CACHE.read().await;
         let cert = cache.serial_to_x509.get(serial);
@@ -158,15 +158,19 @@ impl CertificateCache {
     }
 
     /// Manually update cache from fetching all certs from the central vault
-    async fn update_certificates() -> Result<(),SamplyBeamError> {
+    async fn update_certificates() -> Result<usize,SamplyBeamError> {
         debug!("Triggering certificate update ...");
-        let (tx, rx) = oneshot::channel::<Result<(),SamplyBeamError>>();
+        let (tx, rx) = oneshot::channel::<Result<usize,SamplyBeamError>>();
         CERT_CACHE.read().await.update_trigger.send(tx).await
             .expect("Internal Error: Certificate Store Updater is not listening for requests.");
         match rx.await {
-            Ok(result) => {
-                debug!("Certificate update successfully completed.");
-                result
+            Ok(Ok(result)) => {
+                debug!("Certificate update successfully completed: Got {result} new certificates.");
+                Ok(result)
+            },
+            Ok(Err(e)) => {
+                error!("Unable to sync certificates: {e}");
+                Err(e)
             },
             Err(e) => Err(SamplyBeamError::InternalSynchronizationError(e.to_string()))
         }
@@ -178,13 +182,7 @@ impl CertificateCache {
         let new_certificate_serials: Vec<&String> = {
             certificate_list.iter()
                 .filter(|serial| {
-                    let cached = self.serial_to_x509.get(*serial);
-                    if let Some(CertificateCacheEntry::Invalid(reason)) = cached {
-                        warn!("Skipping known-to-be-broken certificate {serial}: {reason}");
-                        false
-                    } else {
-                        true
-                    }
+                    ! self.serial_to_x509.contains_key(*serial)
                 })
                 .collect()
         };
@@ -197,11 +195,25 @@ impl CertificateCache {
 
             let certificate = CERT_GETTER.get().unwrap().certificate_by_serial_as_pem(serial).await;
             if let Err(e) = certificate {
-                warn!("Could not retrieve certificate for serial {serial}: {}", e);
+                match e {
+                    SamplyBeamError::CertificateError(err) => {
+                        debug!("Will skip invalid certificate {serial} from now on.");
+                        self.serial_to_x509.insert(serial.clone(), CertificateCacheEntry::Invalid(err));
+                    },
+                    other_error => {
+                        warn!("Could not retrieve certificate for serial {serial}: {}", other_error);
+                    }
+                };
                 continue;
             }
             let certificate = certificate.unwrap();
-            let opensslcert = X509::from_pem(certificate.as_bytes())?;
+            let opensslcert = match X509::from_pem(certificate.as_bytes()) {
+                Ok(x) => x,
+                Err(err) => {
+                    error!("Skipping unparseable certificate {serial}: {err}");
+                    continue;
+                },
+            };
             let commonnames: Vec<ProxyId> = 
                 opensslcert.subject_name()
                 .entries()
@@ -306,20 +318,27 @@ pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
 
 #[dynamic(lazy)]
 pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
-    let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<(),SamplyBeamError>>>(1);
+    let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<usize,SamplyBeamError>>>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
     let cc2 = cc.clone();
     tokio::task::spawn(async move {
-        while let Some(_sender) = rx.recv().await {
+        while let Some(sender) = rx.recv().await {
             let mut locked_cache = cc2.write().await;
             let result = locked_cache.update_certificates_mut().await;
-            match result {
+            match &result {
                 Err(e) => {
                     warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped? Reason: {e}");
                 },
                 Ok(count) => {
-                    info!("Added {count} new certificates.");
+                    if *count > 0 {
+                        info!("Added {count} new certificates.");
+                    } else {
+                        info!("No new certificates have been found.");
+                    }
                 }
+            };
+            if let Err(_err) = sender.send(result) {
+                warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
             }
         }
     });
