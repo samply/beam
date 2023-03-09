@@ -9,7 +9,7 @@ use rsa::{PublicKey, RsaPrivateKey, RsaPublicKey, PublicKeyParts, PaddingScheme,
 use sha2::{Sha256, Digest};
 use openssl::{x509::X509, string::OpensslString, asn1::{Asn1Time, Asn1TimeRef}, error::ErrorStack, rand::rand_bytes};
 
-use crate::{errors::SamplyBeamError, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId, AppOrProxyId}, config_shared::ConfigCrypto, crypto};
+use crate::{errors::{SamplyBeamError, CertificateInvalidReason}, MsgTaskRequest, EncryptedMsgTaskRequest, config, beam_id::{ProxyId, BeamId, AppOrProxyId}, config_shared::ConfigCrypto, crypto};
 
 type Serial = String;
 
@@ -28,15 +28,15 @@ impl TryFrom<&X509> for ProxyCertInfo {
         // let remaining = Asn1Time::days_from_now(0)?.diff(cert.not_after())?;
         let common_name = cert.subject_name().entries()
             .find(|c| c.object().nid() == openssl::nid::Nid::COMMONNAME)
-            .ok_or(SamplyBeamError::CertificateError("Cannot find Common Name in certificate."))?
+            .ok_or(SamplyBeamError::CertificateError(CertificateInvalidReason::NoCommonName))?
             .data().as_utf8()?.to_string();
 
-        const SERIALERR: SamplyBeamError = SamplyBeamError::CertificateError("Error reading certificate's serial");
+        const SERIALERR: SamplyBeamError = SamplyBeamError::CertificateError(CertificateInvalidReason::WrongSerial);
 
         let certinfo = ProxyCertInfo {
             proxy_name: common_name
                 .split('.')
-                .next().ok_or(SamplyBeamError::CertificateError("Invalid Certificate CN: Did not contain '.'"))?
+                .next().ok_or(SamplyBeamError::CertificateError(CertificateInvalidReason::InvalidCommonName))?
                 .into(),
             common_name,
             valid_since: cert.not_before().to_string(),
@@ -52,13 +52,18 @@ impl TryFrom<&X509> for ProxyCertInfo {
     }
 }
 
+#[derive(Clone)]
+enum CertificateCacheEntry {
+    Valid(X509),
+    Invalid(CertificateInvalidReason)
+}
+
 pub(crate) struct CertificateCache{
-    serial_to_x509: HashMap<Serial, X509>,
+    serial_to_x509: HashMap<Serial, CertificateCacheEntry>,
     cn_to_serial: HashMap<ProxyId, Vec<Serial>>,
     update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>,
     root_cert: Option<X509>, // Might not be available at initialization time
-    im_cert: Option<X509>, // Might not be available at initialization time
-    broken_certs: HashMap<Serial, SamplyBeamError>
+    im_cert: Option<X509> // Might not be available at initialization time
 }
 
 #[async_trait]
@@ -76,8 +81,7 @@ impl CertificateCache {
             cn_to_serial: HashMap::new(),
             update_trigger,
             root_cert: None,
-            im_cert: None,
-            broken_certs: HashMap::new()
+            im_cert: None
         })
     }
 
@@ -97,15 +101,17 @@ impl CertificateCache {
                     debug!("Fetching certificate with serial {}", serial);
                     let x509 = cache.serial_to_x509.get(serial);
                     if let Some(x509) = x509 {
-                        if ! x509_date_valid(x509).unwrap_or(true) {
-                            let Ok(info) = crypto::ProxyCertInfo::try_from(x509) else {
-                                warn!("Found invalid x509 certificate -- even unable to parse it.");
-                                continue;
-                            };
-                            warn!("Found x509 certificate with invalid date: CN={}, serial={}", info.common_name, info.serial);
-                        } else {
-                            debug!("Certificate with serial {} successfully retrieved.", serial);
-                            result.push(x509.clone());
+                        if let CertificateCacheEntry::Valid(x509) = x509 {
+                            if ! x509_date_valid(x509).unwrap_or(true) {
+                                let Ok(info) = crypto::ProxyCertInfo::try_from(x509) else {
+                                    warn!("Found invalid x509 certificate -- even unable to parse it.");
+                                    continue;
+                                };
+                                warn!("Found x509 certificate with invalid date: CN={}, serial={}", info.common_name, info.serial);
+                            } else {
+                                debug!("Certificate with serial {} successfully retrieved.", serial);
+                                result.push(x509.clone());
+                            }
                         }
                     }
                 }
@@ -125,10 +131,16 @@ impl CertificateCache {
             let cache = CERT_CACHE.read().await;
             let cert = cache.serial_to_x509.get(serial);
             match cert { // why is this not done in the second try?
-                Some(certificate) if x509_date_valid(&certificate).unwrap_or(false) => { 
-                    return Some(certificate.clone());
+                Some(CertificateCacheEntry::Valid(certificate)) => {
+                    if x509_date_valid(&certificate).unwrap_or(false) { 
+                        return Some(certificate.clone());
+                    }
                 },
-                _ => ()
+                Some(CertificateCacheEntry::Invalid(reason)) => {
+                    debug!("Ignoring invalid certificate {serial}: {reason}");
+                    return None;
+                },
+                None => ()
             }
         }
         Self::update_certificates().await.unwrap_or_else(|e| { // requires write lock.
@@ -136,7 +148,13 @@ impl CertificateCache {
             ()
         });
         let cache = CERT_CACHE.read().await;
-        return cache.serial_to_x509.get(serial).cloned();
+        let cert = cache.serial_to_x509.get(serial);
+
+        return if let Some(CertificateCacheEntry::Valid(certificate)) = cert {
+            Some(certificate.clone())
+        } else {
+            None
+        }
     }
 
     /// Manually update cache from fetching all certs from the central vault
@@ -159,10 +177,10 @@ impl CertificateCache {
         let certificate_list = CERT_GETTER.get().unwrap().certificate_list().await?;
         let new_certificate_serials: Vec<&String> = {
             certificate_list.iter()
-                .filter(|serial| !self.serial_to_x509.contains_key(*serial))
                 .filter(|serial| {
-                    if let Some(invalidity) = self.broken_certs.get(*serial) {
-                        warn!("Skipping known-to-be-broken certificate {serial}: {invalidity}");
+                    let cached = self.serial_to_x509.get(*serial);
+                    if let Some(CertificateCacheEntry::Invalid(reason)) = cached {
+                        warn!("Skipping known-to-be-broken certificate {serial}: {reason}");
                         false
                     } else {
                         true
@@ -198,7 +216,7 @@ impl CertificateCache {
 
             let err = {
                 if commonnames.is_empty() {
-                    Some(SamplyBeamError::CertificateError("Certificate has no CNAME"))
+                    Some(CertificateInvalidReason::NoCommonName)
                 } else if let Err(e) = verify_cert(&opensslcert, &self.im_cert.as_ref().expect("No intermediate CA cert found")) {
                     Some(e)
                 } else {
@@ -207,11 +225,11 @@ impl CertificateCache {
             };
             if let Some(err) = err {
                 warn!("Certificate with serial {} invalid: {}.", serial, err);
-                self.broken_certs.insert(serial.clone(), err);
+                self.serial_to_x509.insert(serial.clone(), CertificateCacheEntry::Invalid(err));
             } else {
                 let cn = commonnames.first()
                     .expect("Internal error: common names empty; this should not happen");
-                self.serial_to_x509.insert(serial.clone(), opensslcert);
+                self.serial_to_x509.insert(serial.clone(), CertificateCacheEntry::Valid(opensslcert));
                 match self.cn_to_serial.get_mut(cn) {
                     Some(serials) => serials.push(serial.clone()),
                     None => {
@@ -227,6 +245,7 @@ impl CertificateCache {
 
     }
 
+/*
     /// Returns all ClientIds and associated certificates currently in cache
     pub async fn get_all_cnames_and_certs() -> Vec<(ProxyId,X509)> {
         let cache = &CERT_CACHE.read().await.serial_to_x509;
@@ -245,7 +264,7 @@ impl CertificateCache {
             }
         }
         result
-    }
+    }*/
 
     /// Sets the root certificate, which is usually not available at static time. Must be called before certificate validation
     pub fn set_root_cert(&mut self, root_certificate: &X509) {
@@ -400,15 +419,20 @@ fn extract_x509(cert: &X509) -> Option<CryptoPublicPortion> {
 }
 
 /// Verify whether the certificate is signed by root_ca_cert and the dates are valid
-pub fn verify_cert(certificate: &X509, root_ca_cert: &X509) -> Result<(),SamplyBeamError> {
-    let client_ok = certificate.verify(root_ca_cert.public_key()?.as_ref())?;
-    let date_ok = x509_date_valid(&certificate)?;
+pub fn verify_cert(certificate: &X509, root_ca_cert: &X509) -> Result<(),CertificateInvalidReason> {
+    let client_ok = certificate
+        .verify(
+            root_ca_cert.public_key()
+                .map_err(|e| CertificateInvalidReason::InvalidPublicKey)?
+        .as_ref())
+            .map_err(|e| CertificateInvalidReason::Other(e.to_string()))?;
+    let date_ok = x509_date_valid(&certificate)
+        .map_err(|_err| CertificateInvalidReason::InvalidDate)?;
 
     match (client_ok, date_ok) {
         (true, true) => Ok(()), // TODO: Check if actually constant time
-        (true, false) => Err(SamplyBeamError::CertificateError("Certificate's start/end date is invalid (e.g. expired)")),
-        (false, true) => Err(SamplyBeamError::CertificateError("Problem with the certificate's public key.")),
-        (false, false) => Err(SamplyBeamError::CertificateError("Both the cert's date and its public key are invalid."))
+        (true, false) => Err(CertificateInvalidReason::InvalidDate),
+        (false, _) => Err(CertificateInvalidReason::InvalidPublicKey),
     }
 }
 
