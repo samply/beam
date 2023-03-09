@@ -322,11 +322,8 @@ To better support asynchronous use cases, such as web-based user interfaces stre
 Please note: This feature is experimental and subject to changes.
 
 Method: `GET`  
-URL: `/v1/tasks/<task_id>/results?wait_count=3`
-Headers:
-
-- `Accept: text/event-stream`
-
+URL: `/v1/tasks/<task_id>/results?wait_count=3`  
+Header: `Accept: text/event-stream`  
 Parameters:
 
 - The same parameters as for long-polling, i.e. `to`, `from`, `filter=todo`, `wait_count`, and `wait_time` are supported.
