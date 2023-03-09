@@ -55,14 +55,16 @@ function create_intermediate_ca() {
 
 function request_proxy() {
      application="${1:-app1}"
+     ttl="${2:-24h}"
      cn="${application}.$BROKER_ID"
-     request "$application" "$cn"
+     request "$application" "$cn" "$ttl" 
 }
 
 function request() {
      application=$1
      cn=$2
-     data="{\"common_name\": \"$cn\", \"ttl\": \"24h\"}"
+     ttl=$3
+     data="{\"common_name\": \"$cn\", \"ttl\": \"$ttl\"}"
      echo $data
      echo "Creating Certificate for domain $cn"
      curl --header "X-Vault-Token: $VAULT_TOKEN" \
@@ -97,20 +99,24 @@ case "$1" in
           init
           ;;
      request_proxy)
-          request_proxy $2
+          request_proxy $2 $3
           ;;
      devsetup)
           clean
           touch ${PROXY1_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
           touch ${PROXY2_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
+          touch test1.priv.pem # see https://github.com/docker/compose/issues/8305
+          touch test2.priv.pem # see https://github.com/docker/compose/issues/8305
           #touch root.crt.pem # see https://github.com/docker/compose/issues/8305
           start
           while ! [ "$(curl -s $VAULT_ADDR/v1/sys/health | jq -r .sealed)" == "false" ]; do echo "Waiting ..."; sleep 0.1; done
           docker-compose exec -T vault sh -c "https_proxy=$http_proxy apk add --no-cache bash curl jq"
           docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki init"
-          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY1_ID_SHORT"
-          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY2_ID_SHORT"
-          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy dummy"
+          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY1_ID_SHORT" "24h"
+          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY2_ID_SHORT" "24h"
+          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy dummy" "24h"
+          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy test1 2s"
+          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy test2 2s"
           ;;
      *)
           echo "Usage: $0 start|init|(request [AppName])"

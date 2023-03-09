@@ -64,7 +64,9 @@ async fn get_certificate_by_serial(
             Err(PkiError::CommunicationWithVault(err))
         }
     }?;
-    let pem = cert?.cert.to_pem()
+    let pem = cert
+        .map_err(|_err| PkiError::CertificateError)?
+        .cert.to_pem()
         .map_err(|e| PkiError::OpenSslError(e.to_string()))?;
     debug!("<= Returning requested cert with serial {serial}");
     Ok(String::from_utf8(pem)?)

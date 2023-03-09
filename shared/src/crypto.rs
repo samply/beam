@@ -44,9 +44,9 @@ impl TryFrom<&X509> for ProxyCertInfo {
             valid_until: cert.not_after().to_string(),
             serial: cert.serial_number()
                 .to_bn()
-                .map_err(|e| SERIALERR)?
+                .map_err(|_e| SERIALERR)?
                 .to_hex_str()
-                .map_err(|e| SERIALERR)?
+                .map_err(|_e| SERIALERR)?
                 .to_string()
         };
         Ok(certinfo)
@@ -54,7 +54,7 @@ impl TryFrom<&X509> for ProxyCertInfo {
 }
 
 #[derive(Clone)]
-enum CertificateCacheEntry {
+pub(crate) enum CertificateCacheEntry {
     Valid(X509),
     Invalid(CertificateInvalidReason)
 }
@@ -382,12 +382,12 @@ pub async fn get_newest_certs_for_cnames_as_pemstr(cnames: impl IntoIterator<Ite
 fn extract_x509(cert: &X509) -> Result<CryptoPublicPortion, CertificateInvalidReason> {
     // Public key
     let pubkey = cert.public_key()
-        .map_err(|e| CertificateInvalidReason::InvalidPublicKey)?
+        .map_err(|_e| CertificateInvalidReason::InvalidPublicKey)?
         .public_key_to_pem()
-        .map_err(|e| CertificateInvalidReason::InvalidPublicKey)
+        .map_err(|_e| CertificateInvalidReason::InvalidPublicKey)
         .and_then(|v| 
-            std::str::from_utf8(&v)
-            .map_err(|e| CertificateInvalidReason::InvalidPublicKey)
+            String::from_utf8(v)
+            .map_err(|_e| CertificateInvalidReason::InvalidPublicKey)
         )?;
 
     let cn = cert.subject_name().entries().next();
@@ -406,13 +406,13 @@ fn extract_x509(cert: &X509) -> Result<CryptoPublicPortion, CertificateInvalidRe
         Some(x) => {
             match ProxyId::new(&x) {
                 Ok(x) => x,
-                Err(err) => { return Err(CertificateInvalidReason::InvalidCommonName); }
+                Err(_err) => { return Err(CertificateInvalidReason::InvalidCommonName); }
             }
         }
     };
     Ok(CryptoPublicPortion {
         beam_id: verified_sender,
-        cert: *cert,
+        cert: cert.clone(),
         pubkey: pubkey.into(),
     })
 }
@@ -422,7 +422,7 @@ pub fn verify_cert(certificate: &X509, root_ca_cert: &X509) -> Result<(),Certifi
     let client_ok = certificate
         .verify(
             root_ca_cert.public_key()
-                .map_err(|e| CertificateInvalidReason::InvalidPublicKey)?
+                .map_err(|_e| CertificateInvalidReason::InvalidPublicKey)?
         .as_ref())
             .map_err(|e| CertificateInvalidReason::Other(e.to_string()))?;
     let date_ok = x509_date_valid(&certificate)

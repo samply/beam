@@ -2,7 +2,7 @@ use axum::{async_trait, Json};
 use hyper::{Client, client::HttpConnector, Uri, StatusCode};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use shared::{crypto::GetCerts, errors::SamplyBeamError, config, config_proxy::Config, http_client::SamplyHttpClient};
+use shared::{crypto::GetCerts, errors::{SamplyBeamError, CertificateInvalidReason}, config, config_proxy::Config, http_client::SamplyHttpClient};
 use tracing::debug;
 
 pub(crate) struct GetCertsFromBroker {
@@ -11,7 +11,7 @@ pub(crate) struct GetCertsFromBroker {
 }
 
 impl GetCertsFromBroker {
-    async fn query(&self, path: String) -> Result<String,SamplyBeamError> {
+    async fn query(&self, path: &str) -> Result<String,SamplyBeamError> {
         let uri = Uri::builder()
             .scheme(self.broker_url.scheme().unwrap().to_owned())
             .authority(self.broker_url.authority().unwrap().to_owned())
@@ -24,6 +24,9 @@ impl GetCertsFromBroker {
         if ! req.status().is_success() {
             match req.status() {
                 StatusCode::NOT_FOUND => Ok(String::new()),
+                StatusCode::NO_CONTENT => {
+                    Err(SamplyBeamError::CertificateError(CertificateInvalidReason::NotDisclosedByBroker))
+                },
                 x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}, error message: {}", resp)))
             }
         } else {
@@ -31,7 +34,7 @@ impl GetCertsFromBroker {
         }
     }
 
-    async fn query_vec(&self, path: String) -> Result<Vec<String>,SamplyBeamError> {
+    async fn query_vec(&self, path: &str) -> Result<Vec<String>,SamplyBeamError> {
         let uri = Uri::builder()
             .scheme(self.broker_url.scheme().unwrap().to_owned())
             .authority(self.broker_url.authority().unwrap().to_owned())
@@ -44,6 +47,9 @@ impl GetCertsFromBroker {
         if ! req.status().is_success() {
             match req.status() {
                 StatusCode::NOT_FOUND => Ok(json),
+                StatusCode::NO_CONTENT => {
+                    Err(SamplyBeamError::CertificateError(CertificateInvalidReason::NotDisclosedByBroker))
+                },
                 x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}")))
             }
         } else {
@@ -55,17 +61,17 @@ impl GetCertsFromBroker {
 #[async_trait]
 impl GetCerts for GetCertsFromBroker {
     async fn certificate_list(&self) -> Result<Vec<String>,SamplyBeamError> {
-        self.query_vec("/v1/pki/certs".to_string()).await
+        self.query_vec("/v1/pki/certs").await
     }
 
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String,SamplyBeamError> {
         debug!("Retrieving certificate with serial {serial} ...");
-        self.query(format!("/v1/pki/certs/by_serial/{}", serial)).await
+        self.query(&format!("/v1/pki/certs/by_serial/{}", serial)).await
     }
 
     async fn im_certificate_as_pem(&self) -> Result<String,SamplyBeamError> {
         debug!("Retrieving im ca certificate ...");
-        self.query("/v1/pki/certs/im-ca".to_string()).await
+        self.query("/v1/pki/certs/im-ca").await
     }
 
 
