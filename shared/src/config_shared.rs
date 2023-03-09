@@ -8,7 +8,7 @@ use jwt_simple::prelude::RS256KeyPair;
 use openssl::{x509::{X509, self}, asn1::Asn1IntegerRef};
 use rsa::{RsaPrivateKey, pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
 use static_init::dynamic;
-use tracing::info;
+use tracing::{info, debug};
 
 pub(crate) const CLAP_FOOTER: &str = "For proxy support, environment variables HTTP_PROXY, HTTPS_PROXY, ALL_PROXY and NO_PROXY (and their lower-case variants) are supported. Usually, you want to set HTTP_PROXY *and* HTTPS_PROXY or set ALL_PROXY if both values are the same.\n\nFor updates and detailed usage instructions, visit https://github.com/samply/beam";
 
@@ -110,8 +110,12 @@ async fn load_crypto_for_proxy(cli_args: &CliArgs) -> Result<ConfigCrypto, Sampl
     let proxy_id = cli_args.proxy_id.as_ref()
         .expect("load_crypto() has been called without setting a Proxy ID (maybe in broker?). This should not happen.");
     let proxy_id = ProxyId::new(proxy_id)?;
-    let publics = get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id).await
-        .ok_or_else(|| SamplyBeamError::SignEncryptError("Unable to parse your certificate.".into()))?;
+    let publics: Vec<CryptoPublicPortion>= get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id).await
+        .into_iter()
+        .filter_map(|r| 
+            r.map_err(|e| debug!("Unable to parse Certificate: {e}"))
+            .ok())
+        .collect();
     let public = crypto::get_best_own_certificate(publics, &privkey_rsa).ok_or(SamplyBeamError::SignEncryptError("Unable to choose valid, newest certificate for this proxy".into()))?;
     let serial = asn_str_to_vault_str(public.cert.serial_number())?;
     privkey_rs256 = privkey_rs256.with_key_id(&serial);

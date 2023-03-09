@@ -2,8 +2,8 @@ use axum::{async_trait, Json};
 use hyper::{Client, client::HttpConnector, Uri, StatusCode};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use shared::{crypto::GetCerts, errors::SamplyBeamError, config, config_proxy::Config, http_client::SamplyHttpClient};
-use tracing::debug;
+use shared::{crypto::GetCerts, errors::{SamplyBeamError, CertificateInvalidReason}, config, config_proxy::Config, http_client::SamplyHttpClient};
+use tracing::{debug, warn, info};
 
 pub(crate) struct GetCertsFromBroker {
     client: SamplyHttpClient,
@@ -11,11 +11,7 @@ pub(crate) struct GetCertsFromBroker {
 }
 
 impl GetCertsFromBroker {
-    fn new() -> Result<Self,SamplyBeamError> {
-        unimplemented!()
-    }
-
-    async fn query(&self, path: String) -> Result<String,SamplyBeamError> {
+    async fn query(&self, path: &str) -> Result<String,SamplyBeamError> {
         let uri = Uri::builder()
             .scheme(self.broker_url.scheme().unwrap().to_owned())
             .authority(self.broker_url.authority().unwrap().to_owned())
@@ -25,17 +21,18 @@ impl GetCertsFromBroker {
         let resp = hyper::body::to_bytes(req.body_mut()).await?;
         let resp = String::from_utf8(resp.to_vec())
             .map_err(|e| SamplyBeamError::HttpParseError(e))?;
-        if ! req.status().is_success() {
-            match req.status() {
-                StatusCode::NOT_FOUND => Ok(String::new()),
-                x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}, error message: {}", resp)))
-            }
-        } else {
-            Ok(resp)
+        match req.status() {
+            StatusCode::NOT_FOUND => Ok(String::new()),
+            StatusCode::NO_CONTENT => {
+                debug!("Broker rejected to send us invalid certificate on path {path}");
+                Err(CertificateInvalidReason::NotDisclosedByBroker.into())
+            },
+            StatusCode::OK => Ok(resp),
+            x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}, error message: {}", resp)))
         }
     }
 
-    async fn query_vec(&self, path: String) -> Result<Vec<String>,SamplyBeamError> {
+    async fn query_vec(&self, path: &str) -> Result<Vec<String>,SamplyBeamError> {
         let uri = Uri::builder()
             .scheme(self.broker_url.scheme().unwrap().to_owned())
             .authority(self.broker_url.authority().unwrap().to_owned())
@@ -45,13 +42,14 @@ impl GetCertsFromBroker {
         let resp = hyper::body::to_bytes(req.body_mut()).await?;
         let json: Vec<String> = serde_json::from_slice(&resp)
             .map_err(|e| SamplyBeamError::VaultOtherError(format!("Unable to parse vault reply: {}", e)))?;
-        if ! req.status().is_success() {
-            match req.status() {
-                StatusCode::NOT_FOUND => Ok(json),
-                x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}")))
-            }
-        } else {
-            Ok(json)
+        match req.status() {
+            StatusCode::NOT_FOUND => Ok(json),
+            StatusCode::NO_CONTENT => {
+                debug!("Broker rejected to send us invalid certificate on path {path}");
+                Err(CertificateInvalidReason::NotDisclosedByBroker.into())
+            },
+            StatusCode::OK => Ok(json),
+            x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}")))
         }
     }
 }
@@ -59,17 +57,17 @@ impl GetCertsFromBroker {
 #[async_trait]
 impl GetCerts for GetCertsFromBroker {
     async fn certificate_list(&self) -> Result<Vec<String>,SamplyBeamError> {
-        self.query_vec("/v1/pki/certs".to_string()).await
+        self.query_vec("/v1/pki/certs").await
     }
 
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String,SamplyBeamError> {
         debug!("Retrieving certificate with serial {serial} ...");
-        self.query(format!("/v1/pki/certs/by_serial/{}", serial)).await
+        self.query(&format!("/v1/pki/certs/by_serial/{}", serial)).await
     }
 
     async fn im_certificate_as_pem(&self) -> Result<String,SamplyBeamError> {
         debug!("Retrieving im ca certificate ...");
-        self.query("/v1/pki/certs/im-ca".to_string()).await
+        self.query("/v1/pki/certs/im-ca").await
     }
 }
 
