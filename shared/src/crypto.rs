@@ -57,7 +57,8 @@ pub(crate) struct CertificateCache{
     cn_to_serial: HashMap<ProxyId, Vec<Serial>>,
     update_trigger: mpsc::Sender<oneshot::Sender<Result<(),SamplyBeamError>>>,
     root_cert: Option<X509>, // Might not be available at initialization time
-    im_cert: Option<X509> // Might not be available at initialization time
+    im_cert: Option<X509>, // Might not be available at initialization time
+    broken_certs: HashMap<Serial, SamplyBeamError>
 }
 
 #[async_trait]
@@ -76,6 +77,7 @@ impl CertificateCache {
             update_trigger,
             root_cert: None,
             im_cert: None,
+            broken_certs: HashMap::new()
         })
     }
 
@@ -152,18 +154,29 @@ impl CertificateCache {
         }
     }
 
-    async fn update_certificates_mut(&mut self) -> Result<(),SamplyBeamError> {
+    async fn update_certificates_mut(&mut self) -> Result<usize,SamplyBeamError> {
         info!("Updating certificates ...");
         let certificate_list = CERT_GETTER.get().unwrap().certificate_list().await?;
         let new_certificate_serials: Vec<&String> = {
             certificate_list.iter()
                 .filter(|serial| !self.serial_to_x509.contains_key(*serial))
+                .filter(|serial| {
+                    if let Some(invalidity) = self.broken_certs.get(*serial) {
+                        warn!("Skipping known-to-be-broken certificate {serial}: {invalidity}");
+                        false
+                    } else {
+                        true
+                    }
+                })
                 .collect()
         };
         debug!("Received {} certificates ({} of which were new).", certificate_list.len(), new_certificate_serials.len());
+
+        let mut new_count = 0;
         //TODO Check for validity
         for serial in new_certificate_serials {
             debug!("Checking certificate with serial {serial}");
+
             let certificate = CERT_GETTER.get().unwrap().certificate_by_serial_as_pem(serial).await;
             if let Err(e) = certificate {
                 warn!("Could not retrieve certificate for serial {serial}: {}", e);
@@ -183,10 +196,18 @@ impl CertificateCache {
                 })
                 .collect();
 
-            if commonnames.is_empty() {
-                warn!("Certificate with serial {} invalid: No CNAME.", serial);
-            } else if let Err(e) = verify_cert(&opensslcert, &self.im_cert.as_ref().expect("No intermediate CA cert found")) {
-                warn!("Certificate with serial {} invalid: {}.", serial, e);
+            let err = {
+                if commonnames.is_empty() {
+                    Some(SamplyBeamError::CertificateError("Certificate has no CNAME"))
+                } else if let Err(e) = verify_cert(&opensslcert, &self.im_cert.as_ref().expect("No intermediate CA cert found")) {
+                    Some(e)
+                } else {
+                    None
+                }
+            };
+            if let Some(err) = err {
+                warn!("Certificate with serial {} invalid: {}.", serial, err);
+                self.broken_certs.insert(serial.clone(), err);
             } else {
                 let cn = commonnames.first()
                     .expect("Internal error: common names empty; this should not happen");
@@ -199,9 +220,10 @@ impl CertificateCache {
                     }
                 };
                 debug!("Added certificate {} for cname {}", serial, cn);
+                new_count+=1;
             }
         }
-    Ok(())
+    Ok(new_count)
 
     }
 
@@ -269,11 +291,16 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
     let cc2 = cc.clone();
     tokio::task::spawn(async move {
-        while let Some(sender) = rx.recv().await {
+        while let Some(_sender) = rx.recv().await {
             let mut locked_cache = cc2.write().await;
             let result = locked_cache.update_certificates_mut().await;
-            if let Err(_) = sender.send(result) {
-                warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
+            match result {
+                Err(e) => {
+                    warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped? Reason: {e}");
+                },
+                Ok(count) => {
+                    info!("Added {count} new certificates.");
+                }
             }
         }
     });
