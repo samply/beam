@@ -74,7 +74,7 @@ impl crate::config::Config for Config {
         let tls_ca_certificates = crate::crypto::load_certificates_from_dir(tls_ca_certificates_dir.clone())
             .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory: {}", e)))?;
         Ok(Config { broker_domain, tls_ca_certificates_dir, root_cert, tls_ca_certificates })
-    }    
+    }
 }
 
 fn get_enrollment_msg(proxy_id: &Option<String>) -> String {
