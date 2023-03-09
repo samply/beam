@@ -29,7 +29,7 @@ impl TryFrom<&X509> for ProxyCertInfo {
         // let remaining = Asn1Time::days_from_now(0)?.diff(cert.not_after())?;
         let common_name = cert.subject_name().entries()
             .find(|c| c.object().nid() == openssl::nid::Nid::COMMONNAME)
-            .ok_or(SamplyBeamError::CertificateError(CertificateInvalidReason::NoCommonName))?
+            .ok_or(CertificateInvalidReason::NoCommonName)?
             .data().as_utf8()?.to_string();
 
         const SERIALERR: SamplyBeamError = SamplyBeamError::CertificateError(CertificateInvalidReason::WrongSerial);
@@ -37,7 +37,7 @@ impl TryFrom<&X509> for ProxyCertInfo {
         let certinfo = ProxyCertInfo {
             proxy_name: common_name
                 .split('.')
-                .next().ok_or(SamplyBeamError::CertificateError(CertificateInvalidReason::InvalidCommonName))?
+                .next().ok_or(CertificateInvalidReason::InvalidCommonName)?
                 .into(),
             common_name,
             valid_since: cert.not_before().to_string(),

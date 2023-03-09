@@ -47,7 +47,7 @@ pub enum SamplyBeamError {
     #[error("Unable to parse HTTP response: {0}")]
     HttpParseError(FromUtf8Error),
     #[error("X509 certificate invalid: {0}")]
-    CertificateError(CertificateInvalidReason),
+    CertificateError(#[from] CertificateInvalidReason),
     #[error("Timeout executing HTTP request: {0}")]
     HttpTimeoutError(Elapsed),
 }

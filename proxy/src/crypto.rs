@@ -25,7 +25,7 @@ impl GetCertsFromBroker {
             StatusCode::NOT_FOUND => Ok(String::new()),
             StatusCode::NO_CONTENT => {
                 debug!("Broker rejected to send us invalid certificate on path {path}");
-                Err(SamplyBeamError::CertificateError(CertificateInvalidReason::NotDisclosedByBroker))
+                Err(CertificateInvalidReason::NotDisclosedByBroker.into())
             },
             StatusCode::OK => Ok(resp),
             x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}, error message: {}", resp)))
@@ -46,7 +46,7 @@ impl GetCertsFromBroker {
             StatusCode::NOT_FOUND => Ok(json),
             StatusCode::NO_CONTENT => {
                 debug!("Broker rejected to send us invalid certificate on path {path}");
-                Err(SamplyBeamError::CertificateError(CertificateInvalidReason::NotDisclosedByBroker))
+                Err(CertificateInvalidReason::NotDisclosedByBroker.into())
             },
             StatusCode::OK => Ok(json),
             x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}")))
