@@ -100,7 +100,7 @@ impl crate::config::Config for Config {
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)
-    }        
+    }
 }
 
 fn uri_to_host_header(uri: &Uri) -> Result<HeaderValue,SamplyBeamError> {
