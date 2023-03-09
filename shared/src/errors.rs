@@ -47,7 +47,7 @@ pub enum SamplyBeamError {
     #[error("Unable to parse HTTP response: {0}")]
     HttpParseError(FromUtf8Error),
     #[error("X509 certificate invalid: {0}")]
-    CertificateError(&'static str),
+    CertificateError(#[from] CertificateInvalidReason),
     #[error("Timeout executing HTTP request: {0}")]
     HttpTimeoutError(Elapsed),
 }
@@ -76,4 +76,25 @@ impl From<hyper::Error> for SamplyBeamError {
     fn from(e: hyper::Error) -> Self {
         Self::HttpRequestError(e)
     }
+}
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum CertificateInvalidReason {
+    #[error("Cannot find common name in certificate")]
+    NoCommonName,
+    #[error("Invalid Certificate CN: Did not contain '.'")]
+    InvalidCommonName,
+    #[error("Unable to read serial")]
+    WrongSerial,
+    #[error("Certificate's start/end date is invalid (e.g. expired)")]
+    InvalidDate,
+    #[error("Problem with the certificate's public key")]
+    InvalidPublicKey,
+    #[error("Internal error: {0}")]
+    InternalError(String),
+    #[error("Not disclosed: Broker consideres this certificate invalid")]
+    NotDisclosedByBroker,
+    #[error("Other problem: {0}")]
+    Other(String),
+
 }

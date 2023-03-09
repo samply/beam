@@ -6,7 +6,7 @@ use axum::{Extension, http::Request, routing::{Route, get}, Router, response::{R
 use hyper::{Client, Body, client::HttpConnector, StatusCode};
 use hyper_tls::HttpsConnector;
 use serde::{Serialize, Deserialize};
-use shared::{config::CONFIG_CENTRAL, errors::SamplyBeamError};
+use shared::{config::CONFIG_CENTRAL, errors::{SamplyBeamError, CertificateInvalidReason}};
 use thiserror::Error;
 use tracing::{error, info, debug, log::warn};
 
@@ -17,7 +17,9 @@ enum PkiError {
     #[error("Error processing certificate: {0}")]
     OpenSslError(String),
     #[error("Unable to parse response: {0}")]
-    ParseError(#[from] FromUtf8Error)
+    ParseError(#[from] FromUtf8Error),
+    #[error("Certificate is present but invalid, please see broker logs.")]
+    CertificateError
 }
 
 impl IntoResponse for PkiError {
@@ -27,6 +29,8 @@ impl IntoResponse for PkiError {
                 => StatusCode::BAD_GATEWAY,
             PkiError::OpenSslError(_) | PkiError::ParseError(_)
                 => StatusCode::PRECONDITION_FAILED,
+            PkiError::CertificateError
+                => StatusCode::NO_CONTENT
         };
         
         (status, self.to_string()).into_response()
@@ -60,7 +64,9 @@ async fn get_certificate_by_serial(
             Err(PkiError::CommunicationWithVault(err))
         }
     }?;
-    let pem = cert.cert.to_pem()
+    let pem = cert
+        .map_err(|_err| PkiError::CertificateError)?
+        .cert.to_pem()
         .map_err(|e| PkiError::OpenSslError(e.to_string()))?;
     debug!("<= Returning requested cert with serial {serial}");
     Ok(String::from_utf8(pem)?)
