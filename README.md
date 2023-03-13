@@ -358,12 +358,36 @@ Parameters:
 
 - None
 
-In the current version only an appropriate status code is returned once/if initialization has succeeded. However, in the future more detailed health information might be returned in the reply body.
+In the current version, the Beam.Proxy only returns an appropriate status code once/if initialization has succeeded. However, in the future more detailed health information might be returned in the reply body.
 
 ```
 HTTP/1.1 200 OK
 Content-Length: 0
 Date: Mon, 27 Jun 2022 14:26:45 GMT
+```
+
+The Beam.Broker implements a more informative health endpoint and returns a haalth summary and additional system details:
+
+```
+HTTP/1.1 200
+{
+  "summary": "healthy",
+  "vault": {
+    "status": "ok"
+  }
+}
+```
+
+or in  case of an issue, e.g.:
+
+```
+HTTP/1.1 503
+{
+  "summary": "unhealthy",
+  "vault": {
+    "status": "unavailable"
+  }
+}
 ```
 
 ## Development Environment
