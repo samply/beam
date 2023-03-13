@@ -7,12 +7,14 @@ mod serve_pki;
 mod banner;
 mod expire;
 mod crypto;
+mod health;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use shared::*;
+use backoff::{future::{retry, retry_notify}, ExponentialBackoff, ExponentialBackoffBuilder, Error};
+use shared::{*, config::CONFIG_CENTRAL};
 use tokio::sync::RwLock;
-use tracing::info;
+use tracing::{info, warn, error};
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {    
@@ -20,15 +22,22 @@ pub async fn main() -> anyhow::Result<()> {
     shared::logger::init_logger()?;
     banner::print_banner();
 
-    let cert_getter = crypto::build_cert_getter()?;
+    let (senders, health) = health::Health::make();
+    let cert_getter = crypto::build_cert_getter(senders.vault)?;
+
     shared::crypto::init_cert_getter(cert_getter);
-    shared::crypto::init_ca_chain().await;
+    tokio::task::spawn(
+        retry_notify(ExponentialBackoff::default(),
+            || async {shared::crypto::init_ca_chain().await.map_err(|e| backoff::Error::transient(e))},
+            |err: _, dur: Duration| {warn!("Still trying to initialize CA chain: {}. Retrying in {}s", err, dur.as_secs())}
+            )
+        );
     #[cfg(debug_assertions)]
     if shared::examples::print_example_objects() { return Ok(()); }
     
     let _ = config::CONFIG_CENTRAL.bind_addr; // Initialize config
 
-    serve::serve().await?;
+    serve::serve(health).await?;
 
     Ok(())
 }

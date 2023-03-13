@@ -69,11 +69,6 @@ impl GetCerts for GetCertsFromBroker {
         debug!("Retrieving im ca certificate ...");
         self.query("/v1/pki/certs/im-ca").await
     }
-
-
-    fn new() -> Result<Self,SamplyBeamError> {
-        unimplemented!()
-    }
 }
 
 pub(crate) fn build_cert_getter(
