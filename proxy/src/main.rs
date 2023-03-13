@@ -40,10 +40,14 @@ pub async fn main() -> anyhow::Result<()> {
         info!("Connected to Broker: {}", &config.broker_uri);
     }
 
-    let ec = init_crypto(config.clone(), client.clone()).await;
-    if let Err(e) = ec {
-        error!("{}",e);
+    if let Err(err) = retry_notify(ExponentialBackoff::default(),
+        || async { Ok(init_crypto(config.clone(), client.clone()).await?)},
+        |err, dur: Duration | { warn!("Still trying to initialize certificate chain: {}. Retrying in {}s", err, dur.as_secs()); }
+    ).await {
+        error!("Giving up on initializing certificate chain: {}", err);
         std::process::exit(1);
+    } else {
+        debug!("Certificate chain successfully initialized and validated");
     }
 
     serve::serve(config, client).await?;
@@ -52,7 +56,7 @@ pub async fn main() -> anyhow::Result<()> {
 
 async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(),SamplyBeamError> {
     shared::crypto::init_cert_getter(crypto::build_cert_getter(config.clone(), client.clone())?);
-    shared::crypto::init_ca_chain().await;
+    shared::crypto::init_ca_chain().await?;
     
     let _public_info: Vec<_> = shared::crypto::get_all_certs_and_clients_by_cname_as_pemstr(&config.proxy_id).await
         .into_iter()

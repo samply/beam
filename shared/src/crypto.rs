@@ -282,21 +282,22 @@ impl CertificateCache {
         self.root_cert = Some(root_certificate.clone());
     }
 
-    pub async fn set_im_cert(&mut self) {
-        self.im_cert = Some(X509::from_pem(&get_im_cert().await.unwrap().as_bytes()).unwrap()); // TODO Unwrap
+    pub async fn set_im_cert(&mut self) -> Result<(), SamplyBeamError> {
+        self.im_cert = Some(X509::from_pem(&get_im_cert().await.unwrap().as_bytes())?);
         let _ = verify_cert(&self.im_cert.as_ref().expect("No IM certificate provided"), &self.root_cert.as_ref().expect("No root certificate set!"))
             .expect(&format!("The intermediate certificate is invalid. Please send this info to the central beam admin for debugging:\n---BEGIN DEBUG---\n{}\nroot\n{}\n---END DEBUG---", 
                              String::from_utf8(self.im_cert.as_ref().unwrap().to_text().unwrap_or("Cannot convert IM certificate to text".into())).unwrap_or("Invalid characters in IM certificate".to_string()),
                              String::from_utf8(self.root_cert.as_ref().unwrap().to_text().unwrap_or("Cannot convert root certificate to text".into())).unwrap_or("Invalid characters in root certificate".to_string())));
-        
+        Ok(())
     }
 }
 
 /// Wrapper for initializing the CA chain. Must be called *after* config initialization 
-pub async fn init_ca_chain() {
+pub async fn init_ca_chain() -> Result<(), SamplyBeamError> {
     let mut cache = CERT_CACHE.write().await;
     cache.set_root_cert(&config::CONFIG_SHARED.root_cert);
-    cache.set_im_cert().await;
+    cache.set_im_cert().await?;
+    Ok(())
 }
 
 static CERT_GETTER: OnceCell<Box<dyn GetCerts>> = OnceCell::new();
