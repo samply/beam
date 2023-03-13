@@ -53,6 +53,8 @@ pub mod middleware;
 
 pub mod examples;
 
+pub mod sse_event;
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MyUuid(Uuid);
 impl MyUuid {

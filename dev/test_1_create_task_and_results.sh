@@ -2,7 +2,7 @@
 
 testing Create task
 
-TASK0="$(echo "$TASK0" | task_with_ttl 3600 "$TASK0")"
+TASK0="$(echo "$TASK0" | task_with_ttl 10 "$TASK0")"
 RET=$(echo "${TASK0}" | curl_post $APP1_P1 -v $P1/v1/tasks)
 CODE=$(echo $RET | jq -r .response_code)
 

@@ -1,13 +1,15 @@
-use std::{collections::HashMap, sync::Arc, mem::Discriminant, net::SocketAddr};
+use std::{collections::HashMap, sync::Arc, mem::Discriminant, net::SocketAddr, convert::Infallible, fmt::Debug};
 
 use axum::{
     extract::ConnectInfo,
     http::{StatusCode, header},
     routing::{get, post, put},
-    Json, Router, extract::{Query, Path, State}, response::IntoResponse
+    Json, Router, extract::{Query, Path, State}, response::{IntoResponse, Sse, sse::Event, Response}
 };
+use futures_core::{Stream, stream};
+use hyper::HeaderMap;
 use serde::{Deserialize};
-use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId, WorkStatus, EncryptedMsgTaskRequest, EncryptedMsgTaskResult};
+use shared::{MsgTaskRequest, MsgTaskResult, MsgId, HowLongToBlock, HasWaitId, MsgSigned, MsgEmpty, Msg, EMPTY_VEC_APPORPROXYID, config, beam_id::AppOrProxyId, WorkStatus, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, sse_event::SseEventType, errors::SamplyBeamError};
 use tokio::{sync::{broadcast::{Sender, Receiver}, RwLock}, time};
 use tracing::{debug, info, trace, error, warn};
 
@@ -51,28 +53,51 @@ impl Default for TasksState {
     }
 }
 
-// GET /v1/tasks/:task_id/results
 async fn get_results_for_task(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<TasksState>,
     block: HowLongToBlock,
     task_id: MsgId,
+    headers: HeaderMap,
     msg: MsgSigned<MsgEmpty>,
+) -> Result<Response, (StatusCode, &'static str)> {
+    let found = &headers[header::ACCEPT]
+        .to_str().unwrap_or_default()
+        .split(',')
+        .map(|part| part.trim())
+        .find(|part| *part == "text/event-stream")
+        .is_some();
 
+    let result = if *found {
+        get_results_for_task_stream(addr, state, block, task_id, msg).await?
+            .into_response()
+    } else {
+        get_results_for_task_nostream(addr, state, block, task_id, msg).await?
+            .into_response()
+    };
+    Ok(result)
+}
+
+// GET /v1/tasks/:task_id/results
+async fn get_results_for_task_nostream(
+    addr: SocketAddr,
+    state: TasksState,
+    block: HowLongToBlock,
+    task_id: MsgId,
+    msg: MsgSigned<MsgEmpty>
 ) -> Result<(StatusCode, Json<Vec<MsgSigned<EncryptedMsgTaskResult>>>), (StatusCode, &'static str)> {
     debug!("get_results_for_task(task={}) called by {} with IP {addr}, wait={:?}", task_id.to_string(), msg.get_from(), block);
     let filter_for_me = MsgFilterNoTask { from: None, to: Some(msg.get_from()), mode: MsgFilterMode::Or };
     let (mut results, rx_new_result, rx_deleted_task)  = {
         let tasks = state.tasks.read().await;
-        let task = match tasks.get(&task_id) {
-            Some(task) => task,
-            None => return Err((StatusCode::NOT_FOUND, "Task not found")),
+        let Some(task) = tasks.get(&task_id) else {
+            return Err((StatusCode::NOT_FOUND, "Task not found"));
         };
         if task.get_from() != msg.get_from() {
             return Err((StatusCode::UNAUTHORIZED, "Not your task."));
         }
-        let results = task.msg.results.values().cloned().collect();
-        let rx_new_result = match would_wait_for_elements(&results, &block) {
+        let results: Vec<MsgSigned<EncryptedMsgTaskResult>> = task.msg.results.values().cloned().collect();
+        let rx_new_result = match would_wait_for_elements(results.len(), &block) {
             true => Some(state.new_result_tx.read().await.get(&task_id)
                 .unwrap_or_else(|| panic!("Internal error: No new_result_tx found for task {}", task_id))
                 .subscribe()),
@@ -87,8 +112,66 @@ async fn get_results_for_task(
     Ok((statuscode, Json(results)))
 }
 
-fn would_wait_for_elements<S>(vec: &Vec<S>, block: &HowLongToBlock) -> bool {
-    usize::from(block.wait_count.unwrap_or(0)) > vec.len()
+// GET /v1/tasks/:task_id/results/stream
+async fn get_results_for_task_stream(
+    addr: SocketAddr,
+    state: TasksState,
+    block: HowLongToBlock,
+    task_id: MsgId,
+    msg: MsgSigned<MsgEmpty>
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>,(StatusCode, &'static str)> {
+    debug!("get_results_for_task_stream(task={}) called by {} with IP {addr}, wait={:?}", task_id.to_string(), msg.get_from(), block);
+    let (mut results, rx_new_result, rx_deleted_task)  = {
+        let tasks = state.tasks.read().await;
+        let Some(task) = tasks.get(&task_id) else {
+            return Err((StatusCode::NOT_FOUND, "Task not found"));
+        };
+        if task.get_from() != msg.get_from() {
+            return Err((StatusCode::UNAUTHORIZED, "Not your task."));
+        }
+        let results = task.msg.results.clone();
+        let rx_new_result = match would_wait_for_elements(results.len(), &block) {
+            true => Some(state.new_result_tx.read().await.get(&task_id)
+                .unwrap_or_else(|| panic!("Internal error: No new_result_tx found for task {}", task_id))
+                .subscribe()),
+            false => None,
+        };
+        (results, rx_new_result, state.removed_task_rx.subscribe())
+    };
+
+    let stream = async_stream::stream! {
+        for (_from, result) in &results {
+            let event = Event::default()
+                .event(SseEventType::NewResult)
+                .json_data(result);
+            yield match event {
+                Ok(event) => Ok(event),
+                Err(err) => {
+                    error!("Unable to serialize message: {}; offending message was {:?}", err, result);
+                    Ok(Event::default()
+                        .event(SseEventType::Error)
+                        .data("Internal error: Unable to serialize message.")
+                    )
+                }
+            };
+        }
+        if let Some(rx_new_result) = rx_new_result {
+            let from = msg.get_from();
+            let filter_for_me = MsgFilterNoTask { from: None, to: Some(&from), mode: MsgFilterMode::Or };
+            let other_stream = wait_for_results_for_task_stream(&mut results, &block, rx_new_result, &filter_for_me, rx_deleted_task, &task_id).await;
+            for await event in other_stream {
+                yield event;
+            }
+        }
+    };
+
+    let sse = Sse::new(stream);
+
+    Ok(sse)
+}
+
+fn would_wait_for_elements(existing_elements: usize, block: &HowLongToBlock) -> bool {
+    usize::from(block.wait_count.unwrap_or(0)) > existing_elements
 }
 
 fn wait_get_statuscode<S>(vec: &Vec<S>, block: &HowLongToBlock) -> StatusCode {
@@ -97,6 +180,82 @@ fn wait_get_statuscode<S>(vec: &Vec<S>, block: &HowLongToBlock) -> StatusCode {
     } else {
         StatusCode::OK
     }
+}
+
+async fn wait_for_results_for_task_stream<'a, M: Msg, I: PartialEq>(results: &'a mut HashMap<AppOrProxyId, M>, block: &'a HowLongToBlock, mut new_result_rx: Receiver<M>, filter: &'a MsgFilterNoTask<'a>, mut deleted_task_rx: Receiver<MsgId>, task_id: &'a MsgId)
+-> impl Stream<Item = Result<Event,Infallible>> + 'a
+where M: Clone + HasWaitId<I> + Debug
+{
+    let wait_until =
+        time::Instant::now() + block.wait_time.unwrap_or(time::Duration::from_secs(31536000));
+    trace!(
+        "Now is {:?}. Will wait until {:?}",
+        time::Instant::now(),
+        wait_until
+    );
+    let mut running = true;
+    let stream = async_stream::stream! {
+    while usize::from(block.wait_count.unwrap_or(0)) > results.len()
+        && time::Instant::now() < wait_until
+        && running {
+        trace!(
+            "Items in vec: {}, time remaining: {:?}",
+            results.len(),
+            wait_until - time::Instant::now()
+        );
+            tokio::select! {
+                _ = tokio::time::sleep_until(wait_until) => {
+                    debug!("SSE: Wait expired.");
+                    yield Ok(Event::default()
+                        .event(SseEventType::WaitExpired)
+                        .data("{}"));
+                    running = false;
+                },
+                result = new_result_rx.recv() => {
+                    match result {
+                        Ok(req) => {
+                            if filter.matches(&req) {
+                                let previous = results.insert(req.get_from().clone(), req.clone());
+                                let event_type = match previous {
+                                    Some(_) => SseEventType::UpdatedResult,
+                                    None => SseEventType::NewResult
+                                };
+                                let event = Event::default()
+                                    .event(event_type)
+                                    .json_data(&req);
+                                yield match event {
+                                    Ok(event) => Ok(event),
+                                    Err(err) => {
+                                        error!("Unable to serialize message: {}; offending message was {:?}", err, req);
+                                        Ok(Event::default()
+                                            .event(SseEventType::Error)
+                                            .data("Internal error: Unable to serialize message.")
+                                        )
+                                    }
+                                };
+                            }
+                        },
+                        Err(e) => { panic!("Unable to receive from queue new_result_rx: {}", e); }
+                    }
+                },
+                deleted_task_id = deleted_task_rx.recv() => {
+                    match deleted_task_id {
+                        Ok(deleted_task_id) => {
+                            if deleted_task_id == *task_id {
+                                warn!("Task {} was just deleted while someone was waiting for results. Returning the {} results up to now.", task_id, results.len());
+                                yield Ok(Event::default()
+                                    .event(SseEventType::DeletedTask)
+                                    .data("{ \"task_id\": \"{deleted_task_id}\" }"));
+                                running = false;
+                            }
+                        },
+                        Err(e) => { panic!("Unable to receive from queue deleted_task_rx: {}", e); }
+                    }
+                }
+            }
+        }
+    };
+    stream
 }
 
 // TODO: Is there a way to write this function in a generic way? (1/2)

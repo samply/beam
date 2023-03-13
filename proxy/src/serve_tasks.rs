@@ -1,11 +1,12 @@
-use std::time::{Duration, SystemTime};
+use std::{time::{Duration, SystemTime}, convert::Infallible, str::FromStr};
 
-use axum::{Router, routing::any, response::Response, http::{HeaderValue, request::Parts}, extract::{State, FromRef}};
+use axum::{Router, routing::{any, put, get}, response::{Response, Sse, sse::Event, IntoResponse}, http::{HeaderValue, request::Parts}, extract::{State, FromRef, BodyStream}, body::Bytes};
+use futures::{stream::{StreamExt, TryStreamExt}, Stream};
 use httpdate::fmt_http_date;
 use hyper::{
     body, body::HttpBody,
     client::{connect::Connect, HttpConnector},
-    header, Body, Client, Request, StatusCode, Uri, service::Service,
+    header, Body, Client, Request, StatusCode, Uri, service::Service, HeaderMap,
 };
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
@@ -15,8 +16,9 @@ use serde_json::Value;
 use shared::{
     beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncMsg, DecMsg,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, Msg, MsgEmpty, MsgId, MsgSigned,
-    MsgTaskRequest, MsgTaskResult, crypto, http_client::SamplyHttpClient,
+    MsgTaskRequest, MsgTaskResult, crypto, http_client::SamplyHttpClient, sse_event::SseEventType,
 };
+use tokio::io::BufReader;
 use tracing::{debug, error, warn, trace};
 
 use crate::auth::AuthenticatedApp;
@@ -35,8 +37,9 @@ pub(crate) fn router(client: &SamplyHttpClient) -> Router {
     };
     Router::new()
         // We need both path variants so the server won't send us into a redirect loop (/tasks, /tasks/, ...)
-        .route("/v1/tasks", any(handler_tasks))
-        .route("/v1/tasks/*path", any(handler_tasks))
+        .route("/v1/tasks", get(handler_task).post(handler_task))
+        .route("/v1/tasks/:task_id/results", get(handler_task))
+        .route("/v1/tasks/:task_id/results/:app_id", put(handler_task))
         .with_state(state)
 }
 
@@ -56,28 +59,18 @@ const ERR_FAKED_FROM: (StatusCode, &str) = (
     "You are not authorized to send on behalf of this app.",
 );
 
-async fn handler_tasks(
-    State(client): State<SamplyHttpClient>,
-    State(config): State<config_proxy::Config>,
-    AuthenticatedApp(sender): AuthenticatedApp,
-    mut req: Request<Body>,
-) -> Result<Response<Body>, (StatusCode, &'static str)> {
+async fn forward_request(mut req: Request<Body>, config: &config_proxy::Config, sender: &AppId, client: &SamplyHttpClient) -> Result<hyper::Response<Body>, (StatusCode, &'static str)> {
     let path = req.uri().path();
     let path_query = req
         .uri()
         .path_and_query()
         .map(|v| v.as_str())
         .unwrap_or(path);
-
     let target_uri =
         Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
             .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
-
-    // Insert Via header
     req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
-
     let (body, parts) = encrypt_request(req, &sender).await?;
-
     let err = (StatusCode::BAD_REQUEST, "Cannot parse body for signing's sake");
     let sender = match body.as_object() {
         Some(object) => object.get("from"),
@@ -90,12 +83,49 @@ async fn handler_tasks(
         return Err((StatusCode::BAD_REQUEST, "Cannot deserialize AppOrProxyId from from field"));
     };
     let req = sign_request(body, parts, &config, &target_uri, sender).await?;
-
     trace!("Requesting: {:?}", req);
     let resp = client.request(req).await.map_err(|e| {
         warn!("Request to broker failed: {}", e.to_string());
         (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
     })?;
+    Ok(resp)
+}
+
+async fn handler_task(
+    State(client): State<SamplyHttpClient>,
+    State(config): State<config_proxy::Config>,
+    AuthenticatedApp(sender): AuthenticatedApp,
+    headers: HeaderMap,
+    req: Request<Body>
+) -> Result<Response, (StatusCode, String)> {
+    let found = &headers[header::ACCEPT]
+        .to_str().unwrap_or_default()
+        .split(',')
+        .map(|part| part.trim())
+        .find(|part| *part == "text/event-stream")
+        .is_some();
+
+    let result = if *found {
+        handler_tasks_stream(client, config, sender, req).await?
+            .into_response()
+    } else {
+        handler_tasks_nostream(client, config, sender, req).await
+            .map_err(|e| (e.0, e.1.to_string()))?
+            .into_response()
+    };
+
+    return Ok(result)
+}
+
+async fn handler_tasks_nostream(
+    client: SamplyHttpClient,
+    config: config_proxy::Config,
+    sender: AppId,
+    req: Request<Body>,
+) -> Result<Response<Body>, (StatusCode, &'static str)> {
+    // Validate Query, forward to server, get response.
+    
+    let resp = forward_request(req, &config, &sender, &client).await?;
 
     // Check reply's signature
 
@@ -141,6 +171,129 @@ async fn handler_tasks(
     Ok(resp)
 }
 
+async fn handler_tasks_stream(
+    client: SamplyHttpClient,
+    config: config_proxy::Config,
+    sender: AppId,
+    req: Request<Body>
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
+    // Validate Query, forward to server, get response.
+    
+    let mut resp = forward_request(req, &config, &sender, &client).await
+        .map_err(|err| (err.0, err.1.into()))?;
+
+    let code = resp.status();
+    if ! code.is_success() {
+        let bytes = body::to_bytes(resp.into_body())
+            .await
+            .ok();
+        let error_msg = bytes
+            .and_then(|v| String::from_utf8(v.into()).ok())
+            .unwrap_or("(unable to parse reply)".into());
+        warn!("Got unexpected response code from server: {code}. Returning error message as-is: \"{error_msg}\"");
+        return Err((code, error_msg));
+    }
+
+    let outgoing = async_stream::stream! {
+        let incoming = resp
+            .body_mut()
+            .map(|result| result.map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, format!("IO Error: {error}"))))
+            .into_async_read();
+
+        let mut reader = async_sse::decode(incoming);
+
+        while let Some(event) = reader.next().await {
+            let event = match event {
+                Ok(event) => event,
+                Err(err) => {
+                    error!("Got error reading SSE stream: {err}");
+                    yield Ok(Event::default()
+                        .event(SseEventType::Error)
+                        .data("Error reading SSE stream from Broker (see Proxy logs for details)."));
+                    continue;
+                }
+            };
+            match event {
+                async_sse::Event::Retry(_dur) => {
+                    error!("Got a retry message from the Broker, which is not yet supported.");
+                },
+                async_sse::Event::Message(event) => {
+                    // Check if this is a message or some control event
+                    let event_type = SseEventType::from_str(event.name()).expect("Error in Infallible");
+                    let mut event_as_bytes = event.into_bytes();
+                    let event_as_str = std::str::from_utf8(&event_as_bytes).unwrap_or("(unable to parse)");
+
+                    match &event_type {
+                        SseEventType::DeletedTask | SseEventType::WaitExpired => {
+                            debug!("SSE: Got {event_type} message, forwarding to App.");
+                            yield Ok(Event::default()
+                                .event(event_type)
+                                .data(event_as_str));
+                            continue;
+                        },
+                        SseEventType::Error => {
+                            warn!("SSE: The Broker has reported an error: {event_as_str}");
+                            yield Ok(Event::default()
+                                .event(event_type)
+                                .data(event_as_str));
+                            continue;
+                        },
+                        SseEventType::Undefined => {
+                            error!("SSE: Got a message without event type -- discarding.");
+                            continue;
+                        },
+                        SseEventType::Unknown(s) => {
+                            error!("SSE: Got unknown event type: {s} -- discarding.");
+                            continue;
+                        }
+                        other => {
+                            warn!("Got \"{other}\" event -- parsing.");
+                        }
+                    }
+                    
+                    // Check reply's signature
+
+                    if !event_as_bytes.is_empty() {
+                        let Ok(mut json) = serde_json::from_slice::<Value>(&event_as_bytes) else {
+                            warn!("Answer is no valid JSON; discarding: \"{event_as_str}\".");
+                            // TODO: For some reason, compiler won't accept the following lines, so we can't inform the App about the problem.
+                            //
+                            // warn!("Answer is no valid JSON; returning as-is to client: \"{event_as_str}\".");
+                            // yield Ok(Event::default()
+                            //     .event(SseEventType::Error)
+                            //     .data(format!("Broker sent invalid JSON: {event_as_str}")));
+                            continue;
+                        };
+                        if !validate_and_remove_signatures(&mut json).await {
+                            warn!("The answer was valid JSON but we were unable to validate and remove its signature. The offending JSON was: {}", json);
+                            // return Err(ERR_VALIDATION);
+                            continue;
+                        }
+                        if let Err(err) = decryption_helper(&mut json) {
+                            warn!("Got an error decrypting Broker's reply: {err}");
+                            continue;
+                        }
+                        trace!("Decrypted Msg: {:#?}",json);
+                        event_as_bytes = serde_json::to_vec(&json).unwrap();
+                        trace!(
+                            "Validated and stripped signature: \"{}\"",
+                            std::str::from_utf8(&event_as_bytes).unwrap_or("Unable to parse string as UTF-8")
+                        );
+                    }
+                    let as_string = std::str::from_utf8(&event_as_bytes).unwrap_or("(garbled_utf8)");
+                    let event = Event::default()
+                        .event(event_type)
+                        .data(as_string);
+                    yield Ok(event);
+                }
+            }
+        }
+    };
+    // TODO: Somehow return correct error code (not always possible since headers are sent before long request)
+    let sse = Sse::new(outgoing);
+    Ok(sse)
+}
+
 // TODO: This could be a middleware
 async fn sign_request(
     body: Value,
@@ -173,7 +326,7 @@ async fn sign_request(
     parts.uri = target_uri.clone();
     headers_mut.insert(header::HOST, config.broker_host_header.clone());
 
-    let length = body.size_hint().exact().ok_or_else(|| {error!("Cannot calculate length of request"); ERR_BODY})?;
+    let length = HttpBody::size_hint(&body).exact().ok_or_else(|| {error!("Cannot calculate length of request"); ERR_BODY})?;
     if let Some(old) = headers_mut.insert(
         header::CONTENT_LENGTH,
         length.into()) {

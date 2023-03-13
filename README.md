@@ -78,7 +78,7 @@ at party 2 is capable of solving it, so it asks `proxy1.broker.example.de` to
 create that new task:
 
 ```
-curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"],"ttl":600}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
+curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"],"ttl":60}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
 ```
 
 `Proxy1` replies:
@@ -150,7 +150,7 @@ Tasks are represented in the following structure:
       "max_tries": 5
     }
   },
-  "ttl": 3600,
+  "ttl": 30,
   "metadata": "The broker can read and use this field e.g., to apply filters on behalf of an app"
 }
 ```
@@ -161,7 +161,7 @@ Tasks are represented in the following structure:
 - `body`: Description of work to be done. Not interpreted by the Broker.
 - `failure_strategy`: Advises each client how to handle failures. Possible values `discard`, `retry`.
 - `failure_strategy.retry`: How often to retry (`max_tries`) a failed task and how long to wait in between each try (`backoff_millisecs`).
-- `ttl`: Time-to-live in milliseconds. Once this reaches zero, the broker will expunge the task along with its results.
+- `ttl`: Time-to-live in *seconds*. Once this reaches zero, the broker will expunge the task along with its results.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Result](#result) for more examples) and can be handled by the broker (thus intentionally not encrypted).
 
 ### Result
@@ -307,13 +307,46 @@ Date: Mon, 27 Jun 2022 14:26:45 GMT
 As part of making this API performant, all reading endpoints support long-polling as an efficient alternative to regular (repeated) polling. Using this function requires the following parameters:
 
 - `wait_count`: The API call will block until this many results are available ...
-- `wait_time`: ... or this many milliseconds have passed, whichever comes first.
+- `wait_time`: ... or this many *milliseconds* have passed, whichever comes first.
 
 For example, retrieving a task's results:
 
 - `GET /v1/tasks/<task_id>/results` will return immediately with however many results are available,
 - `GET /v1/tasks/<task_id>/results?wait_count=5` will block forever until 5 results are available,
 - `GET /v1/tasks/<task_id>/results?wait_count=5&wait_time=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code `206 (Partial Content)` is returned to indicate that the result is incomplete.
+
+### Server-sent Events (SSE) API (experimental)
+
+To better support asynchronous use cases, such as web-based user interfaces streaming results, this development version supports a first implementation of [Server-Sent Events](https://www.rfc-editor.org/rfc/rfc8895.html#name-server-push-server-sent-eve) for *Result* retrieval. This allows Beam.Proxies to "subscribe" to tasks and get notifications for every new result without explicit polling. Similar to WebSockets, this is supported natively by JavaScript in web browsers. However, in contrast to WebSockets, SSE are standard long-lived HTTP requests that is likely to pass even strict firewalls.
+
+Please note: This feature is experimental and subject to changes.
+
+Method: `GET`  
+URL: `/v1/tasks/<task_id>/results?wait_count=3`  
+Header: `Accept: text/event-stream`  
+Parameters:
+
+- The same parameters as for long-polling, i.e. `to`, `from`, `filter=todo`, `wait_count`, and `wait_time` are supported.
+
+Returns a *stream* of results, cf. [here](#result):
+
+```
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Transfer-Encoding: chunked
+Date: Thu, 09 Mar 2023 16:28:47 GMT
+
+event: new_result
+data: {"body":"Unable to decrypt quantum state","from":"app2.proxy1.broker","metadata":{"complex":"A map (key complex) is possible, too"},"status":"permfailed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app1.proxy1.broker"]}
+
+event: new_result
+data: {"body":"Successfully quenched 1.43e14 flux pulse devices","from":"app1.proxy1.broker","metadata":["Arbitrary","types","are","possible"],"status":"succeeded","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app1.proxy1.broker"]}
+
+[...]
+```
+
+You can consume this output natively within many settings, including web browsers. For more information, see [Mozilla's developer documentation](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events)
 
 ### Health Check
 
