@@ -1,8 +1,9 @@
-use std::net::{IpAddr, SocketAddr};
+use std::{net::{IpAddr, SocketAddr}, cell::RefCell, sync::Arc};
 
 use axum::{middleware::{self, Next}, response::{Response, IntoResponse}, body::HttpBody, extract::ConnectInfo};
 use http::{Request, StatusCode, header::{self, HeaderName}, HeaderValue, Method, Uri};
 use hyper::Body;
+use tokio::sync::Mutex;
 use tracing::{info, warn, span, Level, instrument};
 
 use crate::beam_id::AppOrProxyId;
@@ -52,19 +53,19 @@ pub async fn log(ConnectInfo(info): ConnectInfo<SocketAddr>, mut req: Request<Bo
     let uri = req.uri().clone();
     let ip = get_ip(&req, &info);
 
-    let mut logging_info = LoggingInfo::new(method, uri, ip);
+    let logging_info = Arc::new(Mutex::new(LoggingInfo::new(method, uri, ip)));
     // Somehow give this a mut ref so I can use it after
-    req.extensions_mut().insert(&mut logging_info);
+    req.extensions_mut().insert( logging_info.clone());
 
-    let mut resp = next.run(req).await;
+    let resp = next.run(req).await;
 
     let status = resp.status();
 
-    let loging_info = resp.extensions_mut().get_mut::<LoggingInfo>().expect("Did someone remove it from extensions?");
-    loging_info.set_status_code(status);
+    let mut logger = logging_info.lock().await;
+    logger.set_status_code(status);
 
 
-    let line = loging_info.get_log();
+    let line = logger.get_log();
     if resp.status().is_success() {
         info!(target: "in", "{}", line);
     } else {
