@@ -59,6 +59,8 @@ using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
 connected via a central broker. Each party runs an application, called `app`.
 We will simulate this application.
 
+Note: cURL versions before 7.82 do not support the `--json` option. In this case, please use `--data` instead.
+
 The used BeamIds are the following:
 
 | System             | BeamID                       |
@@ -211,7 +213,7 @@ A failed task:
 
 ### Create task
 
-Create a new task to be worked on by defined workers. Currently, the body is restricted to 10MB in size. 
+Create a new task to be worked on by defined workers. Currently, the body is restricted to 10MB in size.
 
 Method: `POST`  
 URL: `/v1/tasks`  
@@ -483,19 +485,19 @@ This release improves efficiency in network communication with a base64 encoding
 
 ## Breaking changes
 
-* Improvement of internal message efficiency:
+- Improvement of internal message efficiency:
 In previous releases, the encrypted payload and the encapsulated encryption keys, both fields byte arrays, were encoded as JSON arrays of the ASCII representation of the corresponding decimal numbers. This, of course, potentially quadruples the payload size. We chose a base64-string encoding for those fields to strike a balance against network efficiency and encoding performance. Other encoding types, such as base85, turned out to be (depending on the payload) around 1300% slower.
-* The log level for the hyper component (HTTP handling) is now set to `warn`, except if explicitly specified otherwise, e.g., by setting `RUST_LOG="debug,hyper=debug"`.
+- The log level for the hyper component (HTTP handling) is now set to `warn`, except if explicitly specified otherwise, e.g., by setting `RUST_LOG="debug,hyper=debug"`.
 
 ## Major changes
 
-* We improved the resilience of the communication between the Beam.Broker and the central PKI (Hashicorp Vault) by a more explicit retry mechanism and improved logging.
+- We improved the resilience of the communication between the Beam.Broker and the central PKI (Hashicorp Vault) by a more explicit retry mechanism and improved logging.
 
 ## Minor improvement
 
-* Bugfix: We fixed a bug, where the logging engine might be initialized and and lost some startup messages.
-* We improved the dev build script to avoid out-of-sync binary and docker image generation.
-* The logging was improved throughout the board. Some Information were reduced in severity to `trace` level.
+- Bugfix: We fixed a bug, where the logging engine might be initialized and and lost some startup messages.
+- We improved the dev build script to avoid out-of-sync binary and docker image generation.
+- The logging was improved throughout the board. Some Information were reduced in severity to `trace` level.
 
 ## Cryptography Notice
 
