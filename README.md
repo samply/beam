@@ -479,25 +479,33 @@ The data is symmetrically encrypted using the Autheticated Encryption with Authe
 - [x] Expiration of tasks and results
 - [x] Support TLS-terminating proxies
 
-## Latest version: Samply.Beam 0.6.0 -- 2023-02-xx
+## Latest version: Samply.Beam 0.6.0 -- 2023-03-xx
 
 This release improves efficiency in network communication with a base64 encoding of ciphertexts and encryption keys. Because of this internal API change, both the Beam.Proxies and the Beam.Broker need to run a 0.6.x version. However, the external API has not changed and does not require any action on the user's side.
 
-## Breaking changes
+### Breaking changes
 
-- Improvement of internal message efficiency:
+* Improvement of internal message efficiency:
 In previous releases, the encrypted payload and the encapsulated encryption keys, both fields byte arrays, were encoded as JSON arrays of the ASCII representation of the corresponding decimal numbers. This, of course, potentially quadruples the payload size. We chose a base64-string encoding for those fields to strike a balance against network efficiency and encoding performance. Other encoding types, such as base85, turned out to be (depending on the payload) around 1300% slower.
-- The log level for the hyper component (HTTP handling) is now set to `warn`, except if explicitly specified otherwise, e.g., by setting `RUST_LOG="debug,hyper=debug"`.
+* The log level for the hyper component (HTTP handling) is now set to `warn`, except if explicitly specified otherwise, e.g., by setting `RUST_LOG="debug,hyper=debug"`.
 
-## Major changes
+### Major changes
 
-- We improved the resilience of the communication between the Beam.Broker and the central PKI (Hashicorp Vault) by a more explicit retry mechanism and improved logging.
+* We improved the resilience of the communication between the Beam.Broker and the central PKI (Hashicorp Vault) by a more explicit retry mechanism and improved logging.
+* We updated the certificate cache, resulting in a) less network communication and b) less parsing, hence improving performance and eliminating potential sources of errors.
+* The `v1/health` endpoint of Samply.Broker gives more information regarding the current system status, e.g. if the central vault is reachable/sealed.
+* A first experimental implementation of Server-sent Events (SSE) for fetching results is implemented. To use this API, set the request header `Accept: text/event-stream`. Note, however, that this feature is still experimental and subject to changes.
 
-## Minor improvement
+### Minor improvements
 
-- Bugfix: We fixed a bug, where the logging engine might be initialized and and lost some startup messages.
-- We improved the dev build script to avoid out-of-sync binary and docker image generation.
-- The logging was improved throughout the board. Some Information were reduced in severity to `trace` level.
+* Bugfix: We fixed a bug, where the logging engine might be initialized and and lost some startup messages.
+* We improved the dev build script to avoid out-of-sync binary and docker image generation.
+* The logging was improved throughout the board. Some Information were reduced in severity to `trace` level.
+* Beam development is now supported on both libssl1.1 and libssl3 Linuxes (e.g. Ubuntu 20.04 vs. Ubuntu 22.04).
+* Beam development will now automatically determine when to rebuild the Docker images.
+* Beam now gracefully (and quickly) exits in Docker environments where not all Unix signals are forwarded into containers.
+* `beamdev start` now starts a MITM proxy for debugging (access at http://localhost:9090)
+* (( TODO Jan's refactorings ))
 
 ## Cryptography Notice
 

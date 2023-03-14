@@ -11,9 +11,9 @@ In previous releases, the encrypted payload and the encapsulated encryption keys
 ## Major changes
 
 * We improved the resilience of the communication between the Beam.Broker and the central PKI (Hashicorp Vault) by a more explicit retry mechanism and improved logging.
-* (( TODO Certificate error handling, less retries ))
-* (( TODO Health endpoint ))
-* (( TODO SSE ))
+* We updated the certificate cache, resulting in a) less network communication and b) less parsing, hence improving performance and eliminating potential sources of errors.
+* The `v1/health` endpoint of Samply.Broker gives more information regarding the current system status, e.g. if the central vault is reachable/sealed.
+* A first experimental implementation of Server-sent Events (SSE) for fetching results is implemented. To use this API, set the request header `Accept: text/event-stream`. Note, however, that this feature is still experimental and subject to changes.
 
 ## Minor improvements
 
@@ -25,7 +25,6 @@ In previous releases, the encrypted payload and the encapsulated encryption keys
 * Beam now gracefully (and quickly) exits in Docker environments where not all Unix signals are forwarded into containers.
 * `beamdev start` now starts a MITM proxy for debugging (access at http://localhost:9090)
 * (( TODO Jan's refactorings ))
-* (( TODO Logging improvements ))
 
 # Samply.Beam 0.5.0 -- 2023-02-03
 
@@ -78,7 +77,6 @@ If your current setup relies on the previous behaviour, please check your CA and
 ### End-to-end encryption
 
 This version fully implements end-to-end-encryption between the Beam.Proxies. This breaks downwards compatibility and requires all Beam.Proxies, as well as the central Beam.Broker, to run at least this version (v0.4.0).
-
 
 ## Major changes
 
