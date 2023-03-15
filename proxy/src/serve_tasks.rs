@@ -295,7 +295,7 @@ async fn handler_tasks_stream(
 }
 
 // TODO: This could be a middleware
-async fn sign_request(
+pub async fn sign_request(
     body: Value,
     mut parts: Parts,
     config: &config_proxy::Config,
