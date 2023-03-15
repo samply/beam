@@ -186,6 +186,67 @@ impl Msg for MsgEmpty {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MessageType<State> where State: MsgState {
+    // Maybe add MessageSigned and Encrypted versions
+    MsgTaskRequest(MsgTaskRequest<State>),
+    MsgTaskResult(MsgTaskResult<State>),
+    MsgEmpty(MsgEmpty),
+}
+
+pub type PlainMessage = MessageType<Plain>;
+pub type EncryptedMessage = MessageType<Encrypted>;
+
+impl EncryptableMsg for PlainMessage {
+    type Output = EncryptedMessage;
+
+    fn convert_self(self, body: Encrypted) -> Self::Output {
+        match self {
+            Self::MsgTaskRequest(m) => Self::Output::MsgTaskRequest(m.convert_self(body)),
+            Self::MsgTaskResult(m) => Self::Output::MsgTaskResult(m.convert_self(body)),
+            Self::MsgEmpty(m) => Self::Output::MsgEmpty(m)
+        }
+    }
+
+    fn get_plain(&self) -> &Plain {
+        match self {
+            Self::MsgTaskRequest(m) => m.get_plain(),
+            Self::MsgTaskResult(m) => m.get_plain(),
+            Self::MsgEmpty(_) => &Plain { body: None },
+        }
+    }
+}
+
+impl<T: MsgState> Msg for MessageType<T> {
+    fn get_from(&self) -> &AppOrProxyId {
+        use MessageType::*;
+        match self {
+            MsgTaskRequest(m) => m.get_from(),
+            MsgTaskResult(m) => m.get_from(),
+            MsgEmpty(m) => m.get_from(),
+        }
+    }
+
+    fn get_to(&self) -> &Vec<AppOrProxyId> {
+        use MessageType::*;
+        match self {
+            MsgTaskRequest(m) => m.get_to(),
+            MsgTaskResult(m) => m.get_to(),
+            MsgEmpty(m) => m.get_to(),
+        }
+    }
+
+    fn get_metadata(&self) -> &Value {
+        use MessageType::*;
+        match self {
+            MsgTaskRequest(m) => m.get_metadata(),
+            MsgTaskResult(m) => m.get_metadata(),
+            MsgEmpty(m) => m.get_metadata(),
+        }
+    }
+}
+
 pub trait DecryptableMsg: Msg + Serialize + Sized
 {
     type Output: Msg + DeserializeOwned;
@@ -393,7 +454,7 @@ mod serialize_time {
     }
 }
 
-pub trait MsgState: Serialize + Eq + PartialEq {}
+pub trait MsgState: Serialize + Eq + PartialEq + Default {}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct Encrypted {

@@ -11,15 +11,15 @@ use hyper::{
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Serialize, Deserialize};
 use serde_json::Value;
 use shared::{
     beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncryptableMsg, DecryptableMsg,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, Msg, MsgEmpty, MsgId, MsgSigned,
-    MsgTaskRequest, MsgTaskResult, crypto, http_client::SamplyHttpClient, sse_event::SseEventType,
+    MsgTaskRequest, MsgTaskResult, crypto, http_client::SamplyHttpClient, sse_event::SseEventType, PlainMessage, MessageType, EncryptedMessage,
 };
 use tokio::io::BufReader;
-use tracing::{debug, error, warn, trace};
+use tracing::{debug, error, warn, trace, info};
 
 use crate::auth::AuthenticatedApp;
 
@@ -70,19 +70,8 @@ async fn forward_request(mut req: Request<Body>, config: &config_proxy::Config, 
         Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
             .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
     req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
-    let (body, parts) = encrypt_request(req, &sender).await?;
-    let err = (StatusCode::BAD_REQUEST, "Cannot parse body for signing's sake");
-    let sender = match body.as_object() {
-        Some(object) => object.get("from"),
-        None => return Err(err),
-    };
-    let Some(sender) = sender else {
-        return Err(err);
-    };
-    let Ok(sender) = serde_json::from_value::<AppOrProxyId>(sender.to_owned()) else {
-        return Err((StatusCode::BAD_REQUEST, "Cannot deserialize AppOrProxyId from from field"));
-    };
-    let req = sign_request(body, parts, &config, &target_uri, sender).await?;
+    let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
+    let req = sign_request(encrypted_msg, parts, &config, &target_uri).await?;
     trace!("Requesting: {:?}", req);
     let resp = client.request(req).await.map_err(|e| {
         warn!("Request to broker failed: {}", e.to_string());
@@ -126,6 +115,7 @@ async fn handler_tasks_nostream(
     // Validate Query, forward to server, get response.
     
     let resp = forward_request(req, &config, &sender, &client).await?;
+
 
     // Check reply's signature
 
@@ -296,12 +286,12 @@ async fn handler_tasks_stream(
 
 // TODO: This could be a middleware
 async fn sign_request(
-    body: Value,
+    body: EncryptedMessage,
     mut parts: Parts,
     config: &config_proxy::Config,
     target_uri: &Uri,
-    from: AppOrProxyId,
 ) -> Result<Request<Body>, (StatusCode, &'static str)> {
+    let from = body.get_from();
 
     let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body).await.map_err(|e| {
         error!("Crypto failed: {}", e);
@@ -411,24 +401,25 @@ fn decrypt_msg<M: DecryptableMsg>(
     msg.decrypt(&AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()), crypto::get_own_privkey())
 }
 
+
+
 async fn encrypt_request(
     req: Request<Body>,
     sender: &AppId,
-) -> Result<(Value, Parts), (StatusCode, &'static str)> {
+) -> Result<(EncryptedMessage, Parts), (StatusCode, &'static str)> {
     let (parts, body) = req.into_parts();
     let body = body::to_bytes(body).await.map_err(|e| {
         warn!("Unable to read message body: {e}");
         ERR_BODY
     })?;
 
-    let body = if body.is_empty() {
+    let msg = if body.is_empty() {
         debug!("Body is empty, substituting MsgEmpty.");
-        let empty = MsgEmpty {
+        PlainMessage::MsgEmpty(MsgEmpty {
             from: sender.into(),
-        };
-        serde_json::to_value(empty).unwrap()
+        })
     } else {
-        match serde_json::from_slice::<Value>(&body) {
+        match serde_json::from_slice(&body) {
             Ok(val) => {
                 debug!("Body is valid json");
                 val
@@ -444,23 +435,27 @@ async fn encrypt_request(
         }
     };
     // Sanity/security checks: From address sane?
-    let msg = serde_json::from_value::<MsgEmpty>(body.clone()).map_err(|e| {
-        warn!("Received body did not deserialize into MsgEmpty: {e}");
-        ERR_BODY
-    })?;
+    // let msg = serde_json::from_value::<MsgEmpty>(body.clone()).map_err(|e| {
+    //     warn!("Received body did not deserialize into MsgEmpty: {e}");
+    //     ERR_BODY
+    // })?;
     if msg.get_from() != sender {
         return Err(ERR_FAKED_FROM);
     }
     // What Message is sent?
     // This is ugly I will rewrite this also once we have message enums
-    let body = if let Some(val) = serialize_to::<MsgTaskRequest>(body.clone()){
-        encrypt_msg(val).await.ok().and_then(|val| serde_json::to_value(val).ok()).ok_or_else(|| ERR_INTERNALCRYPTO)?
-    }
-    else if let Some(val) = serialize_to::<MsgTaskResult>(body.clone()){
-        encrypt_msg(val).await.ok().and_then(|val| serde_json::to_value(val).ok()).ok_or_else(|| ERR_INTERNALCRYPTO)?
-    } else {
-        body
-    };
+    // let body = if let Some(val) = serialize_to::<MsgTaskRequest>(body.clone()){
+    //     encrypt_msg(val).await.ok().and_then(|val| serde_json::to_value(val).ok()).ok_or_else(|| ERR_INTERNALCRYPTO)?
+    // }
+    // else if let Some(val) = serialize_to::<MsgTaskResult>(body.clone()){
+    //     encrypt_msg(val).await.ok().and_then(|val| serde_json::to_value(val).ok())
+    // } else {
+    //     body
+    // };
+    let body = encrypt_msg(msg).await.map_err(|e| {
+        warn!("Encryption faild with: {e}");
+        ERR_INTERNALCRYPTO
+    })?;
     Ok((body, parts))
 }
 

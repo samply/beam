@@ -585,8 +585,8 @@ pub async fn get_proxy_public_keys(receivers: impl IntoIterator<Item = &AppOrPro
         }).collect();
     let receivers_crypto_bundle = crypto::get_newest_certs_for_cnames_as_pemstr(proxy_receivers.iter()).await;
     let receivers_keys = match receivers_crypto_bundle {
-        Some(vec) => Ok(vec.iter().map(|crypt_publ| rsa::RsaPublicKey::from_public_key_pem(&crypt_publ.pubkey).expect("Cannot collect recipients' public keys")).collect::<Vec<rsa::RsaPublicKey>>()), // TODO Expect
-        None => Err(SamplyBeamError::SignEncryptError("Cannot gather encryption keys.".into()))
-    }?;
+        Some(vec) => vec.iter().map(|crypt_publ| rsa::RsaPublicKey::from_public_key_pem(&crypt_publ.pubkey).expect("Cannot collect recipients' public keys")).collect::<Vec<rsa::RsaPublicKey>>(), // TODO Expect
+        None => Vec::new()
+    };
     Ok(receivers_keys)
 }
