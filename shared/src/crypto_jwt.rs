@@ -58,6 +58,24 @@ where
     }
 }
 
+pub struct Authorized;
+
+#[async_trait]
+impl<S, B> FromRequest<S, B> for Authorized 
+where
+    S: Send + Sync,
+    B: Send + 'static,
+{
+    type Rejection = (StatusCode, &'static str);
+
+    async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
+        let auth: MsgSigned<MsgEmpty> = FromRequest::from_request(req, state).await?;
+        auth.verify().await.map_err(|_| (StatusCode::UNAUTHORIZED, "This endpoint needs autherization"))?;
+        
+        Ok(Authorized)
+    }
+}
+
 #[tracing::instrument]
 pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
     // TODO: Make static/const
