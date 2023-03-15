@@ -7,7 +7,7 @@ use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use static_init::dynamic;
 use tracing::{debug, error, warn};
-use crate::{BeamId, errors::SamplyBeamError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}};
+use crate::{BeamId, errors::SamplyBeamError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}, middleware::{LoggingInfo, LoggingExtension}};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -23,7 +23,7 @@ where
     B::Data: Send,
     B::Error: Into<BoxError>,
     B: HttpBody + 'static,
-    T: Serialize + DeserializeOwned + MsgWithBody
+    T: Serialize + DeserializeOwned + MsgWithBody + Send
 {
     type Rejection = (StatusCode, &'static str);
 
@@ -204,6 +204,7 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
         msg: custom_without,
         sig: sig.to_string()
     };
+    req.extensions.get::<LoggingExtension>().expect("Should be set by middleware").lock().await.set_proxy_name(msg_signed.get_from().clone());
 
     Ok(msg_signed)
 }

@@ -48,13 +48,15 @@ impl LoggingInfo {
     }
 }
 
+pub type LoggingExtension = Arc<Mutex<LoggingInfo>>;
+
 pub async fn log(ConnectInfo(info): ConnectInfo<SocketAddr>, mut req: Request<Body>, next: Next<Body>) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
     let ip = get_ip(&req, &info);
 
+    // TODO: find a smarter way to do this maybe oneshot channel or something completly diffrent
     let logging_info = Arc::new(Mutex::new(LoggingInfo::new(method, uri, ip)));
-    // Somehow give this a mut ref so I can use it after
     req.extensions_mut().insert( logging_info.clone());
 
     let resp = next.run(req).await;
