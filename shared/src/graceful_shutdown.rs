@@ -7,11 +7,11 @@ use tracing::info;
 pub async fn wait_for_signal() {
     let mut sigterm = signal(SignalKind::terminate())
         .expect("Unable to register shutdown handler; are you running a Unix-based OS?");
-    let mut sigkill = signal(SignalKind::interrupt())
+    let mut sigint = signal(SignalKind::interrupt())
         .expect("Unable to register shutdown handler; are you running a Unix-based OS?");
     let signal = tokio::select! {
         _ = sigterm.recv() => "SIGTERM",
-        _ = sigkill.recv() => "SIGKILL"
+        _ = sigint.recv() => "SIGINT"
     };
     // The following does not print in docker-compose setups but it does when run individually.
     // Probably a docker-compose error.
