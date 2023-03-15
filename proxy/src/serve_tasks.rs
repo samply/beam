@@ -127,15 +127,7 @@ async fn handler_tasks_nostream(
 
     // TODO: Always return application/jwt from server.
     if !bytes.is_empty() {
-        let json = serde_json::from_slice::<Value>(&bytes);
-        if json.is_err() {
-            warn!(
-                "Answer is no valid JSON; returning as-is to client: \"{}\". Headers: {:?}",
-                std::str::from_utf8(&bytes).unwrap_or("(unable to parse)"),
-                parts
-            );
-        } else {
-            let mut json = json.unwrap();
+        if let Ok(mut json) = serde_json::from_slice::<Value>(&bytes) {
             if !validate_and_remove_signatures(&mut json).await {
                 warn!("The answer was valid JSON but we were unable to validate and remove its signature. The offending JSON was: {}", json);
                 return Err(ERR_VALIDATION);
@@ -146,6 +138,12 @@ async fn handler_tasks_nostream(
             trace!(
                 "Validated and stripped signature: \"{}\"",
                 std::str::from_utf8(&bytes).unwrap_or("Unable to parse string as UTF-8")
+            );
+        } else {
+            warn!(
+                "Answer is no valid JSON; returning as-is to client: \"{}\". Headers: {:?}",
+                std::str::from_utf8(&bytes).unwrap_or("(unable to parse)"),
+                parts
             );
         }
     }
