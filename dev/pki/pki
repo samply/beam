@@ -13,7 +13,7 @@ export BROKER_ID=$(echo $PROXY1_ID | cut -d '.' -f 2-)
 export VAULT_ADDR=http://127.0.0.1:8200
 
 function start() {
-     docker-compose up -d vault
+     docker-compose up -d vault --no-build
 }
 
 function clean() {
