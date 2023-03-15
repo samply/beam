@@ -100,13 +100,11 @@ function build() {
 function build_docker() {
     BACK2=$(pwd)
     cd $SD
-    echo "IMGNAME=$IMGNAME PRE"
     if [ -z "$IMGNAME" ]; then
-        docker-compose build --build-arg TARGETARCH=$ARCH --build-arg TAG=$TAG
+        docker-compose build --build-arg TARGETARCH=$ARCH
     else
-        docker-compose build --build-arg TARGETARCH=$ARCH --build-arg TAG=$TAG --build-arg IMGNAME=$IMGNAME
+        docker-compose build --build-arg TARGETARCH=$ARCH --build-arg IMGNAME=$IMGNAME
     fi
-    echo "IMGNAME=$IMGNAME POST"
     cd $BACK2
 }
 
@@ -120,7 +118,7 @@ function start {
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     build
-    docker-compose up --no-recreate --abort-on-container-exit --no-build
+    docker-compose up --no-build --no-recreate --abort-on-container-exit
 }
 
 function start_bg {
@@ -128,7 +126,7 @@ function start_bg {
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     build
-    docker-compose up --no-recreate -d --no-build
+    docker-compose up --no-build --no-recreate -d
     for ADDR in $P1 $P2; do
         TRIES=1
         while [ $TRIES -ne 0 ]; do
