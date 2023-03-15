@@ -43,7 +43,7 @@ function image_for_docker() {
      # Pick the correct Ubuntu version for the Docker image,
      # so the locally-built rust binary works regarding libssl
      if [[ "$(pkg-config --modversion libssl)" =~ ^3.* ]]; then
-          echo "ubuntu:slim" # Use libssl3
+          echo "ubuntu:latest" # Use libssl3
      else
           echo -n "" # Don't change (uses libssl1.1)
      fi
