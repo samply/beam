@@ -77,7 +77,13 @@ async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(),Samp
 }
 
 async fn get_broker_health(config: &Config, client: &SamplyHttpClient) -> Result<(), SamplyBeamError> {
-    let uri = Uri::builder().scheme(config.broker_uri.scheme().unwrap().as_str()).authority(config.broker_uri.authority().unwrap().to_owned()).path_and_query("/v1/health").build().map_err(|e| SamplyBeamError::HttpRequestBuildError(e)).unwrap(); // TODO Unwrap
+    let uri = Uri::builder()
+        .scheme(config.broker_uri.scheme().expect("Config broker uri to have valid scheme").as_str())
+        .authority(config.broker_uri.authority().expect("Config broker uri to have valid authority").to_owned())
+        .path_and_query("/v1/health")
+        .build()
+        .map_err(|e| SamplyBeamError::HttpRequestBuildError(e))
+        .expect("Uri to be constructed correctly");
 
     let resp = retry_notify(
         backoff::ExponentialBackoffBuilder::default()
@@ -89,7 +95,8 @@ async fn get_broker_health(config: &Config, client: &SamplyHttpClient) -> Result
                 .method(Method::GET)
                 .uri(&uri)
                 .header(hyper::header::USER_AGENT, env!("SAMPLY_USER_AGENT"))
-                .body(body::Body::empty()).unwrap(); //TODO Unwrap
+                .body(body::Body::empty())
+                .expect("Request to be constructed correctly");
             Ok(client.request(req).await?)
         },
         |err, b: Duration| {
