@@ -50,6 +50,7 @@ pub mod config_proxy;
 pub mod beam_id;
 pub mod http_client;
 pub mod middleware;
+pub mod graceful_shutdown;
 
 pub mod examples;
 
