@@ -14,7 +14,7 @@ use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use shared::{
-    beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncMsg, DecMsg,
+    beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncryptableMsg, DecryptableMsg,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, Msg, MsgEmpty, MsgId, MsgSigned,
     MsgTaskRequest, MsgTaskResult, crypto, http_client::SamplyHttpClient, sse_event::SseEventType,
 };
@@ -390,37 +390,25 @@ fn decryption_helper(value: &mut Value) -> Result<(), SamplyBeamError> {
             decryption_helper(inner)?;
         }
     } else if value.is_object() {
-        if is_message_type::<EncryptedMsgTaskRequest>(value) {
-            *value = decrypt_msg::<MsgTaskRequest, EncryptedMsgTaskRequest>(value)?;
+        if let Some(val) = serialize_to::<EncryptedMsgTaskRequest>(value.clone()) {
+            *value = serde_json::to_value(decrypt_msg(val)?).map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))?;
             return Ok(());
-        } else if is_message_type::<EncryptedMsgTaskResult>(value) {
-            *value = decrypt_msg::<MsgTaskResult, EncryptedMsgTaskResult>(value)?;
+        } else if let Some(val) = serialize_to::<EncryptedMsgTaskResult>(value.clone()) {
+            *value = serde_json::to_value(decrypt_msg(val)?).map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))?;
             return Ok(());
         }
     }
-    *value = value.clone();
     Ok(())
 }
 
-// Once specialization becomes stable, implement in Msg trait (see https://stackoverflow.com/questions/60138397/how-to-test-for-type-equality-in-rust)
-fn is_message_type<M: Msg + DeserializeOwned>(value: &Value) -> bool {
-    let value = value.clone();
-    match serde_json::from_value::<M>(value) {
-        Ok(_msg) => true,
-        Err(_) => false, // Not of this type -> considered "valid"
-    }
+fn serialize_to<M: DeserializeOwned>(value: Value) -> Option<M> {
+    serde_json::from_value::<M>(value).ok()
 }
 
-fn decrypt_msg<T: Msg + DeserializeOwned + Serialize, M: EncMsg<T> + DeserializeOwned + Serialize + std::fmt::Debug>(
-    value: &Value,
-) -> Result<Value, SamplyBeamError> {
-    let enc_value = value.clone();
-        match serde_json::from_value::<M>(enc_value) {
-        Ok(msg) => serde_json::to_value(msg.decrypt(&AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()), crypto::get_own_privkey())?).map_err(|e| {
-            SamplyBeamError::SignEncryptError(format!("Cannot decrypt message: {}", e).into())
-        }),
-        Err(e) => Err(SamplyBeamError::SignEncryptError(format!("Error decrypting message: {}",e))),
-    }
+fn decrypt_msg<M: DecryptableMsg>(
+    msg: M,
+) -> Result<M::Output, SamplyBeamError> {
+    msg.decrypt(&AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()), crypto::get_own_privkey())
 }
 
 async fn encrypt_request(
@@ -464,35 +452,21 @@ async fn encrypt_request(
         return Err(ERR_FAKED_FROM);
     }
     // What Message is sent?
-    if is_message_type::<MsgTaskRequest>(&body){
-        let body = encrypt_msg::<EncryptedMsgTaskRequest, MsgTaskRequest>(&body).await.map_err(|e| {
-            warn!("Unable to encrypt message: {e}");
-            ERR_INTERNALCRYPTO
-        })?;
-        Ok((body, parts))
+    // This is ugly I will rewrite this also once we have message enums
+    let body = if let Some(val) = serialize_to::<MsgTaskRequest>(body.clone()){
+        encrypt_msg(val).await.ok().and_then(|val| serde_json::to_value(val).ok()).ok_or_else(|| ERR_INTERNALCRYPTO)?
     }
-    else if is_message_type::<MsgTaskResult>(&body){
-        let body = encrypt_msg::<EncryptedMsgTaskResult, MsgTaskResult>(&body).await.map_err(|e| {
-            warn!("Unable to encrypt message: {e}");
-            ERR_INTERNALCRYPTO
-        })?;
-        Ok((body, parts))
+    else if let Some(val) = serialize_to::<MsgTaskResult>(body.clone()){
+        encrypt_msg(val).await.ok().and_then(|val| serde_json::to_value(val).ok()).ok_or_else(|| ERR_INTERNALCRYPTO)?
     } else {
-        Ok((body, parts))
-    }
+        body
+    };
+    Ok((body, parts))
 }
 
-async fn encrypt_msg<T: Msg + DeserializeOwned, M: DecMsg<T> + DeserializeOwned + Serialize + std::fmt::Debug>(
-    value: &Value,
-) -> Result<Value, SamplyBeamError> {
-    let value = value.clone();
-    match serde_json::from_value::<M>(value) {
-        Ok(msg) => {
-            let receivers_keys = crypto::get_proxy_public_keys(msg.get_to()).await?;
-            serde_json::to_value(msg.encrypt(&receivers_keys)?).map_err(|e| {
-                SamplyBeamError::SignEncryptError(format!("Cannot decrypt message: {}", e).into())
-            })
-        },
-        Err(e) => Err(SamplyBeamError::SignEncryptError(format!("Cannot decrypt message: {}", e).into())),
-    }
+async fn encrypt_msg<M: EncryptableMsg>(
+    msg: M,
+) -> Result<M::Output, SamplyBeamError> {
+    let receivers_keys = crypto::get_proxy_public_keys(msg.get_to()).await?;
+    msg.encrypt(&receivers_keys)
 }

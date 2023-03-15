@@ -17,7 +17,7 @@ use itertools::Itertools;
 use rsa::{PaddingScheme, PublicKey, RsaPrivateKey, RsaPublicKey};
 
 use std::{
-    fmt::Display,
+    fmt::{Display, Debug},
     ops::Deref,
     time::{Duration, Instant, SystemTime},
 };
@@ -186,84 +186,37 @@ impl Msg for MsgEmpty {
     }
 }
 
-pub trait EncMsg<M>: Msg + Serialize
-where
-    M: Msg + DeserializeOwned,
+pub trait DecryptableMsg: Msg + Serialize + Sized
 {
+    type Output: Msg + DeserializeOwned;
+
+    fn get_encryption(&self) -> &Encrypted;
+    fn convert_self(self, body: String) -> Self::Output;
+
     /// Decrypts an encrypted message. Caution: can panic.
     #[allow(clippy::or_fun_call)]
     fn decrypt(
-        &self,
+        self,
         my_id: &AppOrProxyId,
         my_priv_key: &RsaPrivateKey,
-    ) -> Result<M, SamplyBeamError> {
-
-        // JSON parsing
-        let binding = serde_json::to_value(self).map_err(|e| {
-            SamplyBeamError::SignEncryptError(format!(
-                "Decryption error: Cannot deserialize message because {}",
-                e
-            ))})?;
-        let mut encrypted_json = binding
-            .as_object()
-            .ok_or(SamplyBeamError::SignEncryptError(
-                "Decryption error: Cannot deserialize message".into(),
-            ))?
-            .to_owned();
-        let encrypted_field =
-            &mut encrypted_json
-                .remove("encrypted")
-                .ok_or(SamplyBeamError::SignEncryptError(
-                    "Decryption error: No encrypted payload found".into(),
-                ))?;
-        let encrypted = encrypted_field.as_str()
-            .ok_or(SamplyBeamError::JsonParseError("field \"encrypted\" does not contain a valid string"))?;
-        let encrypted = base64::decode_block(encrypted)
-            .map_err(|_| SamplyBeamError::DecryptError("field \"encrypted\" is not base64 encoded"))?;
-
-        let to_array_index: usize = encrypted_json
-            .get("to")
-            .ok_or(SamplyBeamError::SignEncryptError(
-                "Decryption error: 'to' field not readable".into(),
-            ))?
-            .as_array()
-            .ok_or(SamplyBeamError::SignEncryptError(
-                "Decryption error: Cannot get adressee array".into(),
-            ))?
-            .iter()
+    ) -> Result<Self::Output, SamplyBeamError> {
+        let Encrypted { encrypted, encryption_keys } = self.get_encryption();
+        let to_array_index: usize = self.get_to().iter()
             .position(|entry| {
-                let entry_str = entry
-                    .as_str()
-                    .expect("Decryption error: Cannot parse 'to' entries");
+                let entry_str = entry.to_string();
 
                 let mut matched = entry_str.ends_with(&my_id.to_string());
                 matched &= match entry_str.find(&my_id.to_string()) {
-                    Some(0) => true, // Begins with id
-                    Some(i) => entry_str.chars().nth(i-1) == Some('.'), // Ends with id, but before is a separator (e.g. appId)
-                    None => false
+                    Some(0) => true,                                      // Begins with id
+                    Some(i) => entry_str.chars().nth(i - 1) == Some('.'), // Ends with id, but before is a separator (e.g. appId)
+                    None => false,
                 };
                 matched
             }) // TODO remove expect!
             .ok_or(SamplyBeamError::SignEncryptError(
                 "Decryption error: This client cannot be found in 'to' list".into(),
             ))?;
-        let encrypted_decryption_keys = &mut encrypted_json.remove("encryption_keys").ok_or(
-            SamplyBeamError::SignEncryptError(
-                "Decryption error: Cannot read 'encryption_keys' field".into(),
-            ),
-        )?;
-        let encrypted_decryption_key: Vec<u8> =
-            encrypted_decryption_keys
-                .as_array()
-                .ok_or(SamplyBeamError::SignEncryptError(
-                    "Decryption error: Cannot read 'encrypted_keys' array".into(),
-                ))?[to_array_index]
-                .as_str()
-                .ok_or(SamplyBeamError::SignEncryptError(
-                    "Decryption error: Encryption key is not readable".into(),
-                ))
-                .map(|v| base64::decode_block(v).unwrap())
-                .map_err(|e| SamplyBeamError::SignEncryptError(format!("Decryption error: Encryption key is invalid: {e}")))?; //TODO unwrap
+        let encrypted_decryption_key = &encryption_keys[to_array_index];
 
         // Cryptographic Operations
         let cipher_engine = XChaCha20Poly1305::new_from_slice(&my_priv_key.decrypt(
@@ -295,65 +248,27 @@ where
             ))
         })?;
 
-        //JSON Reassembling
-        let mut decrypted_json = encrypted_json; // The "encrypted" field was removed earlier
-        let decrypted_elements: Value = serde_json::from_str(&plaintext).map_err(|e| {
-            SamplyBeamError::SignEncryptError(format!(
-                "Decryption error: Decrypted plaintext invalid because {}",
-                e
-            ))
-        })?;
-        let decrypted_elements =
-            decrypted_elements
-                .as_object()
-                .ok_or(SamplyBeamError::SignEncryptError(
-                    "Decryption error: Decrypted plaintext invalid".into(),
-                ))?;
-
-        for (key, value) in decrypted_elements.to_owned() {
-            let old_val = decrypted_json.insert(key, value);
-            if old_val.is_some() {
-                return Err(SamplyBeamError::SignEncryptError(
-                    "Decryption error: Duplicate field in decrypted message".into(),
-                ));
-            }
-        }
-        let result: M = serde_json::from_value(serde_json::Value::from(decrypted_json)).or(Err(
-            SamplyBeamError::SignEncryptError(
-                "Decryption error: Cannot deserialize message".into(),
-            ),
-        ))?;
-        Ok(result)
+        // self.set_body(plaintext);
+        Ok(self.convert_self(plaintext))
     }
 }
 
-const FIELDS_TO_ENCRYPT: [&'static str; 1]  = ["body"];
 
-pub trait DecMsg<M>: Msg + Serialize
-where
-    M: Msg + DeserializeOwned,
+pub trait EncryptableMsg: Msg + Serialize + Sized
 {
+    type Output: Msg;
+
+    fn convert_self(self, body: Encrypted) -> Self::Output;
+    fn get_plain(&self) -> &Plain;
+
     #[allow(clippy::or_fun_call)]
-    fn encrypt(
-        &self,
-        receivers_public_keys: &Vec<RsaPublicKey>,
-    ) -> Result<M, SamplyBeamError> {
+    fn encrypt(self, receivers_public_keys: &Vec<RsaPublicKey>) -> Result<Self::Output, SamplyBeamError> {
         // Generate Symmetric Key and Nonce
         let mut rng = rand::thread_rng();
         let symmetric_key = XChaCha20Poly1305::generate_key(&mut rng);
         let nonce = XChaCha20Poly1305::generate_nonce(&mut rng);
 
-        // Deserialize Msg
-        let binding = serde_json::to_value(self).map_err(|e| {
-            SamplyBeamError::SignEncryptError(format!("Cannot deserialize message: {}", e))
-        })?;
-        let cleartext_json = binding
-            .as_object()
-            .ok_or(SamplyBeamError::SignEncryptError(
-                "Cannot deserialize message".into(),
-            ))?
-            .to_owned();
-        
+
         // Encrypt symmetric key with receivers' public keys
         let (encrypted_keys, err): (Vec<_>, Vec<_>) = receivers_public_keys
             .iter()
@@ -371,27 +286,13 @@ where
             ));
         }
 
-        // Retrieve fields to encrypt and remove from msg
-        let mut json_to_encrypt = cleartext_json.clone();
-        json_to_encrypt.retain(|k, _| FIELDS_TO_ENCRYPT.contains(&k.as_str()));
-        let mut encrypted_json = cleartext_json;
-        for f in FIELDS_TO_ENCRYPT {
-            _ = encrypted_json.remove(f);
-        }
-
-        // Add encrypted keys (converted to base64) to msg
-        encrypted_json.insert(
-            String::from("encryption_keys"),
-            serde_json::Value::from_iter(encrypted_keys
-                .iter()
-                .map(|key| base64::encode_block(key))
-            )
-        );
-
-        // Encrypt fields' content
+        // Encrypt fields content
         let cipher = XChaCha20Poly1305::new(&symmetric_key);
-        let plain_value = serde_json::Value::from(json_to_encrypt);
-        let plaintext = plain_value.to_string();
+
+        // I cant belive there is no better way
+        let default = String::new();
+        let plaintext = self.get_plain().body.as_ref().unwrap_or(&default);
+
         let mut ciphertext = cipher.encrypt(&nonce, plaintext.as_ref()).or(Err(
             SamplyBeamError::SignEncryptError("Encryption error: Can not encrypt data.".into()),
         ))?;
@@ -400,22 +301,11 @@ where
         let mut nonce_and_ciphertext = nonce.to_vec();
         nonce_and_ciphertext.append(&mut ciphertext);
 
-        let nonce_and_ciphertext = base64::encode_block(&nonce_and_ciphertext);
 
-        // Add Encrypted fields to msg
-        encrypted_json.insert(
-            String::from("encrypted"),
-            serde_json::Value::from(nonce_and_ciphertext),
-        );
-
-        let serialized_string = serde_json::Value::from(encrypted_json.clone()).to_string();
-        let result =
-            serde_json::from_str(&serialized_string).or(Err(SamplyBeamError::SignEncryptError(
-                "Encryption error: Cannot deserialize message".into(),
-            )))?;
-
-
-        Ok(result)
+        Ok(self.convert_self(Encrypted {
+            encrypted: nonce_and_ciphertext,
+            encryption_keys: encrypted_keys,
+        }))
     }
 }
 
@@ -426,8 +316,8 @@ pub trait Msg: Serialize {
 }
 
 pub trait MsgWithBody: Msg {}
-impl MsgWithBody for MsgTaskRequest {}
-impl MsgWithBody for MsgTaskResult {}
+impl<T: MsgState> MsgWithBody for MsgTaskRequest<T> {}
+impl<T: MsgState> MsgWithBody for MsgTaskResult<T> {}
 
 impl<M: Msg> Msg for MsgSigned<M> {
     fn get_from(&self) -> &AppOrProxyId {
@@ -443,7 +333,7 @@ impl<M: Msg> Msg for MsgSigned<M> {
     }
 }
 
-impl Msg for MsgTaskRequest {
+impl<T: MsgState> Msg for MsgTaskRequest<T> {
     fn get_from(&self) -> &AppOrProxyId {
         &self.from
     }
@@ -457,7 +347,7 @@ impl Msg for MsgTaskRequest {
     }
 }
 
-impl Msg for MsgTaskResult {
+impl<T: MsgState> Msg for MsgTaskResult<T> {
     fn get_from(&self) -> &AppOrProxyId {
         &self.from
     }
@@ -471,33 +361,6 @@ impl Msg for MsgTaskResult {
     }
 }
 
-impl Msg for EncryptedMsgTaskRequest {
-    fn get_from(&self) -> &AppOrProxyId {
-        &self.from
-    }
-
-    fn get_to(&self) -> &Vec<AppOrProxyId> {
-        &self.to
-    }
-
-    fn get_metadata(&self) -> &Value {
-        &self.metadata
-    }
-}
-
-impl Msg for EncryptedMsgTaskResult {
-    fn get_from(&self) -> &AppOrProxyId {
-        &self.from
-    }
-
-    fn get_to(&self) -> &Vec<AppOrProxyId> {
-        &self.to
-    }
-
-    fn get_metadata(&self) -> &Value {
-        &self.metadata
-    }
-}
 
 mod serialize_time {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -530,72 +393,132 @@ mod serialize_time {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MsgTaskRequest {
-    pub id: MsgId,
-    pub from: AppOrProxyId,
-    pub to: Vec<AppOrProxyId>,
-    pub body: String,
-    #[serde(with = "serialize_time", rename = "ttl")]
-    pub expire: SystemTime,
-    pub failure_strategy: FailureStrategy,
-    #[serde(skip)]
-    pub results: HashMap<AppOrProxyId, MsgSigned<MsgTaskResult>>,
-    pub metadata: Value,
+pub trait MsgState: Serialize + Eq + PartialEq {}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+pub struct Encrypted {
+    pub encrypted: Vec<u8>,
+    pub encryption_keys: Vec<Vec<u8>>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct EncryptedMsgTaskRequest {
-    pub id: MsgId,
-    pub from: AppOrProxyId,
-    pub to: Vec<AppOrProxyId>,
-    pub encrypted: String,
-    pub encryption_keys: Vec<String>,
-    #[serde(with = "serialize_time", rename = "ttl")]
-    pub expire: SystemTime,
-    pub failure_strategy: FailureStrategy,
-    pub metadata: Value,
-    #[serde(skip)]
-    pub results: HashMap<AppOrProxyId, MsgSigned<EncryptedMsgTaskResult>>,
+impl MsgState for Encrypted {}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+pub struct Plain {
+    pub body: Option<String>,
 }
 
-//TODO: Implement EncMsg and DecMsg for all message types
-impl EncMsg<MsgTaskRequest> for EncryptedMsgTaskRequest {}
-impl DecMsg<EncryptedMsgTaskRequest> for MsgTaskRequest {}
+impl MsgState for Plain {}
 
-impl EncryptedMsgTaskRequest {
-    pub fn id(&self) -> &MsgId {
-        &self.id
+impl<T: Into<String>> From<T> for Plain {
+    fn from(val: T) -> Self {
+        Plain { body: Some(val.into()) }
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct MsgTaskResult {
+// When const generic enums get stableized this could get beautiful
+#[derive(Serialize, Deserialize, Clone)]
+pub struct MsgTaskRequest<State = Plain>
+where
+    State: MsgState,
+{
+    pub id: MsgId,
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
-    pub task: MsgId,
     #[serde(flatten)]
-    pub status: WorkStatus,
-    pub body: Option<String>,
+    pub body: State,
+    #[serde(with = "serialize_time", rename = "ttl")]
+    pub expire: SystemTime,
+    pub failure_strategy: FailureStrategy,
+    #[serde(skip)]
+    pub results: HashMap<AppOrProxyId, MsgSigned<MsgTaskResult<State>>>,
     pub metadata: Value,
 }
+
+//TODO: Implement EncMsg and DecMsg for all message types
+impl EncryptableMsg for MsgTaskRequest {
+    type Output = MsgTaskRequest<Encrypted>;
+
+    fn convert_self(self, body: Encrypted) -> Self::Output {
+        let Self { id, from, to, expire, failure_strategy, metadata, .. } = self;
+        Self::Output {
+            body,
+            id, from, to, expire, failure_strategy, metadata,
+            results: Default::default()
+        }
+    }
+
+    fn get_plain(&self) -> &Plain {
+        &self.body
+    }
+}
+
+impl DecryptableMsg for MsgTaskRequest<Encrypted> {
+    type Output = MsgTaskRequest;
+
+    fn convert_self(self, body: String) -> Self::Output {
+        let Self { id, from, to, expire, failure_strategy, metadata, .. } = self;
+        Self::Output {
+            body: Plain::from(body),
+            id, from, to, expire, failure_strategy, metadata,
+            results: Default::default()
+        }
+    }
+
+    fn get_encryption(&self) -> &Encrypted {
+        &self.body
+    }
+
+}
+
+pub type EncryptedMsgTaskRequest = MsgTaskRequest<Encrypted>;
+pub type EncryptedMsgTaskResult = MsgTaskResult<Encrypted>;
+
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct EncryptedMsgTaskResult {
+pub struct MsgTaskResult<State = Plain>
+where State: MsgState {
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub task: MsgId,
     #[serde(flatten)]
     pub status: WorkStatus,
-    pub encrypted: String,
-    pub encryption_keys: Vec<String>,
+    #[serde(flatten)]
+    pub body: State,
     pub metadata: Value,
 }
 
-impl EncMsg<MsgTaskResult> for EncryptedMsgTaskResult {}
-impl DecMsg<EncryptedMsgTaskResult> for MsgTaskResult {}
+impl DecryptableMsg for MsgTaskResult<Encrypted> {
+    type Output = MsgTaskResult;
 
-impl MsgWithBody for EncryptedMsgTaskRequest {}
-impl MsgWithBody for EncryptedMsgTaskResult {}
+    fn convert_self(self, body: String) -> Self::Output {
+        let Self { from, to, task, status, metadata, .. } = self;
+        Self::Output {
+            body: Plain::from(body),
+            from, to, task, status, metadata
+        }
+    }
+
+    fn get_encryption(&self) -> &Encrypted {
+        &self.body
+    }
+
+}
+
+impl EncryptableMsg for MsgTaskResult<Plain> {
+    type Output = MsgTaskResult<Encrypted>;
+
+    fn get_plain(&self) -> &Plain {
+        &self.body
+    }
+
+    fn convert_self(self, body: Encrypted) -> Self::Output {
+        let Self { from, to, task, status, metadata, .. } = self;
+        Self::Output {
+            body,
+            from, to, task, status, metadata
+        }
+    }
+}
 
 pub trait HasWaitId<I: PartialEq> {
     fn wait_id(&self) -> I;
@@ -643,11 +566,12 @@ where
     }
 }
 
-impl MsgTaskRequest {
+impl<T: MsgState> MsgTaskRequest<T> {
     pub fn id(&self) -> &MsgId {
         &self.id
     }
-
+}
+impl MsgTaskRequest {
     pub fn new(
         from: AppOrProxyId,
         to: Vec<AppOrProxyId>,
@@ -659,7 +583,7 @@ impl MsgTaskRequest {
             id: MsgId::new(),
             from,
             to,
-            body,
+            body: body.into(),
             failure_strategy,
             results: HashMap::new(),
             metadata,
@@ -670,7 +594,7 @@ impl MsgTaskRequest {
 
 // Don't compare expire, as it is constantly changing.
 // Todo Is the comparison of Results nessecary
-impl PartialEq for MsgTaskRequest {
+impl<T: MsgState> PartialEq for MsgTaskRequest<T> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
             && self.from == other.from
@@ -681,21 +605,7 @@ impl PartialEq for MsgTaskRequest {
             && self.metadata == other.metadata
     }
 }
-impl Eq for MsgTaskRequest {}
-
-impl PartialEq for EncryptedMsgTaskRequest {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-            && self.from == other.from
-            && self.to == other.to
-            && self.encrypted == other.encrypted
-            && self.encryption_keys == other.encryption_keys
-            && self.failure_strategy == other.failure_strategy
-            && self.metadata == other.metadata
-            && self.results == other.results
-    }
-}
-impl Eq for EncryptedMsgTaskRequest {}
+impl<T: MsgState> Eq for MsgTaskRequest<T> {}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MsgPing {
@@ -765,7 +675,7 @@ mod tests {
             id: MsgId::new(),
             from,
             to,
-            body: "Testbody".to_string(),
+            body: "Testbody".into(),
             expire: expiry,
             failure_strategy: failure,
             results: HashMap::new(),
@@ -784,11 +694,11 @@ mod tests {
 
         // Encrypt Message
         let receivers_public_keys = vec![p1_public, p2_public];
-        let msg_encr = msg
+        let msg_encr = msg.clone()
             .encrypt(&receivers_public_keys)
             .expect("Could not encrypt message");
         // Decrypt for both proxies
-        let msg_p1_decr = msg_encr
+        let msg_p1_decr = msg_encr.clone()
             .decrypt(&p1_id, &p1_private)
             .expect("Cannot decrypt message");
         let msg_p2_decr = msg_encr
@@ -812,7 +722,7 @@ mod tests {
             to,
             task: MsgId::new(),
             status,
-            body: Some("The result is 55!".to_string()),
+            body: "The result is 55!".into(),
             metadata: "".into(),
         };
 
@@ -828,14 +738,14 @@ mod tests {
 
         // Encrypt Message
         let receivers_public_keys = vec![p1_public, p2_public];
-        let msg_encr = msg
+        let msg_encr = msg.clone()
             .encrypt(&receivers_public_keys)
             .expect("Could not encrypt message");
         // Decrypt for both proxies
-        let msg_p1_decr = msg_encr
+        let msg_p1_decr = msg_encr.clone()
             .decrypt(&p1_id, &p1_private)
             .expect("Cannot decrypt message");
-        let msg_p2_decr = msg_encr
+        let msg_p2_decr = msg_encr.clone()
             .decrypt(&p2_id, &p2_private)
             .expect("Cannot decrypt message");
 
@@ -844,14 +754,13 @@ mod tests {
     }
 }
 
-impl std::fmt::Debug for EncryptedMsgTaskRequest {
+impl<T: MsgState + Debug> Debug for MsgTaskRequest<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EncryptedMsgTaskRequest")
             .field("id", &self.id)
             .field("from", &self.from)
             .field("to", &self.to)
-            .field("encrypted (#bytes)", &self.encrypted.len())
-            .field("encryption_keys (#)", &self.encryption_keys.len())
+            .field("body", &self.body)
             .field("expire", &self.expire)
             .field("failure_strategy", &self.failure_strategy)
             .field("metadata", &self.metadata)
@@ -859,15 +768,14 @@ impl std::fmt::Debug for EncryptedMsgTaskRequest {
     }
 }
 
-impl std::fmt::Debug for EncryptedMsgTaskResult {
+impl<T: MsgState + Debug> Debug for MsgTaskResult<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EncryptedMsgTaskResult")
         .field("from", &self.from)
         .field("to", &self.to)
         .field("task", &self.task)
         .field("status", &self.status)
-        .field("encrypted (#bytes)", &self.encrypted.len())
-        .field("encryption_keys (#)", &self.encryption_keys.len())
+        .field("body", &self.body)
         .field("metadata", &self.metadata)
         .finish()
     }
