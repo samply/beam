@@ -262,7 +262,7 @@ export TAG=${TAG:-localbuild}
 
 case "$1" in
   build)
-    build_rust && build_docker
+    build
     ;;
   start)
     start
