@@ -218,6 +218,28 @@ impl EncryptableMsg for PlainMessage {
     }
 }
 
+const MESSAGE_EMPTY_ENCRYPTION: &Encrypted = &Encrypted { encrypted: Vec::new(), encryption_keys: Vec::new() };
+
+impl DecryptableMsg for EncryptedMessage {
+    type Output = PlainMessage;
+
+    fn convert_self(self, body: String) -> Self::Output {
+        match self {
+            Self::MsgTaskRequest(m) => Self::Output::MsgTaskRequest(m.convert_self(body)),
+            Self::MsgTaskResult(m) => Self::Output::MsgTaskResult(m.convert_self(body)),
+            Self::MsgEmpty(m) => Self::Output::MsgEmpty(m)
+        }
+    }
+
+    fn get_encryption(&self) -> &Encrypted {
+        match self {
+            Self::MsgTaskRequest(m) => m.get_encryption(),
+            Self::MsgTaskResult(m) => m.get_encryption(),
+            Self::MsgEmpty(_) => MESSAGE_EMPTY_ENCRYPTION,
+        }
+    }
+}
+
 impl<T: MsgState> Msg for MessageType<T> {
     fn get_from(&self) -> &AppOrProxyId {
         use MessageType::*;

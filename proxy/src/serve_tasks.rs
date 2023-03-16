@@ -1,7 +1,7 @@
 use std::{time::{Duration, SystemTime}, convert::Infallible, str::FromStr};
 
 use axum::{Router, routing::{any, put, get}, response::{Response, Sse, sse::Event, IntoResponse}, http::{HeaderValue, request::Parts}, extract::{State, FromRef, BodyStream}, body::Bytes};
-use futures::{stream::{StreamExt, TryStreamExt}, Stream};
+use futures::{stream::{StreamExt, TryStreamExt}, Stream, TryFutureExt};
 use httpdate::fmt_http_date;
 use hyper::{
     body, body::HttpBody,
@@ -127,13 +127,9 @@ async fn handler_tasks_nostream(
 
     // TODO: Always return application/jwt from server.
     if !bytes.is_empty() {
-        if let Ok(mut json) = serde_json::from_slice::<Value>(&bytes) {
-            if !validate_and_remove_signatures(&mut json).await {
-                warn!("The answer was valid JSON but we were unable to validate and remove its signature. The offending JSON was: {}", json);
-                return Err(ERR_VALIDATION);
-            }
-            decryption_helper(&mut json).or( Err(ERR_INTERNALCRYPTO))?;
-            trace!("Decrypted Msg: {:#?}",json);
+        if let Ok(json) = serde_json::from_slice::<Value>(&bytes) {
+            let json = to_server_error(validate_and_decrypt(json).await)?;
+            trace!("Decrypted Msg: {:#?}", json);
             bytes = serde_json::to_vec(&json).unwrap().into();
             trace!(
                 "Validated and stripped signature: \"{}\"",
@@ -242,7 +238,7 @@ async fn handler_tasks_stream(
                     // Check reply's signature
 
                     if !event_as_bytes.is_empty() {
-                        let Ok(mut json) = serde_json::from_slice::<Value>(&event_as_bytes) else {
+                        let Ok(json) = serde_json::from_slice::<Value>(&event_as_bytes) else {
                             warn!("Answer is no valid JSON; discarding: \"{event_as_str}\".");
                             // TODO: For some reason, compiler won't accept the following lines, so we can't inform the App about the problem.
                             //
@@ -252,15 +248,13 @@ async fn handler_tasks_stream(
                             //     .data(format!("Broker sent invalid JSON: {event_as_str}")));
                             continue;
                         };
-                        if !validate_and_remove_signatures(&mut json).await {
-                            warn!("The answer was valid JSON but we were unable to validate and remove its signature. The offending JSON was: {}", json);
-                            // return Err(ERR_VALIDATION);
-                            continue;
-                        }
-                        if let Err(err) = decryption_helper(&mut json) {
-                            warn!("Got an error decrypting Broker's reply: {err}");
-                            continue;
-                        }
+                        let json = match validate_and_decrypt(json).await {
+                            Ok(json) => json,
+                            Err(err) => {
+                                warn!("Got an error decrypting Broker's reply: {err}");
+                                continue;
+                            }
+                        };
                         trace!("Decrypted Msg: {:#?}",json);
                         event_as_bytes = serde_json::to_vec(&json).unwrap();
                         trace!(
@@ -281,6 +275,25 @@ async fn handler_tasks_stream(
     let sse = Sse::new(outgoing);
     Ok(sse)
 }
+
+fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, (StatusCode, &'static str)> {
+    res.map_err(|e| match e {
+        SamplyBeamError::JsonParseError(e) => {
+            warn!("{e}");
+            ERR_UPSTREAM
+        },
+        SamplyBeamError::RequestValidationFailed(e) => {
+            warn!("The answer was valid JSON but we were unable to validate and remove its signature. Err: {e}");
+            ERR_VALIDATION
+        },
+        SamplyBeamError::SignEncryptError(_) => ERR_INTERNALCRYPTO,
+        e => {
+            warn!("Unhandeled error {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "Unknown error")
+        }
+    })
+}
+
 
 // TODO: This could be a middleware
 async fn sign_request(
@@ -335,59 +348,26 @@ async fn sign_request(
 }
 
 #[async_recursion::async_recursion]
-async fn validate_and_remove_signatures(json: &mut Value) -> bool {
-    if json.is_array() {
-        for inner in json.as_array_mut().unwrap() {
-            if !validate_and_remove_signatures(inner).await {
-                return false;
-            }
+async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
+    if let Value::Array(arr) = json {
+        let mut results = Vec::with_capacity(arr.len());
+        for value in arr {
+            results.push(validate_and_decrypt(value).await?);
         }
+        Ok(Value::Array(results))
     } else if json.is_object() {
-        if !(validate_helper_value::<MsgTaskRequest>(json).await
-            || validate_helper_value::<MsgTaskResult>(json).await
-            || validate_helper_value::<MsgEmpty>(json).await)
-        {
-            return false;
+        match serde_json::from_value::<MsgSigned<EncryptedMessage>>(json) {
+            Ok(signed) => {
+                signed.verify().await?;
+                Ok(serde_json::to_value(decrypt_msg(signed.msg)?).expect("Should serialize fine"))
+            }
+            Err(e) => Err(SamplyBeamError::JsonParseError(format!("Failed to parse broker response as a signed encrypted message. Err is {e}")))
         }
-        let msg = json
-            .as_object()
-            .unwrap()
-            .get("msg")
-            .expect("Internal error: We just validated that this is a valid MsgSigned.")
-            .to_owned();
-        *json = msg;
-        return true;
-    }
-    true
-}
-
-async fn validate_helper_value<M: Msg + DeserializeOwned + std::fmt::Debug>(value: &Value) -> bool {
-    let value = value.clone();
-    match serde_json::from_value::<MsgSigned<M>>(value) {
-        Ok(msg) => {
-            debug!("Verifying reply {:?}", msg);
-            msg.verify().await.is_ok()
-        }
-        Err(_) => true, // Not of this type -> considered "valid"
+    } else {
+        Err(SamplyBeamError::JsonParseError(format!("Broker respondend with invalid json {json:#?}")))
     }
 }
 
-fn decryption_helper(value: &mut Value) -> Result<(), SamplyBeamError> {
-    if value.is_array() {
-        for inner in value.as_array_mut().unwrap() {
-            decryption_helper(inner)?;
-        }
-    } else if value.is_object() {
-        if let Some(val) = serialize_to::<EncryptedMsgTaskRequest>(value.clone()) {
-            *value = serde_json::to_value(decrypt_msg(val)?).map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))?;
-            return Ok(());
-        } else if let Some(val) = serialize_to::<EncryptedMsgTaskResult>(value.clone()) {
-            *value = serde_json::to_value(decrypt_msg(val)?).map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))?;
-            return Ok(());
-        }
-    }
-    Ok(())
-}
 
 fn serialize_to<M: DeserializeOwned>(value: Value) -> Option<M> {
     serde_json::from_value::<M>(value).ok()
