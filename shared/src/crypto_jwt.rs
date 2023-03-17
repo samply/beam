@@ -7,7 +7,7 @@ use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use static_init::dynamic;
 use tracing::{debug, error, warn};
-use crate::{BeamId, errors::SamplyBeamError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}, middleware::{LoggingInfo, ProxyLogger}};
+use crate::{BeamId, errors::{SamplyBeamError, CertificateInvalidReason}, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}, middleware::{LoggingInfo, ProxyLogger}};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -84,14 +84,27 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
         max_token_length: Some(1024*1024*10), //10MB
         ..Default::default()
     };
-
     let metadata = Token::decode_metadata(token)
         .map_err(|e| SamplyBeamError::RequestValidationFailed(format!("Unable to decode JWT metadata: {}", e)))?;
-    let serial = metadata.key_id()
-        .ok_or_else(|| SamplyBeamError::RequestValidationFailed(format!("Unable to extract certificate serial from JWT. The offending JWT was: {}", token)))?;
-    let public = crypto::get_cert_and_client_by_serial_as_pemstr(serial).await
-        .ok_or_else(|| SamplyBeamError::VaultOtherError(format!("Unable to retrieve matching certificate for serial \"{}\"", serial)))?
-        .map_err(|e| SamplyBeamError::CertificateError(e))?;
+    let public = if let Some(serial) = metadata.key_id() {
+        crypto::get_cert_and_client_by_serial_as_pemstr(serial).await
+            .ok_or_else(|| SamplyBeamError::VaultOtherError(format!("Unable to retrieve matching certificate for serial \"{}\"", serial)))?
+            .map_err(|e| SamplyBeamError::CertificateError(e))?
+    } else {
+        // if it does not have a serial in the metadata try to get it by readying the from in the body
+        let data = token.splitn(3, ".").nth(1).ok_or(SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string()))?;
+        let data = base64::decode_block(data).map_err(|_| SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string()))?;
+        let json = serde_json::from_slice::<jwt_simple::claims::JWTClaims<HeaderClaim>>(&data).map_err(|_| SamplyBeamError::RequestValidationFailed("Invalid JWT body in header".to_string()))?;
+        let proxy_id: ProxyId = json.custom.from.get_proxy_id();
+        let mut certs = crypto::get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
+            .await
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        // Get newest Certificate
+        certs.sort_by(|a, b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
+        certs.into_iter().nth(0).ok_or(SamplyBeamError::CertificateError(CertificateInvalidReason::NoCommonName))?
+    };
     let pubkey = RS256PublicKey::from_pem(&public.pubkey)
         .map_err(|e| {
             SamplyBeamError::SignEncryptError(format!("Unable to initialize public key: {}", e))
