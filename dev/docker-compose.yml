@@ -39,7 +39,6 @@ services:
       - ./mitmproxy:/home/mitmproxy/.mitmproxy
     command: mitmweb --web-host 0.0.0.0 --web-port 9090
     ports:
-      # - 8080:8080
       - 9090:9090
   proxy1:
     depends_on: [broker]
