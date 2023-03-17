@@ -7,7 +7,7 @@ use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use static_init::dynamic;
 use tracing::{debug, error, warn};
-use crate::{BeamId, errors::SamplyBeamError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}, middleware::{LoggingInfo, LoggingExtension}};
+use crate::{BeamId, errors::SamplyBeamError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}, middleware::{LoggingInfo, ProxyLogger}};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -34,7 +34,7 @@ where
             warn!("Unable to parse token_without_extended_signature as UTF-8: {}", e);
             ERR_SIG
         })?;
-        verify_with_extended_header(&parts, Some(token_without_extended_signature)).await
+        verify_with_extended_header(parts, Some(token_without_extended_signature)).await
     }
 }
 
@@ -54,7 +54,7 @@ where
 
     async fn from_request(req: Request<B>, _state: &S) -> Result<Self, Self::Rejection> {
         let (parts, _) = req.into_parts();
-        verify_with_extended_header(&parts, None).await
+        verify_with_extended_header(parts, None).await
     }
 }
 
@@ -102,7 +102,7 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
 }
 
 #[tracing::instrument]
-async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, token_without_extended_signature: Option<&str>) -> Result<MsgSigned<M>,(StatusCode, &'static str)> {
+async fn verify_with_extended_header<M: Msg + DeserializeOwned>(mut req: Parts, token_without_extended_signature: Option<&str>) -> Result<MsgSigned<M>,(StatusCode, &'static str)> {
     let token_with_extended_signature = std::str::from_utf8(req.headers.get(header::AUTHORIZATION).ok_or_else(|| {
         warn!("Missing Authorization header (in verify_with_extended_header)");
         ERR_SIG
@@ -222,7 +222,11 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
         msg: custom_without,
         sig: sig.to_string()
     };
-    req.extensions.get::<LoggingExtension>().expect("Should be set by middleware").lock().await.set_proxy_name(msg_signed.get_from().clone());
+    req.extensions
+        .remove::<ProxyLogger>()
+        .expect("Should be set by middleware")
+        .send(msg_signed.get_from().clone())
+        .expect("Reciever still lives in middleware");
 
     Ok(msg_signed)
 }

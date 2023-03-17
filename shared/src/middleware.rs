@@ -3,7 +3,7 @@ use std::{net::{IpAddr, SocketAddr}, cell::RefCell, sync::Arc};
 use axum::{middleware::{self, Next}, response::{Response, IntoResponse}, body::HttpBody, extract::ConnectInfo};
 use http::{Request, StatusCode, header::{self, HeaderName}, HeaderValue, Method, Uri};
 use hyper::Body;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 use tracing::{info, warn, span, Level, instrument};
 
 use crate::beam_id::AppOrProxyId;
@@ -32,7 +32,7 @@ impl LoggingInfo {
         self.status_code = Some(status);
     }
 
-    pub fn set_proxy_name(&mut self, proxy: AppOrProxyId) {
+    fn set_proxy_name(&mut self, proxy: AppOrProxyId) {
         self.from_proxy = Some(proxy);
     }
 
@@ -48,26 +48,26 @@ impl LoggingInfo {
     }
 }
 
-pub type LoggingExtension = Arc<Mutex<LoggingInfo>>;
+pub type ProxyLogger = oneshot::Sender<AppOrProxyId>;
 
 pub async fn log(ConnectInfo(info): ConnectInfo<SocketAddr>, mut req: Request<Body>, next: Next<Body>) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
     let ip = get_ip(&req, &info);
 
-    // TODO: find a smarter way to do this maybe oneshot channel or something completly diffrent
-    let logging_info = Arc::new(Mutex::new(LoggingInfo::new(method, uri, ip)));
-    req.extensions_mut().insert( logging_info.clone());
+    let mut info = LoggingInfo::new(method, uri, ip);
+    // This channel may or may not recieve an AppOrProxyId from verify_with_extended_header
+    let (tx, mut rx) = oneshot::channel();
+    req.extensions_mut().insert(tx);
 
     let resp = next.run(req).await;
+    info.set_status_code(resp.status());
 
-    let status = resp.status();
+    if let Ok(proxy) = rx.try_recv() {
+        info.set_proxy_name(proxy);
+    }
 
-    let mut logger = logging_info.lock().await;
-    logger.set_status_code(status);
-
-
-    let line = logger.get_log();
+    let line = info.get_log();
     if resp.status().is_success() {
         info!(target: "in", "{}", line);
     } else {
