@@ -27,10 +27,19 @@ services:
       PRIVKEY_FILE: /run/secrets/dummy.pem
       BIND_ADDR: 0.0.0.0:8080
       RUST_LOG: ${RUST_LOG}
+      ALL_PROXY: http://mitmproxy:8080
     secrets:
       - pki.secret
       - dummy.pem
       - root.crt.pem
+  mitmproxy:
+    image: mitmproxy/mitmproxy
+    volumes:
+      - ./mitmproxy:/home/mitmproxy/.mitmproxy
+    command: mitmweb --web-host 0.0.0.0 --web-port 9090
+    ports:
+      # - 8080:8080
+      - 9090:9090
   proxy1:
     depends_on: [broker]
     build:
@@ -49,7 +58,8 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
-      no_proxy: broker
+      # no_proxy: broker
+      ALL_PROXY: http://mitmproxy:8080
     secrets:
       - proxy1.pem
       - root.crt.pem
@@ -71,7 +81,7 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
       RUST_LOG: ${RUST_LOG}
-      no_proxy: broker
+      ALL_PROXY: http://mitmproxy:8080
     secrets:
       - proxy2.pem
       - root.crt.pem
