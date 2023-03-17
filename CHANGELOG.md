@@ -23,7 +23,7 @@ In previous releases, the encrypted payload and the encapsulated encryption keys
 * Beam development is now supported on both libssl1.1 and libssl3 Linuxes (e.g. Ubuntu 20.04 vs. Ubuntu 22.04).
 * Beam development will now automatically determine when to rebuild the Docker images.
 * Beam now gracefully (and quickly) exits in Docker environments where not all Unix signals are forwarded into containers.
-* `beamdev start` now starts a MITM proxy for debugging
+* `beamdev start` now starts a MITM proxy for debugging (access at http://localhost:9090)
 * (( TODO Jan's refactorings ))
 * (( TODO Logging improvements ))
 
