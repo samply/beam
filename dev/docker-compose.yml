@@ -35,8 +35,6 @@ services:
   mitmproxy:
     image: mitmproxy/mitmproxy
     stop_signal: SIGKILL
-    volumes:
-      - ./mitmproxy:/home/mitmproxy/.mitmproxy
     command: mitmweb --web-host 0.0.0.0 --web-port 9090
     ports:
       - 9090:9090
