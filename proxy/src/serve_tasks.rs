@@ -369,17 +369,9 @@ async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
 }
 
 
-fn serialize_to<M: DeserializeOwned>(value: Value) -> Option<M> {
-    serde_json::from_value::<M>(value).ok()
-}
-
-fn decrypt_msg<M: DecryptableMsg>(
-    msg: M,
-) -> Result<M::Output, SamplyBeamError> {
+fn decrypt_msg<M: DecryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> {
     msg.decrypt(&AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()), crypto::get_own_privkey())
 }
-
-
 
 async fn encrypt_request(
     req: Request<Body>,
@@ -413,23 +405,9 @@ async fn encrypt_request(
         }
     };
     // Sanity/security checks: From address sane?
-    // let msg = serde_json::from_value::<MsgEmpty>(body.clone()).map_err(|e| {
-    //     warn!("Received body did not deserialize into MsgEmpty: {e}");
-    //     ERR_BODY
-    // })?;
     if msg.get_from() != sender {
         return Err(ERR_FAKED_FROM);
     }
-    // What Message is sent?
-    // This is ugly I will rewrite this also once we have message enums
-    // let body = if let Some(val) = serialize_to::<MsgTaskRequest>(body.clone()){
-    //     encrypt_msg(val).await.ok().and_then(|val| serde_json::to_value(val).ok()).ok_or_else(|| ERR_INTERNALCRYPTO)?
-    // }
-    // else if let Some(val) = serialize_to::<MsgTaskResult>(body.clone()){
-    //     encrypt_msg(val).await.ok().and_then(|val| serde_json::to_value(val).ok())
-    // } else {
-    //     body
-    // };
     let body = encrypt_msg(msg).await.map_err(|e| {
         warn!("Encryption faild with: {e}");
         ERR_INTERNALCRYPTO
