@@ -1,4 +1,4 @@
-# Samply.Beam 0.6.0 -- 2023-02-xx
+# Samply.Beam 0.6.0 -- 2023-03-xx
 
 This release improves efficiency in network communication with a base64 encoding of ciphertexts and encryption keys. Because of this internal API change, both the Beam.Proxies and the Beam.Broker need to run a 0.6.x version. However, the external API has not changed and does not require any action on the user's side.
 
@@ -11,12 +11,20 @@ In previous releases, the encrypted payload and the encapsulated encryption keys
 ## Major changes
 
 * We improved the resilience of the communication between the Beam.Broker and the central PKI (Hashicorp Vault) by a more explicit retry mechanism and improved logging.
+* (( TODO Certificate error handling, less retries ))
+* (( TODO Health endpoint ))
+* (( TODO SSE ))
 
-## Minor improvement
+## Minor improvements
 
 * Bugfix: We fixed a bug, where the logging engine might be initialized and and lost some startup messages.
 * We improved the dev build script to avoid out-of-sync binary and docker image generation.
 * The logging was improved throughout the board. Some Information were reduced in severity to `trace` level.
+* Beam development is now supported on both libssl1.1 and libssl3 Linuxes (e.g. Ubuntu 20.04 vs. Ubuntu 22.04).
+* Beam development will now automatically determine when to rebuild the Docker images.
+* Beam now gracefully (and quickly) exits in Docker environments where not all Unix signals are forwarded into containers.
+* (( TODO Jan's refactorings ))
+* (( TODO Logging improvements ))
 
 # Samply.Beam 0.5.0 -- 2023-02-03
 
