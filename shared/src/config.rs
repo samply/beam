@@ -34,7 +34,8 @@ pub static CONFIG_SHARED: config_shared::Config = {
     load()
 };
 
-pub(crate) static CONFIG_SHARED_CRYPTO: OnceCell<ConfigCrypto> = OnceCell::new();
+// TODO: make this not mut by passing around ConfigCrypto before setting it
+pub(crate) static mut CONFIG_SHARED_CRYPTO: OnceCell<ConfigCrypto> = OnceCell::new();
 
 pub fn prepare_env() {
     for var in ["http_proxy", "https_proxy", "all_proxy", "no_proxy"] {

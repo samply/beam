@@ -1,7 +1,7 @@
 use axum::{async_trait, extract::FromRequest, body::{HttpBody}, BoxError, http::StatusCode};
 use http::{Request, request::Parts};
 use hyper::{header::{self, HeaderName}, Method, Uri, HeaderMap};
-use jwt_simple::prelude::{Token, RS256PublicKey, RSAPublicKeyLike, RS256KeyPair, Claims, Duration, RSAKeyPairLike, KeyMetadata, Base64, VerificationOptions};
+use jwt_simple::{prelude::{Token, RS256PublicKey, RSAPublicKeyLike, RS256KeyPair, Claims, Duration, RSAKeyPairLike, KeyMetadata, Base64, VerificationOptions}, claims::JWTClaims};
 use openssl::base64;
 use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
@@ -94,7 +94,7 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
         // if it does not have a serial in the metadata try to get it by readying the from in the body
         let data = token.splitn(3, ".").nth(1).ok_or(SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string()))?;
         let data = base64::decode_block(data).map_err(|_| SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string()))?;
-        let json = serde_json::from_slice::<jwt_simple::claims::JWTClaims<HeaderClaim>>(&data).map_err(|_| SamplyBeamError::RequestValidationFailed("Invalid JWT body in header".to_string()))?;
+        let json = serde_json::from_slice::<JWTClaims<HeaderClaim>>(&data).map_err(|_| SamplyBeamError::RequestValidationFailed("Invalid JWT body in header".to_string()))?;
         let proxy_id: ProxyId = json.custom.from.get_proxy_id();
         let mut certs = crypto::get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
             .await
