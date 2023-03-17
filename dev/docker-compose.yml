@@ -56,7 +56,6 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
-      # no_proxy: broker
       ALL_PROXY: http://mitmproxy:8080
     secrets:
       - proxy1.pem
