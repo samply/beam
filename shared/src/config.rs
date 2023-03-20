@@ -34,7 +34,6 @@ pub static CONFIG_SHARED: config_shared::Config = {
     load()
 };
 
-// TODO: make this not mut by passing around ConfigCrypto before setting it
 pub(crate) static CONFIG_SHARED_CRYPTO: OnceCell<ConfigCrypto> = OnceCell::new();
 
 pub fn prepare_env() {
