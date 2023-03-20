@@ -53,7 +53,7 @@ pub struct Config {
     pub tls_ca_certificates: Vec<X509>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConfigCrypto {
     pub privkey_rs256: RS256KeyPair,
     pub privkey_rsa: RsaPrivateKey,
@@ -89,15 +89,18 @@ fn get_enrollment_msg(proxy_id: &Option<String>) -> String {
     )
 }
 
-pub async fn init_public_crypto_for_proxy() -> Result<(String, String), SamplyBeamError>{
+pub async fn init_public_crypto_for_proxy(private_config: ConfigCrypto) -> Result<(String, String), SamplyBeamError>{
     let cli_args = CliArgs::parse();
-    load_public_crypto_for_proxy(&cli_args).await?;
-    let cert_info = &CONFIG_SHARED_CRYPTO.get().expect("Should be set by load_private_crypto_for_proxy").public.as_ref().expect("Set by load_public_crypto_for_proxy").cert;
-    let cert_info = crypto::ProxyCertInfo::try_from(cert_info)?;
+    let crypto = load_public_crypto_for_proxy(&cli_args, private_config).await?;
+
+    let cert_info = crypto::ProxyCertInfo::try_from(&crypto.public.as_ref().expect("Should be set by load_public_crypto_for_proxy").cert)?;
+    if CONFIG_SHARED_CRYPTO.set(crypto).is_err() {
+        panic!("Tried to initialize crypto twice (init_public_crypto_for_proxy())");
+    }
     Ok((cert_info.serial, cert_info.common_name))
 }
 
-pub fn load_private_crypto_for_proxy() -> Result<(), SamplyBeamError> {
+pub fn load_private_crypto_for_proxy() -> Result<ConfigCrypto, SamplyBeamError> {
     let cli_args = CliArgs::parse();
     let privkey_pem = read_to_string(&cli_args.privkey_file)
         .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to load private key from file {}: {}\n{}", cli_args.privkey_file.to_string_lossy(), e, get_enrollment_msg(&cli_args.proxy_id))))?
@@ -107,15 +110,14 @@ pub fn load_private_crypto_for_proxy() -> Result<(), SamplyBeamError> {
         .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
     let privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem)
         .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
-    CONFIG_SHARED_CRYPTO.set(ConfigCrypto {
+    Ok(ConfigCrypto {
         privkey_rs256,
         privkey_rsa,
         public: None,
-    }).expect("Private crypto should be set first to load certificates from broker");
-    Ok(())
+    })
 }
 
-async fn load_public_crypto_for_proxy(cli_args: &CliArgs) -> Result<(), SamplyBeamError> {
+async fn load_public_crypto_for_proxy(cli_args: &CliArgs, mut config: ConfigCrypto) -> Result<ConfigCrypto, SamplyBeamError> {
     let proxy_id = cli_args.proxy_id.as_ref()
         .expect("load_crypto() has been called without setting a Proxy ID (maybe in broker?). This should not happen.");
     let proxy_id = ProxyId::new(proxy_id)?;
@@ -125,12 +127,11 @@ async fn load_public_crypto_for_proxy(cli_args: &CliArgs) -> Result<(), SamplyBe
             r.map_err(|e| debug!("Unable to parse Certificate: {e}"))
             .ok())
         .collect();
-    let mut config = CONFIG_SHARED_CRYPTO.get_mut().expect("Should have been set by load_private_crypto_for_proxy");
     let public = crypto::get_best_own_certificate(publics, &config.privkey_rsa).ok_or(SamplyBeamError::SignEncryptError("Unable to choose valid, newest certificate for this proxy".into()))?;
     let serial = asn_str_to_vault_str(public.cert.serial_number())?;
     config.privkey_rs256 = config.privkey_rs256.with_key_id(&serial);
     config.public = Some(public);
-    Ok(())
+    Ok(config)
 }
 
 fn asn_str_to_vault_str(asn: &Asn1IntegerRef) -> Result<String,SamplyBeamError> {

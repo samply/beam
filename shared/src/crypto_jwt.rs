@@ -7,7 +7,7 @@ use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use static_init::dynamic;
 use tracing::{debug, error, warn};
-use crate::{BeamId, errors::{SamplyBeamError, CertificateInvalidReason}, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}, middleware::{LoggingInfo, ProxyLogger}};
+use crate::{BeamId, errors::{SamplyBeamError, CertificateInvalidReason}, crypto::{self, CryptoPublicPortion}, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}, middleware::{LoggingInfo, ProxyLogger}, config_shared::ConfigCrypto};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -58,23 +58,8 @@ where
     }
 }
 
-pub struct Authorized;
+pub type Authorized = MsgSigned<MsgEmpty>;
 
-#[async_trait]
-impl<S, B> FromRequest<S, B> for Authorized 
-where
-    S: Send + Sync,
-    B: Send + 'static,
-{
-    type Rejection = (StatusCode, &'static str);
-
-    async fn from_request(req: Request<B>, state: &S) -> Result<Self, Self::Rejection> {
-        let auth: MsgSigned<MsgEmpty> = FromRequest::from_request(req, state).await?;
-        auth.verify().await.map_err(|_| (StatusCode::UNAUTHORIZED, "This endpoint needs autherization"))?;
-        
-        Ok(Authorized)
-    }
-}
 
 #[tracing::instrument]
 pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
@@ -244,10 +229,14 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(mut req: Parts, 
     Ok(msg_signed)
 }
 
-pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBeamError> {
+pub async fn sign_to_jwt(input: impl Serialize, crypto_conf: Option<&ConfigCrypto>) -> Result<String,SamplyBeamError> {
     let json = serde_json::to_value(input)
         .map_err(|e| SamplyBeamError::SignEncryptError(format!("Serialization failed: {}", e)))?;
-    let privkey = &config::CONFIG_SHARED_CRYPTO.get().unwrap().privkey_rs256;
+    let privkey = if let Some(ConfigCrypto { privkey_rs256, .. }) = crypto_conf {
+        privkey_rs256
+    } else {
+        &config::CONFIG_SHARED_CRYPTO.get().expect("If called by GetCertsFromBroker config needs to be provided by param").privkey_rs256
+    };
     
     let claims = 
         Claims::with_custom_claims::<Value>(json, Duration::from_hours(1)); // TODO: Make variable

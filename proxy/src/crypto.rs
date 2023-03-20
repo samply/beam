@@ -2,14 +2,15 @@ use axum::{async_trait, Json, body::Bytes, response::Response, http::request};
 use hyper::{Client, client::HttpConnector, Uri, StatusCode, Request, Method};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use shared::{crypto::GetCerts, errors::{SamplyBeamError, CertificateInvalidReason}, config, config_proxy::Config, http_client::SamplyHttpClient, MsgEmpty, beam_id::AppOrProxyId};
+use shared::{crypto::GetCerts, errors::{SamplyBeamError, CertificateInvalidReason}, config, config_proxy::Config, http_client::SamplyHttpClient, MsgEmpty, beam_id::AppOrProxyId, config_shared::ConfigCrypto};
 use tracing::{debug, warn, info};
 
 use crate::serve_tasks::sign_request;
 
 pub(crate) struct GetCertsFromBroker {
     client: SamplyHttpClient,
-    config: Config
+    config: Config,
+    crypto_conf: ConfigCrypto
 }
 
 impl GetCertsFromBroker {
@@ -22,7 +23,7 @@ impl GetCertsFromBroker {
 
         let body = serde_json::to_value(MsgEmpty { from: AppOrProxyId::ProxyId(self.config.proxy_id.clone()) }).expect("Emptymsg faild to serialize");
         let (parts, body) = Request::builder().method(Method::GET).uri(&uri).body(body).expect("To build request successfully").into_parts();
-        let req = sign_request(body, parts, &self.config, &uri, AppOrProxyId::ProxyId(self.config.proxy_id.clone()))
+        let req = sign_request(body, parts, &self.config, &uri, AppOrProxyId::ProxyId(self.config.proxy_id.clone()), Some(&self.crypto_conf))
             .await
             .map_err(|(_, msg)| {
                 SamplyBeamError::SignEncryptError(msg.into())
@@ -82,7 +83,8 @@ impl GetCerts for GetCertsFromBroker {
 
 pub(crate) fn build_cert_getter(
     config: Config, 
-    client: SamplyHttpClient
+    client: SamplyHttpClient,
+    crypto_conf: ConfigCrypto
 ) -> Result<GetCertsFromBroker,SamplyBeamError> {
     let client = client;
     let broker_url = config.broker_uri.clone();
@@ -91,5 +93,5 @@ pub(crate) fn build_cert_getter(
     // let broker_builder = Uri::builder()
     //     .scheme(scheme)
     //     .authority(authority);
-    Ok(GetCertsFromBroker { client, config })
+    Ok(GetCertsFromBroker { client, config, crypto_conf })
 }
