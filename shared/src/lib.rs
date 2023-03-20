@@ -140,7 +140,8 @@ pub struct MsgSigned<M: Msg> {
 impl<M: Msg> MsgSigned<M> {
     pub async fn verify(&self) -> Result<(), SamplyBeamError> {
         // Signature valid?
-        let (proxy_public_info, _, content) = extract_jwt(&self.sig).await?;
+        // TODO: This needs to be rewritten
+        let (proxy_public_info, _, content) = extract_jwt::<Value>(&self.sig).await?;
 
         // Message content matches token?
         let val = serde_json::to_value(&self.msg)
@@ -398,9 +399,6 @@ pub trait Msg: Serialize {
     fn get_metadata(&self) -> &Value;
 }
 
-pub trait MsgWithBody: Msg {}
-impl<T: MsgState> MsgWithBody for MsgTaskRequest<T> {}
-impl<T: MsgState> MsgWithBody for MsgTaskResult<T> {}
 
 impl<M: Msg> Msg for MsgSigned<M> {
     fn get_from(&self) -> &AppOrProxyId {
