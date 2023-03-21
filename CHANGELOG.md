@@ -11,12 +11,16 @@ In previous releases, the encrypted payload and the encapsulated encryption keys
 ## Major changes
 
 * We improved the resilience of the communication between the Beam.Broker and the central PKI (Hashicorp Vault) by a more explicit retry mechanism and improved logging.
+* `MsgSigned` now gets veryfied on the proxy.
 
 ## Minor improvement
 
 * Bugfix: We fixed a bug, where the logging engine might be initialized and and lost some startup messages.
 * We improved the dev build script to avoid out-of-sync binary and docker image generation.
-* The logging was improved throughout the board. Some Information were reduced in severity to `trace` level.
+* The logging was improved throughout the board. Some Information were reduced in severity to `trace` level.1. `MsgSigned` now only holds a full JWT when sent to the proxy as JSON.
+* `MsgTaskRequest` and `MsgTaskResult` are now generic over their encryption status (the encrypted versions of these types still exist as a type alias).
+* There is a new `MessageType` enum which is also generic over its encryption status. It is used to unify the Serialization of Messages.
+* A lot of small refactors.
 
 # Samply.Beam 0.5.0 -- 2023-02-03
 
