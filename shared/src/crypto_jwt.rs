@@ -2,6 +2,7 @@ use axum::{async_trait, extract::FromRequest, body::{HttpBody}, BoxError, http::
 use http::{Request, request::Parts};
 use hyper::{header::{self, HeaderName}, Method, Uri, HeaderMap};
 use jwt_simple::prelude::{Token, RS256PublicKey, RSAPublicKeyLike, RS256KeyPair, Claims, Duration, RSAKeyPairLike, KeyMetadata, Base64, VerificationOptions};
+use once_cell::unsync::Lazy;
 use openssl::base64;
 use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
@@ -41,12 +42,6 @@ where
 
 #[tracing::instrument]
 pub async fn extract_jwt<T: DeserializeOwned + Serialize>(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<T>), SamplyBeamError> {
-    // TODO: Make static/const
-    let options = VerificationOptions {
-        accept_future: true,
-        max_token_length: Some(1024*1024*10), //10MB
-        ..Default::default()
-    };
 
     let metadata = Token::decode_metadata(token)
         .map_err(|e| SamplyBeamError::RequestValidationFailed(format!("Unable to decode JWT metadata: {}", e)))?;
@@ -59,10 +54,16 @@ pub async fn extract_jwt<T: DeserializeOwned + Serialize>(token: &str) -> Result
         .map_err(|e| {
             SamplyBeamError::SignEncryptError(format!("Unable to initialize public key: {}", e))
         })?;
-    let content = pubkey.verify_token::<T>(token, Some(options))
+    let content = pubkey.verify_token::<T>(token, Some(JWT_VERIFICATION_OPTIONS.clone()))
         .map_err(|e| SamplyBeamError::RequestValidationFailed(format!("Unable to verify token and extract claims from JWT: {}", e)))?;
     Ok((public, pubkey, content))
 }
+
+pub const JWT_VERIFICATION_OPTIONS: Lazy<VerificationOptions> = Lazy::new(|| VerificationOptions {
+    accept_future: true,
+    max_token_length: Some(1024*1024*10), //10MB
+    ..Default::default()
+});
 
 #[tracing::instrument]
 /// This verifys a Msg from sent to the Broker
@@ -94,15 +95,9 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
     let digest_claimed = custom.sig;
     let sender_claimed = custom.from;
 
-    // TODO: Make static/const
-    let options = VerificationOptions {
-        accept_future: true,
-        max_token_length: Some(1024*1024*10), //10MB
-        ..Default::default()
-    };
 
     // Check if short token matches the long token
-    let msg = pubkey.verify_token::<M>(token_without_extended_signature, Some(options))
+    let msg = pubkey.verify_token::<M>(token_without_extended_signature, Some(JWT_VERIFICATION_OPTIONS.clone()))
         .map_err(|e| {
             warn!("Unable to verify short token {}: {}", token_without_extended_signature, e);
             ERR_SIG

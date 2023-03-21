@@ -4,6 +4,7 @@ use axum::async_trait;
 use beam_id::{AppId, AppOrProxyId, BeamId, ProxyId};
 use crypto_jwt::extract_jwt;
 use errors::SamplyBeamError;
+use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
 use openssl::base64;
 use serde_json::{json, Value};
 use sha2::Sha256;
@@ -29,6 +30,8 @@ use serde::{
 };
 use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
+
+use crate::{crypto::get_best_cert_for_proxy, crypto_jwt::JWT_VERIFICATION_OPTIONS};
 
 pub type MsgId = MyUuid;
 pub type MsgType = String;
@@ -140,26 +143,14 @@ pub struct MsgSigned<M: Msg> {
 impl<M: Msg> MsgSigned<M> {
     pub async fn verify(&self) -> Result<(), SamplyBeamError> {
         // Signature valid?
-        // TODO: This needs to be rewritten
-        let (proxy_public_info, _, content) = extract_jwt::<Value>(&self.sig).await?;
+        let public = get_best_cert_for_proxy(&self.msg.get_from().get_proxy_id()).await.map_err(SamplyBeamError::CertificateError)?;
+        let pubkey = RS256PublicKey::from_pem(&public.pubkey)
+        .map_err(|e| {
+            SamplyBeamError::SignEncryptError(format!("Unable to initialize public key: {}", e))
+        })?;
+        // We dont care about any info as we already have the json
+        let _ = pubkey.verify_token::<Value>(todo!("Create fake header and b64 enc msg to create fake token"), Some(JWT_VERIFICATION_OPTIONS.clone()));
 
-        // Message content matches token?
-        let val = serde_json::to_value(&self.msg)
-            .expect("Internal error: Unable to interpret already parsed message to JSON Value.");
-        if content.custom != val {
-            return Err(SamplyBeamError::RequestValidationFailed(
-                "content.custom did not match parsed message.".to_string(),
-            ));
-        }
-
-        // From field matches CN in certificate?
-        if !self.get_from().can_be_signed_by(&proxy_public_info.beam_id) {
-            return Err(SamplyBeamError::RequestValidationFailed(format!(
-                "{} is not allowed to sign for {}",
-                &proxy_public_info.beam_id,
-                self.get_from()
-            )));
-        }
         debug!("Message has been verified succesfully.");
         Ok(())
     }
