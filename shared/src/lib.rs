@@ -134,25 +134,19 @@ pub struct HowLongToBlock {
     pub wait_count: Option<u16>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct MsgSigned<M: Msg> {
+    #[serde(skip)]
     pub msg: M,
-    pub sig: String,
+    pub jwt: String,
 }
 
-impl<M: Msg> MsgSigned<M> {
-    pub async fn verify(&self) -> Result<(), SamplyBeamError> {
-        // Signature valid?
-        let public = get_best_cert_for_proxy(&self.msg.get_from().get_proxy_id()).await.map_err(SamplyBeamError::CertificateError)?;
-        let pubkey = RS256PublicKey::from_pem(&public.pubkey)
-        .map_err(|e| {
-            SamplyBeamError::SignEncryptError(format!("Unable to initialize public key: {}", e))
-        })?;
-        // We dont care about any info as we already have the json
-        let _ = pubkey.verify_token::<Value>(todo!("Create fake header and b64 enc msg to create fake token"), Some(JWT_VERIFICATION_OPTIONS.clone()));
+impl<M: Msg + DeserializeOwned> MsgSigned<M> {
+    pub async fn verify(token: &str) -> Result<Self, SamplyBeamError> {
+        let msg = extract_jwt(token).await?.2.custom;
 
         debug!("Message has been verified succesfully.");
-        Ok(())
+        Ok(MsgSigned { msg, jwt: token.to_string() })
     }
 }
 
@@ -620,23 +614,16 @@ impl HasWaitId<String> for EncryptedMsgTaskResult {
     }
 }
 
-impl<M> HasWaitId<MsgId> for MsgSigned<M>
+impl<M, I> HasWaitId<I> for MsgSigned<M>
 where
-    M: HasWaitId<MsgId> + Msg,
+    M: HasWaitId<I> + Msg,
+    I: PartialEq
 {
-    fn wait_id(&self) -> MsgId {
+    fn wait_id(&self) -> I {
         self.msg.wait_id()
     }
 }
 
-impl<M> HasWaitId<String> for MsgSigned<M>
-where
-    M: HasWaitId<String> + Msg,
-{
-    fn wait_id(&self) -> String {
-        self.msg.wait_id()
-    }
-}
 
 impl<T: MsgState> MsgTaskRequest<T> {
     pub fn id(&self) -> &MsgId {

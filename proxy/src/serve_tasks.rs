@@ -347,8 +347,14 @@ async fn sign_request(
     Ok(req)
 }
 
+
 #[async_recursion::async_recursion]
 async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
+    // It might be possible to use MsgSigned directly instead but there are issues impl Deserialize for MsgSigned<EncryptedMessage>
+    #[derive(Deserialize)]
+    struct MsgSignedHelper {
+        jwt: String
+    }
     if let Value::Array(arr) = json {
         let mut results = Vec::with_capacity(arr.len());
         for value in arr {
@@ -356,10 +362,10 @@ async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
         }
         Ok(Value::Array(results))
     } else if json.is_object() {
-        match serde_json::from_value::<MsgSigned<EncryptedMessage>>(json) {
+        match serde_json::from_value::<MsgSignedHelper>(json) {
             Ok(signed) => {
-                signed.verify().await?;
-                Ok(serde_json::to_value(decrypt_msg(signed.msg)?).expect("Should serialize fine"))
+                let msg = MsgSigned::<EncryptedMessage>::verify(&signed.jwt).await?.msg;
+                Ok(serde_json::to_value(decrypt_msg(msg)?).expect("Should serialize fine"))
             }
             Err(e) => Err(SamplyBeamError::JsonParseError(format!("Failed to parse broker response as a signed encrypted message. Err is {e}")))
         }

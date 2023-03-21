@@ -135,7 +135,7 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
 
     let msg_signed = MsgSigned{
         msg,
-        sig: sig.to_string()
+        jwt: token_without_extended_signature.to_string()
     };
 
     Ok(msg_signed)
