@@ -88,8 +88,7 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
             .flatten()
             .collect::<Vec<_>>();
         // Get newest Certificate
-        certs.sort_by(|a, b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
-        certs.into_iter().nth(0).ok_or(SamplyBeamError::CertificateError(CertificateInvalidReason::NoCommonName))?
+        crypto::get_newest_cert(&mut certs).ok_or(SamplyBeamError::CertificateError(CertificateInvalidReason::NoCommonName))?
     };
     let pubkey = RS256PublicKey::from_pem(&public.pubkey)
         .map_err(|e| {
