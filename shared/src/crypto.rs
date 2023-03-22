@@ -552,6 +552,11 @@ pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,Err
     return Ok(is_equal);
 }
 
+pub fn get_newest_cert(certs: &mut Vec<CryptoPublicPortion>) -> Option<CryptoPublicPortion> {
+    certs.sort_by(|a, b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate")); // sort by newest
+    certs.pop()
+}
+
 /// Selecs the best fitting certificate from a vector of certs according to:
 /// 1) Does it match the private key?
 /// 2) Is the current date in the valid date range?
@@ -563,8 +568,7 @@ pub(crate) fn get_best_own_certificate(publics: impl Into<Vec<CryptoPublicPortio
     debug!("get_best_certificate(): {} certificates match our private key.", publics.len());
     publics.retain(|c| x509_date_valid(&c.cert).unwrap_or(false)); // retain certs with valid dates
     debug!("get_best_certificate(): After sorting, {} certificates remaining.", publics.len());
-    publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
-    publics.first().cloned() // If empty vec --> return None
+    get_newest_cert(&mut publics)
 }
 
 /// Selecs the best fitting certificate from a vector of certs according to:
@@ -573,8 +577,7 @@ pub(crate) fn get_best_own_certificate(publics: impl Into<Vec<CryptoPublicPortio
 pub fn get_best_other_certificate(publics: &Vec<CryptoPublicPortion>) -> Option<CryptoPublicPortion> {
     let mut publics = publics.to_owned();
     publics.retain(|c| x509_date_valid(&c.cert).unwrap_or(false)); // retain certs with valid dates
-    publics.sort_by(|a,b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
-    publics.first().cloned() // If empty vec --> return None
+    get_newest_cert(&mut publics)
 }
 
 pub async fn get_proxy_public_keys(receivers: impl IntoIterator<Item = &AppOrProxyId>) -> Result<Vec<RsaPublicKey>,SamplyBeamError> {

@@ -16,7 +16,7 @@ use serde_json::Value;
 use shared::{
     beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncryptableMsg, DecryptableMsg,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, Msg, MsgEmpty, MsgId, MsgSigned,
-    MsgTaskRequest, MsgTaskResult, crypto, http_client::SamplyHttpClient, sse_event::SseEventType, PlainMessage, MessageType, EncryptedMessage,
+    MsgTaskRequest, MsgTaskResult, crypto::{self, CryptoPublicPortion}, http_client::SamplyHttpClient, sse_event::SseEventType, PlainMessage, MessageType, EncryptedMessage, config_shared::ConfigCrypto,
 };
 use tokio::io::BufReader;
 use tracing::{debug, error, warn, trace, info};
@@ -71,7 +71,7 @@ async fn forward_request(mut req: Request<Body>, config: &config_proxy::Config, 
             .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
     req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
     let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
-    let req = sign_request(encrypted_msg, parts, &config, &target_uri).await?;
+    let req = sign_request(encrypted_msg, parts, &config, &target_uri, None).await?;
     trace!("Requesting: {:?}", req);
     let resp = client.request(req).await.map_err(|e| {
         warn!("Request to broker failed: {}", e.to_string());
@@ -296,15 +296,16 @@ fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, (StatusCode,
 
 
 // TODO: This could be a middleware
-async fn sign_request(
+pub async fn sign_request(
     body: EncryptedMessage,
     mut parts: Parts,
     config: &config_proxy::Config,
     target_uri: &Uri,
+    private_crypto: Option<&ConfigCrypto>
 ) -> Result<Request<Body>, (StatusCode, &'static str)> {
     let from = body.get_from();
 
-    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body).await.map_err(|e| {
+    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, private_crypto).await.map_err(|e| {
         error!("Crypto failed: {}", e);
         ERR_INTERNALCRYPTO
     })?;
@@ -317,7 +318,7 @@ async fn sign_request(
     );
     let digest = crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig, &from)
         .map_err(|_| ERR_INTERNALCRYPTO)?;
-    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest).await.map_err(|e| {
+    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, private_crypto).await.map_err(|e| {
         error!("Crypto failed: {}", e);
         ERR_INTERNALCRYPTO
     })?;

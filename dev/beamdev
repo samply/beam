@@ -39,6 +39,18 @@ export P2="http://localhost:8082" # for scripts
 
 export ARCH=$(docker version --format "{{.Server.Arch}}")
 
+function image_for_docker() {
+     # Pick the correct Ubuntu version for the Docker image,
+     # so the locally-built rust binary works regarding libssl
+     if [[ "$(pkg-config --modversion libssl)" =~ ^3.* ]]; then
+          echo "ubuntu:latest" # Use libssl3
+     else
+          echo -n "" # Don't change (uses libssl1.1)
+     fi
+}
+
+export IMGNAME="$(image_for_docker)"
+
 function check_prereqs() {
      set +e
      if [[ "$(curl --version)" != *" libcurl/"* ]]; then
@@ -56,22 +68,44 @@ function check_prereqs() {
      set -e
 }
 
-function build_rust() {
+function build() {
+    BUILD_DOCKER=0
     BACK=$(pwd)
     cd $SD/..
     BUILD=$(cargo build --message-format=json)
-    BROKER=$(echo $BUILD | jq 'select(.executable != null)' |jq -r 'select(.target.name == "broker")' | jq -r .executable)
-    PROXY=$(echo $BUILD | jq 'select(.executable != null)' | jq -r 'select(.target.name == "proxy")' | jq -r .executable)
-    mkdir -p artifacts/binaries-$ARCH
-    rsync "$BROKER" "$PROXY" artifacts/binaries-$ARCH/
+    if echo $BUILD | jq 'select(.fresh==false)' | grep -q 'fresh'; then
+        echo "Will rebuild docker image due to changes in rust binaries."
+        BUILD_DOCKER=1
+    fi
+    [ -x ./artifacts/binaries-$ARCH ] || {
+        echo "Will rebuild docker image since binaries had not been there."
+        BUILD_DOCKER=1
+    }
+    if [ -z "$(docker images -q samply/beam-broker:$TAG)" ] || [ -z "$(docker images -q samply/beam-proxy:$TAG)" ]; then
+        echo "Will rebuild docker image since it is missing."
+        BUILD_DOCKER=1
+    fi
+    if [ $BUILD_DOCKER -eq 1 ]; then
+        BROKER=$(echo $BUILD | jq 'select(.executable != null)' |jq -r 'select(.target.name == "broker")' | jq -r .executable)
+        PROXY=$(echo $BUILD | jq 'select(.executable != null)' | jq -r 'select(.target.name == "proxy")' | jq -r .executable)
+        mkdir -p artifacts/binaries-$ARCH
+        rsync "$BROKER" "$PROXY" artifacts/binaries-$ARCH/
+        build_docker
+    else
+        echo "Not rebuilding docker image since nothing has changed."
+    fi
     cd $BACK
 }
 
 function build_docker() {
-    BACK=$(pwd)
+    BACK2=$(pwd)
     cd $SD
-    docker-compose build --build-arg TARGETARCH=$ARCH
-    cd $BACK
+    if [ -z "$IMGNAME" ]; then
+        docker-compose build --build-arg TARGETARCH=$ARCH
+    else
+        docker-compose build --build-arg TARGETARCH=$ARCH --build-arg IMGNAME=$IMGNAME
+    fi
+    cd $BACK2
 }
 
 function clean() {
@@ -83,16 +117,16 @@ function start {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    [ -x ../artifacts/binaries-$ARCH ] || (build_rust && build_docker)
-    docker-compose up --no-recreate --abort-on-container-exit
+    build
+    docker-compose up --no-build --no-recreate --abort-on-container-exit
 }
 
 function start_bg {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    [ -x ../artifacts/binaries-$ARCH ] || (build_rust && build_docker)
-    docker-compose up --no-recreate -d
+    build
+    docker-compose up --no-build --no-recreate -d
     for ADDR in $P1 $P2; do
         TRIES=1
         while [ $TRIES -ne 0 ]; do
@@ -228,7 +262,7 @@ export TAG=${TAG:-localbuild}
 
 case "$1" in
   build)
-    build_rust && build_docker
+    build
     ;;
   start)
     start
