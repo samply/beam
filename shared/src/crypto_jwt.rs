@@ -76,7 +76,8 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
             .ok_or_else(|| SamplyBeamError::VaultOtherError(format!("Unable to retrieve matching certificate for serial \"{}\"", serial)))?
             .map_err(|e| SamplyBeamError::CertificateError(e))?
     } else {
-        // if it does not have a serial in the metadata try to get it by readying the from in the body
+        // if it does not have a serial in the metadata try to get it by reading the from field in the body
+        // this happens, e.g. during proxy initialization before a certificate (serial) is received
         let data = token.splitn(3, ".").nth(1).ok_or(SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string()))?;
         let data = base64::decode_block(data).map_err(|_| SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string()))?;
         let json = serde_json::from_slice::<JWTClaims<HeaderClaim>>(&data).map_err(|_| SamplyBeamError::RequestValidationFailed("Invalid JWT body in header".to_string()))?;
