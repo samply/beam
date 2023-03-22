@@ -6,7 +6,7 @@ use axum::{Extension, http::Request, routing::{Route, get}, Router, response::{R
 use hyper::{Client, Body, client::HttpConnector, StatusCode};
 use hyper_tls::HttpsConnector;
 use serde::{Serialize, Deserialize};
-use shared::{config::CONFIG_CENTRAL, errors::{SamplyBeamError, CertificateInvalidReason}};
+use shared::{config::CONFIG_CENTRAL, errors::{SamplyBeamError, CertificateInvalidReason}, crypto_jwt::Authorized};
 use thiserror::Error;
 use tracing::{error, info, debug, log::warn};
 
@@ -47,7 +47,8 @@ pub(crate) fn router() -> Router {
 #[tracing::instrument(name = "/v1/pki/certs/by_serial/:serial")]
 async fn get_certificate_by_serial(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    Path(serial): Path<String>
+    Path(serial): Path<String>,
+    _: Authorized
 ) -> Result<String, PkiError> {
     debug!("=> Asked for cert with serial {serial} by {addr}");
     let cert = match tokio::time::timeout(std::time::Duration::new(10,0), shared::crypto::get_cert_and_client_by_serial_as_pemstr(&serial)).await {
@@ -73,7 +74,7 @@ async fn get_certificate_by_serial(
 }
 
 #[tracing::instrument(name = "/v1/pki/certs/im-ca")]
-async fn get_im_cert(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Result<String, PkiError> {
+async fn get_im_cert(ConnectInfo(addr): ConnectInfo<SocketAddr>, _: Authorized) -> Result<String, PkiError> {
     debug!("=> Asked for IM CA Cert by {addr}");
     let cert = shared::crypto::get_im_cert().await
         .or(Err(PkiError::CommunicationWithVault(String::new())))?;
@@ -81,7 +82,7 @@ async fn get_im_cert(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Result<Strin
 }
 
 #[tracing::instrument(name = "/v1/pki/certs")]
-async fn get_certificate_list(ConnectInfo(addr): ConnectInfo<SocketAddr>) -> Result<Json<Vec<String>>,PkiError> {
+async fn get_certificate_list(ConnectInfo(addr): ConnectInfo<SocketAddr>, _: Authorized) -> Result<Json<Vec<String>>,PkiError> {
     debug!("Asked for all certificates by {addr}");
     let list = shared::crypto::get_serial_list().await
         .map_err(|e| PkiError::CommunicationWithVault(e.to_string()))?;

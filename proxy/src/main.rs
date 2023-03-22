@@ -55,7 +55,8 @@ pub async fn main() -> anyhow::Result<()> {
 }
 
 async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(),SamplyBeamError> {
-    shared::crypto::init_cert_getter(crypto::build_cert_getter(config.clone(), client.clone())?);
+    let private_crypto_proxy = shared::config_shared::load_private_crypto_for_proxy()?;
+    shared::crypto::init_cert_getter(crypto::build_cert_getter(config.clone(), client.clone(), private_crypto_proxy.clone())?);
     shared::crypto::init_ca_chain().await?;
     
     let _public_info: Vec<_> = shared::crypto::get_all_certs_and_clients_by_cname_as_pemstr(&config.proxy_id).await
@@ -66,7 +67,7 @@ async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(),Samp
             )
             .ok())
         .collect();
-    let (serial, cname) = shared::config_shared::init_crypto_for_proxy().await?;
+    let (serial, cname) = shared::config_shared::init_public_crypto_for_proxy(private_crypto_proxy).await?;
     if cname != config.proxy_id.to_string() {
         return Err(SamplyBeamError::ConfigurationFailed(format!("Unable to retrieve a certificate matching your Proxy ID. Expected {}, got {}. Please check your configuration", cname, config.proxy_id.to_string())));
     }
@@ -77,7 +78,13 @@ async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(),Samp
 }
 
 async fn get_broker_health(config: &Config, client: &SamplyHttpClient) -> Result<(), SamplyBeamError> {
-    let uri = Uri::builder().scheme(config.broker_uri.scheme().unwrap().as_str()).authority(config.broker_uri.authority().unwrap().to_owned()).path_and_query("/v1/health").build().map_err(|e| SamplyBeamError::HttpRequestBuildError(e)).unwrap(); // TODO Unwrap
+    let uri = Uri::builder()
+        .scheme(config.broker_uri.scheme().expect("Config broker uri to have valid scheme").as_str())
+        .authority(config.broker_uri.authority().expect("Config broker uri to have valid authority").to_owned())
+        .path_and_query("/v1/health")
+        .build()
+        .map_err(|e| SamplyBeamError::HttpRequestBuildError(e))
+        .expect("Uri to be constructed correctly");
 
     let resp = retry_notify(
         backoff::ExponentialBackoffBuilder::default()
@@ -89,7 +96,8 @@ async fn get_broker_health(config: &Config, client: &SamplyHttpClient) -> Result
                 .method(Method::GET)
                 .uri(&uri)
                 .header(hyper::header::USER_AGENT, env!("SAMPLY_USER_AGENT"))
-                .body(body::Body::empty()).unwrap(); //TODO Unwrap
+                .body(body::Body::empty())
+                .expect("Request to be constructed correctly");
             Ok(client.request(req).await?)
         },
         |err, b: Duration| {

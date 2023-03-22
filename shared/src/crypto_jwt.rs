@@ -1,13 +1,13 @@
 use axum::{async_trait, extract::FromRequest, body::{HttpBody}, BoxError, http::StatusCode};
 use http::{Request, request::Parts};
 use hyper::{header::{self, HeaderName}, Method, Uri, HeaderMap};
-use jwt_simple::prelude::{Token, RS256PublicKey, RSAPublicKeyLike, RS256KeyPair, Claims, Duration, RSAKeyPairLike, KeyMetadata, Base64, VerificationOptions};
+use jwt_simple::{prelude::{Token, RS256PublicKey, RSAPublicKeyLike, RS256KeyPair, Claims, Duration, RSAKeyPairLike, KeyMetadata, Base64, VerificationOptions}, claims::JWTClaims};
 use openssl::base64;
 use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use static_init::dynamic;
 use tracing::{debug, error, warn};
-use crate::{BeamId, errors::SamplyBeamError, crypto, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}};
+use crate::{BeamId, errors::{SamplyBeamError, CertificateInvalidReason}, crypto::{self, CryptoPublicPortion}, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}, middleware::{LoggingInfo, ProxyLogger}, config_shared::ConfigCrypto};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -23,7 +23,7 @@ where
     B::Data: Send,
     B::Error: Into<BoxError>,
     B: HttpBody + 'static,
-    T: Serialize + DeserializeOwned + MsgWithBody
+    T: Serialize + DeserializeOwned + MsgWithBody + Send
 {
     type Rejection = (StatusCode, &'static str);
 
@@ -34,7 +34,7 @@ where
             warn!("Unable to parse token_without_extended_signature as UTF-8: {}", e);
             ERR_SIG
         })?;
-        verify_with_extended_header(&parts, Some(token_without_extended_signature)).await
+        verify_with_extended_header(parts, Some(token_without_extended_signature)).await
     }
 }
 
@@ -54,9 +54,12 @@ where
 
     async fn from_request(req: Request<B>, _state: &S) -> Result<Self, Self::Rejection> {
         let (parts, _) = req.into_parts();
-        verify_with_extended_header(&parts, None).await
+        verify_with_extended_header(parts, None).await
     }
 }
+
+pub type Authorized = MsgSigned<MsgEmpty>;
+
 
 #[tracing::instrument]
 pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
@@ -66,14 +69,27 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
         max_token_length: Some(1024*1024*10), //10MB
         ..Default::default()
     };
-
     let metadata = Token::decode_metadata(token)
         .map_err(|e| SamplyBeamError::RequestValidationFailed(format!("Unable to decode JWT metadata: {}", e)))?;
-    let serial = metadata.key_id()
-        .ok_or_else(|| SamplyBeamError::RequestValidationFailed(format!("Unable to extract certificate serial from JWT. The offending JWT was: {}", token)))?;
-    let public = crypto::get_cert_and_client_by_serial_as_pemstr(serial).await
-        .ok_or_else(|| SamplyBeamError::VaultOtherError(format!("Unable to retrieve matching certificate for serial \"{}\"", serial)))?
-        .map_err(|e| SamplyBeamError::CertificateError(e))?;
+    let public = if let Some(serial) = metadata.key_id() {
+        crypto::get_cert_and_client_by_serial_as_pemstr(serial).await
+            .ok_or_else(|| SamplyBeamError::VaultOtherError(format!("Unable to retrieve matching certificate for serial \"{}\"", serial)))?
+            .map_err(|e| SamplyBeamError::CertificateError(e))?
+    } else {
+        // if it does not have a serial in the metadata try to get it by reading the from field in the body
+        // this happens, e.g. during proxy initialization before a certificate (serial) is received
+        let data = token.splitn(3, ".").nth(1).ok_or(SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string()))?;
+        let data = base64::decode_block(data).map_err(|_| SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string()))?;
+        let json = serde_json::from_slice::<JWTClaims<HeaderClaim>>(&data).map_err(|_| SamplyBeamError::RequestValidationFailed("Invalid JWT body in header".to_string()))?;
+        let proxy_id: ProxyId = json.custom.from.get_proxy_id();
+        let mut certs = crypto::get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
+            .await
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        // Get newest Certificate
+        crypto::get_newest_cert(&mut certs).ok_or(SamplyBeamError::CertificateError(CertificateInvalidReason::NoCommonName))?
+    };
     let pubkey = RS256PublicKey::from_pem(&public.pubkey)
         .map_err(|e| {
             SamplyBeamError::SignEncryptError(format!("Unable to initialize public key: {}", e))
@@ -84,7 +100,7 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
 }
 
 #[tracing::instrument]
-async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, token_without_extended_signature: Option<&str>) -> Result<MsgSigned<M>,(StatusCode, &'static str)> {
+async fn verify_with_extended_header<M: Msg + DeserializeOwned>(mut req: Parts, token_without_extended_signature: Option<&str>) -> Result<MsgSigned<M>,(StatusCode, &'static str)> {
     let token_with_extended_signature = std::str::from_utf8(req.headers.get(header::AUTHORIZATION).ok_or_else(|| {
         warn!("Missing Authorization header (in verify_with_extended_header)");
         ERR_SIG
@@ -204,14 +220,23 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(req: &Parts, tok
         msg: custom_without,
         sig: sig.to_string()
     };
+    req.extensions
+        .remove::<ProxyLogger>()
+        .expect("Should be set by middleware")
+        .send(msg_signed.get_from().clone())
+        .expect("Reciever still lives in middleware");
 
     Ok(msg_signed)
 }
 
-pub async fn sign_to_jwt(input: impl Serialize) -> Result<String,SamplyBeamError> {
+pub async fn sign_to_jwt(input: impl Serialize, crypto_conf: Option<&ConfigCrypto>) -> Result<String,SamplyBeamError> {
     let json = serde_json::to_value(input)
         .map_err(|e| SamplyBeamError::SignEncryptError(format!("Serialization failed: {}", e)))?;
-    let privkey = &config::CONFIG_SHARED_CRYPTO.get().unwrap().privkey_rs256;
+    let privkey = if let Some(ConfigCrypto { privkey_rs256, .. }) = crypto_conf {
+        privkey_rs256
+    } else {
+        &config::CONFIG_SHARED_CRYPTO.get().expect("If called by GetCertsFromBroker config needs to be provided by param").privkey_rs256
+    };
     
     let claims = 
         Claims::with_custom_claims::<Value>(json, Duration::from_hours(1)); // TODO: Make variable
