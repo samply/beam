@@ -2,12 +2,13 @@ use axum::{async_trait, extract::FromRequest, body::{HttpBody}, BoxError, http::
 use http::{Request, request::Parts};
 use hyper::{header::{self, HeaderName}, Method, Uri, HeaderMap};
 use jwt_simple::{prelude::{Token, RS256PublicKey, RSAPublicKeyLike, RS256KeyPair, Claims, Duration, RSAKeyPairLike, KeyMetadata, Base64, VerificationOptions}, claims::JWTClaims};
+use once_cell::unsync::Lazy;
 use openssl::base64;
 use serde::{Serialize, de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 use static_init::dynamic;
 use tracing::{debug, error, warn};
-use crate::{BeamId, errors::{SamplyBeamError, CertificateInvalidReason}, crypto::{self, CryptoPublicPortion}, Msg, MsgSigned, MsgEmpty, MsgId, MsgWithBody, config, beam_id::{ProxyId, AppOrProxyId}, middleware::{LoggingInfo, ProxyLogger}, config_shared::ConfigCrypto};
+use crate::{BeamId, errors::{SamplyBeamError, CertificateInvalidReason}, crypto::{self, CryptoPublicPortion}, Msg, MsgSigned, MsgEmpty, MsgId, config, beam_id::{ProxyId, AppOrProxyId}, middleware::{LoggingInfo, ProxyLogger}, config_shared::ConfigCrypto};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -23,7 +24,7 @@ where
     B::Data: Send,
     B::Error: Into<BoxError>,
     B: HttpBody + 'static,
-    T: Serialize + DeserializeOwned + MsgWithBody + Send
+    T: Serialize + DeserializeOwned + Msg
 {
     type Rejection = (StatusCode, &'static str);
 
@@ -34,27 +35,7 @@ where
             warn!("Unable to parse token_without_extended_signature as UTF-8: {}", e);
             ERR_SIG
         })?;
-        verify_with_extended_header(parts, Some(token_without_extended_signature)).await
-    }
-}
-
-#[async_trait]
-impl<S,B> FromRequest<S,B> for MsgSigned<MsgEmpty>
-where
-    // these trait bounds are copied from `impl FromRequest for axum::Json`
-    // T: DeserializeOwned,
-    // B: axum::body::HttpBody + Send,
-    // B::Data: Send,
-    // B::Error: Into<BoxError>,
-    // T: Serialize + DeserializeOwned + Msg
-    S: Send + Sync,
-    B: Send + 'static,
-{
-    type Rejection = (StatusCode, &'static str);
-
-    async fn from_request(req: Request<B>, _state: &S) -> Result<Self, Self::Rejection> {
-        let (parts, _) = req.into_parts();
-        verify_with_extended_header(parts, None).await
+        verify_with_extended_header(parts, token_without_extended_signature).await
     }
 }
 
@@ -62,13 +43,8 @@ pub type Authorized = MsgSigned<MsgEmpty>;
 
 
 #[tracing::instrument]
-pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<Value>), SamplyBeamError> {
-    // TODO: Make static/const
-    let options = VerificationOptions {
-        accept_future: true,
-        max_token_length: Some(1024*1024*10), //10MB
-        ..Default::default()
-    };
+pub async fn extract_jwt<T: DeserializeOwned + Serialize>(token: &str) -> Result<(crypto::CryptoPublicPortion, RS256PublicKey, jwt_simple::prelude::JWTClaims<T>), SamplyBeamError> {
+
     let metadata = Token::decode_metadata(token)
         .map_err(|e| SamplyBeamError::RequestValidationFailed(format!("Unable to decode JWT metadata: {}", e)))?;
     let public = if let Some(serial) = metadata.key_id() {
@@ -94,13 +70,23 @@ pub async fn extract_jwt(token: &str) -> Result<(crypto::CryptoPublicPortion, RS
         .map_err(|e| {
             SamplyBeamError::SignEncryptError(format!("Unable to initialize public key: {}", e))
         })?;
-    let content = pubkey.verify_token::<Value>(token, Some(options))
+    let content = pubkey.verify_token::<T>(token, Some(JWT_VERIFICATION_OPTIONS.clone()))
         .map_err(|e| SamplyBeamError::RequestValidationFailed(format!("Unable to verify token and extract claims from JWT: {}", e)))?;
     Ok((public, pubkey, content))
 }
 
+pub const JWT_VERIFICATION_OPTIONS: Lazy<VerificationOptions> = Lazy::new(|| VerificationOptions {
+    accept_future: true,
+    max_token_length: Some(1024*1024*10), //10MB
+    ..Default::default()
+});
+
 #[tracing::instrument]
-async fn verify_with_extended_header<M: Msg + DeserializeOwned>(mut req: Parts, token_without_extended_signature: Option<&str>) -> Result<MsgSigned<M>,(StatusCode, &'static str)> {
+/// This verifys a Msg from sent to the Broker
+/// The Message is encoded in the JWT Claims of the body which is a JWT.
+/// There is never really a [`MsgSigned`] involved in Deserializing the message as the signature is just copyed from the body JWT.
+/// The token is verified by a key derived from the kid of the JWT in the Header which should also match the kid of the body JWT.
+async fn verify_with_extended_header<M: Msg + DeserializeOwned>(mut req: Parts, token_without_extended_signature: &str) -> Result<MsgSigned<M>,(StatusCode, &'static str)> {
     let token_with_extended_signature = std::str::from_utf8(req.headers.get(header::AUTHORIZATION).ok_or_else(|| {
         warn!("Missing Authorization header (in verify_with_extended_header)");
         ERR_SIG
@@ -112,8 +98,8 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(mut req: Parts, 
             })?;
     let token_with_extended_signature = token_with_extended_signature.trim_start_matches("SamplyJWT ");
     
-    let (proxy_public_info, pubkey, mut header_claims) 
-        = extract_jwt(token_with_extended_signature).await
+    let (proxy_public_info, pubkey, header_claims) 
+        = extract_jwt::<HeaderClaim>(token_with_extended_signature).await
         .map_err(|e| {
             warn!("Unable to extract header JWT: {}. The full JWT was: {}. The header was: {:?}", e, token_with_extended_signature, req);
             ERR_SIG
@@ -121,104 +107,51 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(mut req: Parts, 
     
     // Check extra digest
 
-    let custom = header_claims.custom.as_object_mut();
-    if custom.is_none() {
-        warn!("Received a request with empty JWT custom claims");
-        return Err(ERR_SIG);
-    }
-    let custom = custom.unwrap();
-    let digest_claimed = custom.get("s");
+    let custom = header_claims.custom;
+    let digest_claimed = custom.sig;
+    let sender_claimed = custom.from;
 
-    if digest_claimed.is_none() {
-        warn!("Received a request but had an empty header signature");
-        return Err(ERR_SIG);
-    }
-    let digest_claimed = digest_claimed.unwrap();
-    if ! digest_claimed.is_string() {
-        warn!("Received a request but header signature was not a valid string");
-        return Err(ERR_SIG);
-    }
-    let digest_claimed = digest_claimed.as_str().unwrap();
-    let sender_claimed = custom.get("f");
-    if sender_claimed.is_none() {
-        warn!("Received a request but had an empty header signature");
-        return Err(ERR_SIG);
-    }
-    let sender_claimed = sender_claimed.unwrap().to_owned();
-    let sender_claimed = serde_json::from_value::<AppOrProxyId>(sender_claimed).map_err(|e| {
-        warn!("Recieved a request with an invalid SenderID in header token: {}", e);
-        ERR_SIG
-    })?;
 
-    // TODO: Make static/const
-    let options = VerificationOptions {
-        accept_future: true,
-        max_token_length: Some(1024*1024*10), //10MB
-        ..Default::default()
+    // Check if short token matches the long token
+    let msg = pubkey.verify_token::<M>(token_without_extended_signature, Some(JWT_VERIFICATION_OPTIONS.clone()))
+        .map_err(|e| {
+            warn!("Unable to verify short token {}: {}", token_without_extended_signature, e);
+            ERR_SIG
+        })?.custom;
+
+    let Some((_, sig)) = token_without_extended_signature.rsplit_once('.') else {
+        warn!("Cannot split signature from body token");
+        return Err(ERR_SIG);
     };
+    let sender_actual = msg.get_from();
 
-    let (custom_without, sig) = if let Some(token_without_extended_signature) = token_without_extended_signature {
-        
-        // Check if short token matches the long token
-        let content_without = pubkey.verify_token::<Value>(token_without_extended_signature, Some(options))
-            .map_err(|e| {
-                warn!("Unable to verify short token {}: {}", token_without_extended_signature, e);
-                ERR_SIG
-            })?;
-        let custom_without = content_without.custom.as_object();
-        if custom_without.is_none() {
-            warn!("Upon message verification, encountered an empty custom_without.");
-            return Err(ERR_SIG);
-        }
-        let custom_without = custom_without.unwrap();
-        let custom_without = serde_json::from_value::<M>(Value::Object(custom_without.clone()))
-            .map_err(|e| {
-                warn!("Unable to unpack custom_without to JSON value, returning ERR_BODY: {}", e);
-                ERR_BODY
-        })?;
-        let sig = if let Some(sig) = token_without_extended_signature.rsplit_once('.') {sig.1} else {warn!("Cannot split signature from body token"); return Err(ERR_SIG);};
-        (custom_without, sig)
-    } else {
-        let msg_empty = MsgEmpty {
-            from: sender_claimed.clone(),
-        };
-        let serialized = serde_json::to_string(&msg_empty).unwrap(); // known input
-        (
-             serde_json::from_str::<M>(&serialized).unwrap(), // known input
-             ""
-        )
-    };
-    let sender_actual = custom_without.get_from();
-    if !(sig.is_empty() && token_without_extended_signature.is_none()) { // Not a MsgEmpty
-
-        // Check if header claims is matching the body token
-        let digest_actual = make_extra_fields_digest(&req.method, &req.uri, &req.headers, &sig, &sender_actual)
+    // Check if header claims is matching the body token
+    let digest_actual = make_extra_fields_digest(&req.method, &req.uri, &req.headers, &sig, &sender_actual)
         .map_err(|e| {
             warn!("Got error in make_extra_fields_digest: {}", e);
             ERR_SIG
         })?.sig;
 
-        if digest_actual != digest_claimed {
-            warn!("Digests did not match: expected {}, received {}", digest_claimed, digest_actual);
-            return Err(ERR_SIG);
-        }
+    if digest_actual != digest_claimed {
+        warn!("Digests did not match: expected {}, received {}", digest_claimed, digest_actual);
+        return Err(ERR_SIG);
+    }
 
-        if sender_actual.to_owned() != sender_claimed {
-            warn!("Sender did not match: expected {}, received {}", sender_claimed, sender_actual);
-            return Err(ERR_SIG);
-        }
+    if sender_actual.to_owned() != sender_claimed {
+        warn!("Sender did not match: expected {}, received {}", sender_claimed, sender_actual);
+        return Err(ERR_SIG);
     }
 
     // Check if Messages' "from" attribute can be signed by the proxy
-    if ! custom_without.get_from().can_be_signed_by(&proxy_public_info.beam_id) {
+    if !msg.get_from().can_be_signed_by(&proxy_public_info.beam_id) {
         warn!("Received messages' \"from\" attribute which should not have been signed by the proxy.");
         return Err(ERR_FROM);
     }
     // TODO: Check if Date header makes sense (replay attacks)
 
     let msg_signed = MsgSigned{
-        msg: custom_without,
-        sig: sig.to_string()
+        msg,
+        jwt: token_without_extended_signature.to_string()
     };
     req.extensions
         .remove::<ProxyLogger>()

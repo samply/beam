@@ -17,7 +17,7 @@ pub enum SamplyBeamError {
     #[error("Invalid Client ID: {0}")]
     InvalidClientIdString(String),
     #[error("Unable to parse JSON: {0}")]
-    JsonParseError(&'static str),
+    JsonParseError(String),
     #[error("Decryption error: {0}")]
     DecryptError(&'static str),
     #[error("Signing / encryption failed: {0}")]

@@ -1,7 +1,7 @@
 use std::{time::{Duration, SystemTime}, convert::Infallible, str::FromStr};
 
 use axum::{Router, routing::{any, put, get}, response::{Response, Sse, sse::Event, IntoResponse}, http::{HeaderValue, request::Parts}, extract::{State, FromRef, BodyStream}, body::Bytes};
-use futures::{stream::{StreamExt, TryStreamExt}, Stream};
+use futures::{stream::{StreamExt, TryStreamExt}, Stream, TryFutureExt};
 use httpdate::fmt_http_date;
 use hyper::{
     body, body::HttpBody,
@@ -11,15 +11,15 @@ use hyper::{
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{de::DeserializeOwned, Serialize, Deserialize};
 use serde_json::Value;
 use shared::{
-    beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncMsg, DecMsg,
+    beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncryptableMsg, DecryptableMsg,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, Msg, MsgEmpty, MsgId, MsgSigned,
-    MsgTaskRequest, MsgTaskResult, crypto::{self, CryptoPublicPortion}, http_client::SamplyHttpClient, sse_event::SseEventType, config_shared::ConfigCrypto,
+    MsgTaskRequest, MsgTaskResult, crypto::{self, CryptoPublicPortion}, http_client::SamplyHttpClient, sse_event::SseEventType, PlainMessage, MessageType, EncryptedMessage, config_shared::ConfigCrypto,
 };
 use tokio::io::BufReader;
-use tracing::{debug, error, warn, trace};
+use tracing::{debug, error, warn, trace, info};
 
 use crate::auth::AuthenticatedApp;
 
@@ -70,19 +70,8 @@ async fn forward_request(mut req: Request<Body>, config: &config_proxy::Config, 
         Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
             .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
     req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
-    let (body, parts) = encrypt_request(req, &sender).await?;
-    let err = (StatusCode::BAD_REQUEST, "Cannot parse body for signing's sake");
-    let sender = match body.as_object() {
-        Some(object) => object.get("from"),
-        None => return Err(err),
-    };
-    let Some(sender) = sender else {
-        return Err(err);
-    };
-    let Ok(sender) = serde_json::from_value::<AppOrProxyId>(sender.to_owned()) else {
-        return Err((StatusCode::BAD_REQUEST, "Cannot deserialize AppOrProxyId from from field"));
-    };
-    let req = sign_request(body, parts, &config, &target_uri, sender, None).await?;
+    let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
+    let req = sign_request(encrypted_msg, parts, &config, &target_uri, None).await?;
     trace!("Requesting: {:?}", req);
     let resp = client.request(req).await.map_err(|e| {
         warn!("Request to broker failed: {}", e.to_string());
@@ -127,6 +116,7 @@ async fn handler_tasks_nostream(
     
     let resp = forward_request(req, &config, &sender, &client).await?;
 
+
     // Check reply's signature
 
     let (mut parts, body) = resp.into_parts();
@@ -137,25 +127,19 @@ async fn handler_tasks_nostream(
 
     // TODO: Always return application/jwt from server.
     if !bytes.is_empty() {
-        let json = serde_json::from_slice::<Value>(&bytes);
-        if json.is_err() {
-            warn!(
-                "Answer is no valid JSON; returning as-is to client: \"{}\". Headers: {:?}",
-                std::str::from_utf8(&bytes).unwrap_or("(unable to parse)"),
-                parts
-            );
-        } else {
-            let mut json = json.unwrap();
-            if !validate_and_remove_signatures(&mut json).await {
-                warn!("The answer was valid JSON but we were unable to validate and remove its signature. The offending JSON was: {}", json);
-                return Err(ERR_VALIDATION);
-            }
-            decryption_helper(&mut json).or( Err(ERR_INTERNALCRYPTO))?;
-            trace!("Decrypted Msg: {:#?}",json);
+        if let Ok(json) = serde_json::from_slice::<Value>(&bytes) {
+            let json = to_server_error(validate_and_decrypt(json).await)?;
+            trace!("Decrypted Msg: {:#?}", json);
             bytes = serde_json::to_vec(&json).unwrap().into();
             trace!(
                 "Validated and stripped signature: \"{}\"",
                 std::str::from_utf8(&bytes).unwrap_or("Unable to parse string as UTF-8")
+            );
+        } else {
+            warn!(
+                "Answer is no valid JSON; returning as-is to client: \"{}\". Headers: {:?}",
+                std::str::from_utf8(&bytes).unwrap_or("(unable to parse)"),
+                parts
             );
         }
     }
@@ -254,7 +238,7 @@ async fn handler_tasks_stream(
                     // Check reply's signature
 
                     if !event_as_bytes.is_empty() {
-                        let Ok(mut json) = serde_json::from_slice::<Value>(&event_as_bytes) else {
+                        let Ok(json) = serde_json::from_slice::<Value>(&event_as_bytes) else {
                             warn!("Answer is no valid JSON; discarding: \"{event_as_str}\".");
                             // TODO: For some reason, compiler won't accept the following lines, so we can't inform the App about the problem.
                             //
@@ -264,15 +248,13 @@ async fn handler_tasks_stream(
                             //     .data(format!("Broker sent invalid JSON: {event_as_str}")));
                             continue;
                         };
-                        if !validate_and_remove_signatures(&mut json).await {
-                            warn!("The answer was valid JSON but we were unable to validate and remove its signature. The offending JSON was: {}", json);
-                            // return Err(ERR_VALIDATION);
-                            continue;
-                        }
-                        if let Err(err) = decryption_helper(&mut json) {
-                            warn!("Got an error decrypting Broker's reply: {err}");
-                            continue;
-                        }
+                        let json = match validate_and_decrypt(json).await {
+                            Ok(json) => json,
+                            Err(err) => {
+                                warn!("Got an error decrypting Broker's reply: {err}");
+                                continue;
+                            }
+                        };
                         trace!("Decrypted Msg: {:#?}",json);
                         event_as_bytes = serde_json::to_vec(&json).unwrap();
                         trace!(
@@ -294,15 +276,34 @@ async fn handler_tasks_stream(
     Ok(sse)
 }
 
+fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, (StatusCode, &'static str)> {
+    res.map_err(|e| match e {
+        SamplyBeamError::JsonParseError(e) => {
+            warn!("{e}");
+            ERR_UPSTREAM
+        },
+        SamplyBeamError::RequestValidationFailed(e) => {
+            warn!("The answer was valid JSON but we were unable to validate and remove its signature. Err: {e}");
+            ERR_VALIDATION
+        },
+        SamplyBeamError::SignEncryptError(_) => ERR_INTERNALCRYPTO,
+        e => {
+            warn!("Unhandeled error {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "Unknown error")
+        }
+    })
+}
+
+
 // TODO: This could be a middleware
 pub async fn sign_request(
-    body: Value,
+    body: EncryptedMessage,
     mut parts: Parts,
     config: &config_proxy::Config,
     target_uri: &Uri,
-    from: AppOrProxyId,
     private_crypto: Option<&ConfigCrypto>
 ) -> Result<Request<Body>, (StatusCode, &'static str)> {
+    let from = body.get_from();
 
     let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, private_crypto).await.map_err(|e| {
         error!("Crypto failed: {}", e);
@@ -347,101 +348,55 @@ pub async fn sign_request(
     Ok(req)
 }
 
+
 #[async_recursion::async_recursion]
-async fn validate_and_remove_signatures(json: &mut Value) -> bool {
-    if json.is_array() {
-        for inner in json.as_array_mut().unwrap() {
-            if !validate_and_remove_signatures(inner).await {
-                return false;
-            }
+async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
+    // It might be possible to use MsgSigned directly instead but there are issues impl Deserialize for MsgSigned<EncryptedMessage>
+    #[derive(Deserialize)]
+    struct MsgSignedHelper {
+        jwt: String
+    }
+    if let Value::Array(arr) = json {
+        let mut results = Vec::with_capacity(arr.len());
+        for value in arr {
+            results.push(validate_and_decrypt(value).await?);
         }
+        Ok(Value::Array(results))
     } else if json.is_object() {
-        if !(validate_helper_value::<MsgTaskRequest>(json).await
-            || validate_helper_value::<MsgTaskResult>(json).await
-            || validate_helper_value::<MsgEmpty>(json).await)
-        {
-            return false;
+        match serde_json::from_value::<MsgSignedHelper>(json) {
+            Ok(signed) => {
+                let msg = MsgSigned::<EncryptedMessage>::verify(&signed.jwt).await?.msg;
+                Ok(serde_json::to_value(decrypt_msg(msg)?).expect("Should serialize fine"))
+            }
+            Err(e) => Err(SamplyBeamError::JsonParseError(format!("Failed to parse broker response as a signed encrypted message. Err is {e}")))
         }
-        let msg = json
-            .as_object()
-            .unwrap()
-            .get("msg")
-            .expect("Internal error: We just validated that this is a valid MsgSigned.")
-            .to_owned();
-        *json = msg;
-        return true;
-    }
-    true
-}
-
-async fn validate_helper_value<M: Msg + DeserializeOwned + std::fmt::Debug>(value: &Value) -> bool {
-    let value = value.clone();
-    match serde_json::from_value::<MsgSigned<M>>(value) {
-        Ok(msg) => {
-            debug!("Verifying reply {:?}", msg);
-            msg.verify().await.is_ok()
-        }
-        Err(_) => true, // Not of this type -> considered "valid"
+    } else {
+        Err(SamplyBeamError::JsonParseError(format!("Broker respondend with invalid json {json:#?}")))
     }
 }
 
-fn decryption_helper(value: &mut Value) -> Result<(), SamplyBeamError> {
-    if value.is_array() {
-        for inner in value.as_array_mut().unwrap() {
-            decryption_helper(inner)?;
-        }
-    } else if value.is_object() {
-        if is_message_type::<EncryptedMsgTaskRequest>(value) {
-            *value = decrypt_msg::<MsgTaskRequest, EncryptedMsgTaskRequest>(value)?;
-            return Ok(());
-        } else if is_message_type::<EncryptedMsgTaskResult>(value) {
-            *value = decrypt_msg::<MsgTaskResult, EncryptedMsgTaskResult>(value)?;
-            return Ok(());
-        }
-    }
-    *value = value.clone();
-    Ok(())
-}
 
-// Once specialization becomes stable, implement in Msg trait (see https://stackoverflow.com/questions/60138397/how-to-test-for-type-equality-in-rust)
-fn is_message_type<M: Msg + DeserializeOwned>(value: &Value) -> bool {
-    let value = value.clone();
-    match serde_json::from_value::<M>(value) {
-        Ok(_msg) => true,
-        Err(_) => false, // Not of this type -> considered "valid"
-    }
-}
-
-fn decrypt_msg<T: Msg + DeserializeOwned + Serialize, M: EncMsg<T> + DeserializeOwned + Serialize + std::fmt::Debug>(
-    value: &Value,
-) -> Result<Value, SamplyBeamError> {
-    let enc_value = value.clone();
-        match serde_json::from_value::<M>(enc_value) {
-        Ok(msg) => serde_json::to_value(msg.decrypt(&AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()), crypto::get_own_privkey())?).map_err(|e| {
-            SamplyBeamError::SignEncryptError(format!("Cannot decrypt message: {}", e).into())
-        }),
-        Err(e) => Err(SamplyBeamError::SignEncryptError(format!("Error decrypting message: {}",e))),
-    }
+fn decrypt_msg<M: DecryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> {
+    msg.decrypt(&AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()), crypto::get_own_privkey())
 }
 
 async fn encrypt_request(
     req: Request<Body>,
     sender: &AppId,
-) -> Result<(Value, Parts), (StatusCode, &'static str)> {
+) -> Result<(EncryptedMessage, Parts), (StatusCode, &'static str)> {
     let (parts, body) = req.into_parts();
     let body = body::to_bytes(body).await.map_err(|e| {
         warn!("Unable to read message body: {e}");
         ERR_BODY
     })?;
 
-    let body = if body.is_empty() {
+    let msg = if body.is_empty() {
         debug!("Body is empty, substituting MsgEmpty.");
-        let empty = MsgEmpty {
+        PlainMessage::MsgEmpty(MsgEmpty {
             from: sender.into(),
-        };
-        serde_json::to_value(empty).unwrap()
+        })
     } else {
-        match serde_json::from_slice::<Value>(&body) {
+        match serde_json::from_slice(&body) {
             Ok(val) => {
                 debug!("Body is valid json");
                 val
@@ -457,43 +412,19 @@ async fn encrypt_request(
         }
     };
     // Sanity/security checks: From address sane?
-    let msg = serde_json::from_value::<MsgEmpty>(body.clone()).map_err(|e| {
-        warn!("Received body did not deserialize into MsgEmpty: {e}");
-        ERR_BODY
-    })?;
     if msg.get_from() != sender {
         return Err(ERR_FAKED_FROM);
     }
-    // What Message is sent?
-    if is_message_type::<MsgTaskRequest>(&body){
-        let body = encrypt_msg::<EncryptedMsgTaskRequest, MsgTaskRequest>(&body).await.map_err(|e| {
-            warn!("Unable to encrypt message: {e}");
-            ERR_INTERNALCRYPTO
-        })?;
-        Ok((body, parts))
-    }
-    else if is_message_type::<MsgTaskResult>(&body){
-        let body = encrypt_msg::<EncryptedMsgTaskResult, MsgTaskResult>(&body).await.map_err(|e| {
-            warn!("Unable to encrypt message: {e}");
-            ERR_INTERNALCRYPTO
-        })?;
-        Ok((body, parts))
-    } else {
-        Ok((body, parts))
-    }
+    let body = encrypt_msg(msg).await.map_err(|e| {
+        warn!("Encryption faild with: {e}");
+        ERR_INTERNALCRYPTO
+    })?;
+    Ok((body, parts))
 }
 
-async fn encrypt_msg<T: Msg + DeserializeOwned, M: DecMsg<T> + DeserializeOwned + Serialize + std::fmt::Debug>(
-    value: &Value,
-) -> Result<Value, SamplyBeamError> {
-    let value = value.clone();
-    match serde_json::from_value::<M>(value) {
-        Ok(msg) => {
-            let receivers_keys = crypto::get_proxy_public_keys(msg.get_to()).await?;
-            serde_json::to_value(msg.encrypt(&receivers_keys)?).map_err(|e| {
-                SamplyBeamError::SignEncryptError(format!("Cannot decrypt message: {}", e).into())
-            })
-        },
-        Err(e) => Err(SamplyBeamError::SignEncryptError(format!("Cannot decrypt message: {}", e).into())),
-    }
+async fn encrypt_msg<M: EncryptableMsg>(
+    msg: M,
+) -> Result<M::Output, SamplyBeamError> {
+    let receivers_keys = crypto::get_proxy_public_keys(msg.get_to()).await?;
+    msg.encrypt(&receivers_keys)
 }

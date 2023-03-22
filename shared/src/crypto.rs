@@ -373,6 +373,7 @@ pub async fn get_all_certs_and_clients_by_cname_as_pemstr(cname: &ProxyId) -> Ve
         .collect()
 }
 
+
 pub async fn get_cert_and_client_by_serial_as_pemstr(serial: &str) -> Option<Result<CryptoPublicPortion,CertificateInvalidReason>> {
     match get_cert_by_serial(serial).await {
         None => None,
@@ -588,8 +589,8 @@ pub async fn get_proxy_public_keys(receivers: impl IntoIterator<Item = &AppOrPro
         }).collect();
     let receivers_crypto_bundle = crypto::get_newest_certs_for_cnames_as_pemstr(proxy_receivers.iter()).await;
     let receivers_keys = match receivers_crypto_bundle {
-        Some(vec) => Ok(vec.iter().map(|crypt_publ| rsa::RsaPublicKey::from_public_key_pem(&crypt_publ.pubkey).expect("Cannot collect recipients' public keys")).collect::<Vec<rsa::RsaPublicKey>>()), // TODO Expect
-        None => Err(SamplyBeamError::SignEncryptError("Cannot gather encryption keys.".into()))
-    }?;
+        Some(vec) => vec.iter().map(|crypt_publ| rsa::RsaPublicKey::from_public_key_pem(&crypt_publ.pubkey).expect("Cannot collect recipients' public keys")).collect::<Vec<rsa::RsaPublicKey>>(), // TODO Expect
+        None => Vec::new()
+    };
     Ok(receivers_keys)
 }

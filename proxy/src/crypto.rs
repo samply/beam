@@ -2,7 +2,7 @@ use axum::{async_trait, Json, body::Bytes, response::Response, http::request};
 use hyper::{Client, client::HttpConnector, Uri, StatusCode, Request, Method};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use shared::{crypto::GetCerts, errors::{SamplyBeamError, CertificateInvalidReason}, config, config_proxy::Config, http_client::SamplyHttpClient, MsgEmpty, beam_id::AppOrProxyId, config_shared::ConfigCrypto};
+use shared::{crypto::GetCerts, errors::{SamplyBeamError, CertificateInvalidReason}, config, config_proxy::Config, http_client::SamplyHttpClient, MsgEmpty, beam_id::AppOrProxyId, config_shared::ConfigCrypto, EncryptedMessage};
 use tracing::{debug, warn, info};
 
 use crate::serve_tasks::sign_request;
@@ -21,9 +21,20 @@ impl GetCertsFromBroker {
             .path_and_query(path)
             .build()?;
 
-        let body = serde_json::to_value(MsgEmpty { from: AppOrProxyId::ProxyId(self.config.proxy_id.clone()) }).expect("Emptymsg faild to serialize");
-        let (parts, body) = Request::builder().method(Method::GET).uri(&uri).body(body).expect("To build request successfully").into_parts();
-        let req = sign_request(body, parts, &self.config, &uri, AppOrProxyId::ProxyId(self.config.proxy_id.clone()), Some(&self.crypto_conf))
+        let body = EncryptedMessage::MsgEmpty(MsgEmpty { from: AppOrProxyId::ProxyId(self.config.proxy_id.clone()) });
+        let (mut parts, body) = Request::builder().method(Method::GET).uri(&uri).body(body).expect("To build request successfully").into_parts();
+        
+        // Weird path crafting to match forward_request so that make_extra_fields_digest has the same url on proxy and broker
+        let path = uri.path();
+        let path_query = uri
+            .path_and_query()
+            .map(|v| v.as_str())
+            .unwrap_or(path);
+        let uri_for_digest = Uri::try_from(path_query)
+            .map_err(|_| SamplyBeamError::InternalSynchronizationError("Failed to build uri to request certs from broker".to_string()))?;
+        parts.uri = uri_for_digest;
+
+        let req = sign_request(body, parts, &self.config, &uri, Some(&self.crypto_conf))
             .await
             .map_err(|(_, msg)| {
                 SamplyBeamError::SignEncryptError(msg.into())
