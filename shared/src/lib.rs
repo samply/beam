@@ -31,7 +31,7 @@ use serde::{
 use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
 
-use crate::{crypto::get_best_cert_for_proxy, crypto_jwt::JWT_VERIFICATION_OPTIONS};
+use crate::crypto_jwt::JWT_VERIFICATION_OPTIONS;
 
 pub type MsgId = MyUuid;
 pub type MsgType = String;

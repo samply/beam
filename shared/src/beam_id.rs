@@ -194,14 +194,6 @@ pub enum AppOrProxyId {
     ProxyId(ProxyId),
 }
 
-impl AppOrProxyId {
-    pub fn get_proxy_id(&self) -> ProxyId {
-        match self {
-            AppOrProxyId::AppId(app) => app.proxy_id(),
-            AppOrProxyId::ProxyId(proxy) => proxy.clone() 
-        }
-    }
-}
 
 impl Display for AppOrProxyId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

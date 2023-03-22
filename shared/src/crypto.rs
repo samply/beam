@@ -373,16 +373,6 @@ pub async fn get_all_certs_and_clients_by_cname_as_pemstr(cname: &ProxyId) -> Ve
         .collect()
 }
 
-pub async fn get_best_cert_for_proxy(proxy_id: &ProxyId) -> Result<CryptoPublicPortion, CertificateInvalidReason>  {
-    let mut certs = crypto::get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
-        .await
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-    // Get newest Certificate
-    certs.sort_by(|a, b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate").reverse()); // sort by newest
-    certs.into_iter().nth(0).ok_or(CertificateInvalidReason::NoCommonName)
-}
 
 pub async fn get_cert_and_client_by_serial_as_pemstr(serial: &str) -> Option<Result<CryptoPublicPortion,CertificateInvalidReason>> {
     match get_cert_by_serial(serial).await {
