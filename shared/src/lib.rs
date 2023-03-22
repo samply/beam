@@ -503,6 +503,7 @@ impl Msg for EncryptedMsgTaskResult {
 mod serialize_time {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+    use fundu::parse_duration;
     use serde::{self, Deserialize, Deserializer, Serializer};
     use tracing::{debug, error, warn};
 
@@ -524,9 +525,19 @@ mod serialize_time {
     where
         D: Deserializer<'de>,
     {
-        let ttl: u64 = u64::deserialize(deserializer)?;
-        let expire = SystemTime::now() + Duration::from_secs(ttl);
-        debug!("Deserialized u64 {} to time {:?}", ttl, expire);
+        #[derive(Deserialize, Debug)]
+        #[serde(untagged)]
+        enum StringOrNum {
+            Str(String),
+            Num(u64)
+        }
+        let duration = &StringOrNum::deserialize(deserializer)?;
+        let ttl = match duration {
+            StringOrNum::Str(s) => parse_duration(s).map_err(serde::de::Error::custom)?,
+            StringOrNum::Num(num) => Duration::from_secs(*num),
+        };
+        let expire = SystemTime::now() + ttl;
+        debug!("Deserialized {:?} to time {:?}", duration, expire);
         Ok(expire)
     }
 }
