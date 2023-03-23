@@ -60,6 +60,7 @@ const ERR_FAKED_FROM: (StatusCode, &str) = (
 );
 
 async fn forward_request(mut req: Request<Body>, config: &config_proxy::Config, sender: &AppId, client: &SamplyHttpClient) -> Result<hyper::Response<Body>, (StatusCode, &'static str)> {
+    // Create uri to contact broker
     let path = req.uri().path();
     let path_query = req
         .uri()
@@ -69,9 +70,11 @@ async fn forward_request(mut req: Request<Body>, config: &config_proxy::Config, 
     let target_uri =
         Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
             .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
+    *req.uri_mut() = target_uri;
+    
     req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
     let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
-    let req = sign_request(encrypted_msg, parts, &config, &target_uri, None).await?;
+    let req = sign_request(encrypted_msg, parts, &config, None).await?;
     trace!("Requesting: {:?}", req);
     let resp = client.request(req).await.map_err(|e| {
         warn!("Request to broker failed: {}", e.to_string());
@@ -300,7 +303,6 @@ pub async fn sign_request(
     body: EncryptedMessage,
     mut parts: Parts,
     config: &config_proxy::Config,
-    target_uri: &Uri,
     private_crypto: Option<&ConfigCrypto>
 ) -> Result<Request<Body>, (StatusCode, &'static str)> {
     let from = body.get_from();
@@ -325,7 +327,6 @@ pub async fn sign_request(
     let body: Body = token_without_extended_signature.into();
     let mut auth_header = String::from("SamplyJWT ");
     auth_header.push_str(&token_with_extended_signature);
-    parts.uri = target_uri.clone();
     headers_mut.insert(header::HOST, config.broker_host_header.clone());
 
     let length = HttpBody::size_hint(&body).exact().ok_or_else(|| {error!("Cannot calculate length of request"); ERR_BODY})?;

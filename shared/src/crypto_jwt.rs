@@ -1,5 +1,5 @@
 use axum::{async_trait, extract::FromRequest, body::{HttpBody}, BoxError, http::StatusCode};
-use http::{Request, request::Parts};
+use http::{Request, request::Parts, uri::PathAndQuery};
 use hyper::{header::{self, HeaderName}, Method, Uri, HeaderMap};
 use jwt_simple::{prelude::{Token, RS256PublicKey, RSAPublicKeyLike, RS256KeyPair, Claims, Duration, RSAKeyPairLike, KeyMetadata, Base64, VerificationOptions}, claims::JWTClaims};
 use once_cell::unsync::Lazy;
@@ -196,7 +196,9 @@ pub fn make_extra_fields_digest(method: &Method, uri: &Uri, headers: &HeaderMap,
 
     let mut buf: Vec<u8> = Vec::new();
     buf.append(&mut method.as_str().as_bytes().to_vec());
-    buf.append(&mut uri.to_string().as_bytes().to_vec());
+    // Only hashing path and query is sufficient because from will contain the name of the broker that should transmit this task
+    let p_and_q = uri.path_and_query().map(PathAndQuery::as_str).unwrap_or(uri.path());
+    buf.append(&mut p_and_q.as_bytes().to_vec());
     for header in HEADERS_TO_SIGN {
         if let Some(header) = headers.get(header) {
             let mut bytes = header.as_bytes().to_vec();
