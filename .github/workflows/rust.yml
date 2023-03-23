@@ -22,7 +22,7 @@ jobs:
 
   build-rust:
     name: Build (Rust)
-    runs-on: ubuntu-20.04
+    runs-on: self-hosted
 
     strategy:
       matrix:
