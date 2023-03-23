@@ -518,24 +518,15 @@ mod serialize_time {
                 Duration::ZERO
             }
         };
-        s.serialize_u64(ttl.as_secs())
+        s.serialize_str(&ttl.as_secs().to_string())
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize, Debug)]
-        #[serde(untagged)]
-        enum StringOrNum {
-            Str(String),
-            Num(u64)
-        }
-        let duration = &StringOrNum::deserialize(deserializer)?;
-        let ttl = match duration {
-            StringOrNum::Str(s) => parse_duration(s).map_err(serde::de::Error::custom)?,
-            StringOrNum::Num(num) => Duration::from_secs(*num),
-        };
+        let duration = &String::deserialize(deserializer)?;
+        let ttl = parse_duration(&duration).map_err(serde::de::Error::custom)?;
         let expire = SystemTime::now() + ttl;
         debug!("Deserialized {:?} to time {:?}", duration, expire);
         Ok(expire)
