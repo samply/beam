@@ -553,7 +553,7 @@ pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,Err
 }
 
 pub fn get_newest_cert(certs: &mut Vec<CryptoPublicPortion>) -> Option<CryptoPublicPortion> {
-    certs.sort_by(|a, b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate")); // sort by newest
+    certs.sort_by(|a, b| b.cert.not_before().compare(a.cert.not_before()).expect("Unable to select newest certificate")); // sort by newest
     certs.pop()
 }
 
