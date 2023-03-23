@@ -72,24 +72,28 @@ function build() {
     BUILD_DOCKER=0
     BACK=$(pwd)
     cd $SD/..
-    BUILD=$(cargo build --message-format=json)
-    if echo $BUILD | jq 'select(.fresh==false)' | grep -q 'fresh'; then
-        echo "Will rebuild docker image due to changes in rust binaries."
-        BUILD_DOCKER=1
-    fi
-    [ -x ./artifacts/binaries-$ARCH ] || {
+    BROKER=./target/debug/broker
+    PROXY=./target/debug/proxy
+    if [ ! -x ./artifacts/binaries-$ARCH ]; then
+        echo "Binaries missing -- building ..."
+        BUILD="$(cargo build --message-format=json)"
         echo "Will rebuild docker image since binaries had not been there."
-        BUILD_DOCKER=1
-    }
-    if [ -z "$(docker images -q samply/beam-broker:$TAG)" ] || [ -z "$(docker images -q samply/beam-proxy:$TAG)" ]; then
-        echo "Will rebuild docker image since it is missing."
-        BUILD_DOCKER=1
-    fi
-    if [ $BUILD_DOCKER -eq 1 ]; then
-        BROKER=$(echo $BUILD | jq 'select(.executable != null)' |jq -r 'select(.target.name == "broker")' | jq -r .executable)
-        PROXY=$(echo $BUILD | jq 'select(.executable != null)' | jq -r 'select(.target.name == "proxy")' | jq -r .executable)
         mkdir -p artifacts/binaries-$ARCH
         rsync "$BROKER" "$PROXY" artifacts/binaries-$ARCH/
+        BUILD_DOCKER=1
+    elif [ -z "$(docker images -q samply/beam-broker:$TAG)" ] || [ -z "$(docker images -q samply/beam-proxy:$TAG)" ]; then
+        echo "Will rebuild docker image since it is missing."
+        BUILD_DOCKER=1
+    elif [ -x ./target ]; then
+        echo "Checking for changed Rust source code ..."
+        BUILD="$(cargo build --message-format=json)"
+        if echo $BUILD | jq 'select(.fresh==false)' | grep -q 'fresh'; then
+            echo "Will rebuild docker image due to changes in rust binaries."
+            rsync "$BROKER" "$PROXY" artifacts/binaries-$ARCH/
+            BUILD_DOCKER=1
+        fi
+    fi
+    if [ $BUILD_DOCKER -eq 1 ]; then
         build_docker
     else
         echo "Not rebuilding docker image since nothing has changed."
