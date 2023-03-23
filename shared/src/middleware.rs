@@ -37,7 +37,7 @@ impl LoggingInfo {
     }
 
     fn get_log(&self) -> String {
-        let from = self.from_proxy.as_ref().map(|id| id.to_string()).unwrap_or(self.ip.to_string());
+        let from = self.from_proxy.as_ref().map(|id| id.hide_broker()).unwrap_or(self.ip.to_string());
         format!("{} {} {} {}",
             from,
             self.status_code
