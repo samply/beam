@@ -55,8 +55,14 @@ pub async fn extract_jwt<T: DeserializeOwned + Serialize>(token: &str) -> Result
         // if it does not have a serial in the metadata try to get it by reading the from field in the body
         // this happens, e.g. during proxy initialization before a certificate (serial) is received
         let data = token.splitn(3, ".").nth(1).ok_or(SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string()))?;
-        let data = base64::decode_block(data).map_err(|_| SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string()))?;
-        let json = serde_json::from_slice::<JWTClaims<HeaderClaim>>(&data).map_err(|_| SamplyBeamError::RequestValidationFailed("Invalid JWT body in header".to_string()))?;
+        let data = base64::decode_block(data).map_err(|e| {
+            warn!("Failed to b64decode {data:?}. Err: {e}");
+            SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string())
+        })?;
+        let json = serde_json::from_slice::<JWTClaims<HeaderClaim>>(&data).map_err(|e| {
+            warn!("Failed to decode {data:?} to JwtClaims<HeaderClaims>. Err: {e}");
+            SamplyBeamError::RequestValidationFailed("Invalid JWT body in header".to_string())
+        })?;
         let proxy_id: ProxyId = json.custom.from.get_proxy_id();
         let mut certs = crypto::get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
             .await
