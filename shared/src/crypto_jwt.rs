@@ -1,7 +1,7 @@
 use axum::{async_trait, extract::FromRequest, body::{HttpBody}, BoxError, http::StatusCode};
 use http::{Request, request::Parts, uri::PathAndQuery};
 use hyper::{header::{self, HeaderName}, Method, Uri, HeaderMap};
-use jwt_simple::{prelude::{Token, RS256PublicKey, RSAPublicKeyLike, RS256KeyPair, Claims, Duration, RSAKeyPairLike, KeyMetadata, Base64, VerificationOptions}, claims::JWTClaims};
+use jwt_simple::{prelude::{Token, RS256PublicKey, RSAPublicKeyLike, RS256KeyPair, Claims, Duration, RSAKeyPairLike, KeyMetadata, Base64, VerificationOptions, Base64UrlSafeNoPadding}, claims::JWTClaims, reexports::ct_codecs::Decoder};
 use once_cell::unsync::Lazy;
 use openssl::base64;
 use serde::{Serialize, de::DeserializeOwned, Deserialize};
@@ -55,7 +55,7 @@ pub async fn extract_jwt<T: DeserializeOwned + Serialize>(token: &str) -> Result
         // if it does not have a serial in the metadata try to get it by reading the from field in the body
         // this happens, e.g. during proxy initialization before a certificate (serial) is received
         let data = token.splitn(3, ".").nth(1).ok_or(SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string()))?;
-        let data = base64::decode_block(data).map_err(|e| {
+        let data = Base64UrlSafeNoPadding::decode_to_vec(data, None).map_err(|e| {
             warn!("Failed to b64decode {data:?}. Err: {e}");
             SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string())
         })?;
