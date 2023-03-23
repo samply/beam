@@ -22,19 +22,14 @@ impl GetCertsFromBroker {
             .build()?;
 
         let body = EncryptedMessage::MsgEmpty(MsgEmpty { from: AppOrProxyId::ProxyId(self.config.proxy_id.clone()) });
-        let (mut parts, body) = Request::builder().method(Method::GET).uri(&uri).body(body).expect("To build request successfully").into_parts();
+        let (parts, body) = Request::builder()
+            .method(Method::GET)
+            .uri(&uri)
+            .body(body)
+            .expect("To build request successfully")
+            .into_parts();
         
-        // Weird path crafting to match forward_request so that make_extra_fields_digest has the same url on proxy and broker
-        let path = uri.path();
-        let path_query = uri
-            .path_and_query()
-            .map(|v| v.as_str())
-            .unwrap_or(path);
-        let uri_for_digest = Uri::try_from(path_query)
-            .map_err(|_| SamplyBeamError::InternalSynchronizationError("Failed to build uri to request certs from broker".to_string()))?;
-        parts.uri = uri_for_digest;
-
-        let req = sign_request(body, parts, &self.config, &uri, Some(&self.crypto_conf))
+        let req = sign_request(body, parts, &self.config, Some(&self.crypto_conf))
             .await
             .map_err(|(_, msg)| {
                 SamplyBeamError::SignEncryptError(msg.into())
