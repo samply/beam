@@ -90,8 +90,10 @@ async fn handler_task(
     headers: HeaderMap,
     req: Request<Body>
 ) -> Result<Response, (StatusCode, String)> {
-    let found = &headers[header::ACCEPT]
-        .to_str().unwrap_or_default()
+    let found = &headers.get(header::ACCEPT)
+        .unwrap_or(&HeaderValue::from_static(""))
+        .to_str()
+        .unwrap_or_default()
         .split(',')
         .map(|part| part.trim())
         .find(|part| *part == "text/event-stream")
