@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc, mem::Discriminant, net::SocketAddr, c
 
 use axum::{
     extract::ConnectInfo,
-    http::{StatusCode, header},
+    http::{StatusCode, header, HeaderValue},
     routing::{get, post, put},
     Json, Router, extract::{Query, Path, State}, response::{IntoResponse, Sse, sse::Event, Response}
 };
@@ -61,8 +61,10 @@ async fn get_results_for_task(
     headers: HeaderMap,
     msg: MsgSigned<MsgEmpty>,
 ) -> Result<Response, (StatusCode, &'static str)> {
-    let found = &headers[header::ACCEPT]
-        .to_str().unwrap_or_default()
+    let found = &headers.get(header::ACCEPT)
+        .unwrap_or(&HeaderValue::from_static(""))
+        .to_str()
+        .unwrap_or_default()
         .split(',')
         .map(|part| part.trim())
         .find(|part| *part == "text/event-stream")
