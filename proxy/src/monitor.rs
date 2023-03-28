@@ -1,13 +1,22 @@
 
 use std::{sync::{atomic::{AtomicBool, Ordering}, Arc}, convert::Infallible};
 
-use axum::{extract::{State, Path}, response::{Response, Sse, IntoResponse, sse::Event}};
+use axum::{extract::{State, Path}, response::{Response, Sse, IntoResponse, sse::Event}, Router, routing::get};
 use hyper::{Request, Body, Method};
 use shared::once_cell::sync::Lazy;
 use serde_json::Value;
 use shared::{MsgId, MsgTaskRequest};
 use tokio::sync::broadcast::{Sender, self, Receiver};
 use tracing::{info, error};
+use tower_http::services::{ServeDir, ServeFile};
+
+
+pub fn router() -> Router {
+    let servic = ServeDir::new("./monitorer/dist").not_found_service(ServeFile::new("./monitorer/dist/index.html"));
+    Router::new()
+        .route("/api/events", get(stream_recorded_tasks))
+        .fallback_service(servic)
+}
 
 // TODO this needs some form of Auth
 pub async fn stream_recorded_tasks() -> impl IntoResponse {
@@ -25,6 +34,8 @@ pub async fn stream_recorded_tasks() -> impl IntoResponse {
     };
     Sse::new(task_stream)
 }
+
+
 
 pub struct Monitorer {
     should_record: AtomicBool,
