@@ -58,6 +58,7 @@ pub mod graceful_shutdown;
 pub mod examples;
 
 pub mod sse_event;
+pub use once_cell;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MyUuid(Uuid);
