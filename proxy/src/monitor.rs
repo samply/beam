@@ -1,15 +1,41 @@
+use std::{
+    convert::Infallible,
+    net::SocketAddr,
+    sync::atomic::{AtomicBool, Ordering},
+};
 
-use std::{sync::{atomic::{AtomicBool, Ordering}, Arc}, convert::Infallible};
-
-use axum::{extract::{State, Path}, response::{Response, Sse, IntoResponse, sse::Event}, Router, routing::get};
-use hyper::{Request, Body, Method};
-use shared::once_cell::sync::Lazy;
+use axum::{
+    async_trait,
+    body::Bytes,
+    extract::{ConnectInfo, Path, State},
+    http::request,
+    middleware::Next,
+    response::{sse::Event, IntoResponse, Response, Sse},
+    routing::get,
+    Router,
+};
+use hyper::{body::Buf, Body, HeaderMap, Method, Request, StatusCode, Uri};
+use serde::{Serialize, Serializer};
 use serde_json::Value;
+use shared::once_cell::sync::Lazy;
 use shared::{MsgId, MsgTaskRequest};
-use tokio::sync::broadcast::{Sender, self, Receiver};
-use tracing::{info, error};
+use tokio::sync::broadcast::{self, Receiver, Sender};
 use tower_http::services::{ServeDir, ServeFile};
+use tracing::{error, info};
 
+/// If monitoring is active this function will await the full request and response bodys
+pub async fn monitor_and_log(
+    s: ConnectInfo<SocketAddr>,
+    mut req: Request<Body>,
+    next: Next<Body>,
+) -> Response {
+    // TODO combine req and response into single type
+    MONITORER.send(&mut req);
+    // TODO put this where it was and just layer this middleware
+    let mut resp = shared::middleware::log(s, req, next).await;
+    MONITORER.send(&mut resp);
+    resp
+}
 
 pub fn router() -> Router {
     let servic = ServeDir::new("./dist").not_found_service(ServeFile::new("./dist/index.html"));
@@ -21,8 +47,8 @@ pub fn router() -> Router {
 // TODO this needs some form of Auth
 pub async fn stream_recorded_tasks() -> impl IntoResponse {
     MONITORER.start_recording();
+    let mut receiver = MONITORER.get_receiver();
     let task_stream = async_stream::stream! {
-        let mut receiver = MONITORER.get_receiver();
         while let Ok(update) = receiver.recv().await {
             // Maybe return some actual error when all senders are dropped
             if let Some(event) = update.into_event() {
@@ -35,7 +61,9 @@ pub async fn stream_recorded_tasks() -> impl IntoResponse {
     Sse::new(task_stream)
 }
 
-
+pub trait IntoMonitoringUpdate {
+    fn into_monitoring(self) -> Option<MonitoringUpdate>;
+}
 
 pub struct Monitorer {
     should_record: AtomicBool,
@@ -45,7 +73,10 @@ pub struct Monitorer {
 impl Default for Monitorer {
     fn default() -> Self {
         let (tx, _) = broadcast::channel(32);
-        Self { should_record: Default::default(), task_sender: tx }
+        Self {
+            should_record: Default::default(),
+            task_sender: tx,
+        }
     }
 }
 
@@ -66,11 +97,11 @@ impl Monitorer {
 
     /// Sends an update to the monitorer
     /// Returns the number of listeners
-    pub fn send(&self, update: impl TryInto<MonitoringUpdate>) {
+    pub fn send(&self, update: impl IntoMonitoringUpdate) {
         if !self.should_record.load(Ordering::Relaxed) {
             return;
         }
-        if let Ok(update) = update.try_into() {
+        if let Some(update) = update.into_monitoring() {
             if self.task_sender.send(update).is_err() {
                 info!("Noone is listening");
                 MONITORER.stop_recording();
@@ -79,13 +110,45 @@ impl Monitorer {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub enum MonitoringUpdate {
-    
+    Request {
+        #[serde(with = "hyper_serde")]
+        uri: Uri,
+        #[serde(with = "hyper_serde")]
+        method: Method,
+        #[serde(with = "hyper_serde")]
+        headers: HeaderMap,
+    },
+    Response {
+        #[serde(with = "hyper_serde")]
+        status: StatusCode,
+        #[serde(with = "hyper_serde")]
+        headers: HeaderMap,
+    },
 }
 
 impl MonitoringUpdate {
     fn into_event(self) -> Option<Event> {
-        todo!()
+        Event::default().json_data(self).ok()
+    }
+}
+
+impl IntoMonitoringUpdate for &mut Request<Body> {
+    fn into_monitoring(self) -> Option<MonitoringUpdate> {
+        Some(MonitoringUpdate::Request {
+            method: self.method().to_owned(),
+            headers: self.headers().to_owned(),
+            uri: self.uri().to_owned(),
+        })
+    }
+}
+
+impl IntoMonitoringUpdate for &mut Response {
+    fn into_monitoring(self) -> Option<MonitoringUpdate> {
+        Some(MonitoringUpdate::Response {
+            status: self.status(),
+            headers: self.headers().to_owned(),
+        })
     }
 }

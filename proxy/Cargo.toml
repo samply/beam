@@ -42,6 +42,7 @@ futures = "0.3.26"
 async-sse = "5.1.0"
 async-stream = "0.3.4"
 tower-http = { version = "0.4.0", features = ["fs"] }
+hyper_serde = "0.13.0"
 
 [build-dependencies]
 build-data = "0"
