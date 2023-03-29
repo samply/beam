@@ -80,7 +80,7 @@ at party 2 is capable of solving it, so it asks `proxy1.broker.example.de` to
 create that new task:
 
 ```
-curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"],"ttl":60}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
+curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"],"ttl":"60s"}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
 ```
 
 `Proxy1` replies:
@@ -152,7 +152,7 @@ Tasks are represented in the following structure:
       "max_tries": 5
     }
   },
-  "ttl": 30,
+  "ttl": "30s",
   "metadata": "The broker can read and use this field e.g., to apply filters on behalf of an app"
 }
 ```
@@ -163,7 +163,7 @@ Tasks are represented in the following structure:
 - `body`: Description of work to be done. Not interpreted by the Broker.
 - `failure_strategy`: Advises each client how to handle failures. Possible values `discard`, `retry`.
 - `failure_strategy.retry`: How often to retry (`max_tries`) a failed task and how long to wait in between each try (`backoff_millisecs`).
-- `ttl`: Time-to-live in *seconds*. Once this reaches zero, the broker will expunge the task along with its results.
+- `ttl`: Time-to-live. If not stated differently (by adding 'm', 'h', 'ms', etc.), this value is interpreted as seconds. Once this reaches zero, the broker will expunge the task along with its results.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Result](#result) for more examples) and can be handled by the broker (thus intentionally not encrypted).
 
 ### Result
@@ -309,13 +309,13 @@ Date: Mon, 27 Jun 2022 14:26:45 GMT
 As part of making this API performant, all reading endpoints support long-polling as an efficient alternative to regular (repeated) polling. Using this function requires the following parameters:
 
 - `wait_count`: The API call will block until this many results are available ...
-- `wait_time`: ... or this many *milliseconds* have passed, whichever comes first.
+- `wait_time`: ... or this time has passed (if not stated differntly, e.g., by adding 'm', 'h', 'ms', ..., this is interpreted as seconds), whichever comes first.
 
 For example, retrieving a task's results:
 
 - `GET /v1/tasks/<task_id>/results` will return immediately with however many results are available,
 - `GET /v1/tasks/<task_id>/results?wait_count=5` will block forever until 5 results are available,
-- `GET /v1/tasks/<task_id>/results?wait_count=5&wait_time=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code `206 (Partial Content)` is returned to indicate that the result is incomplete.
+- `GET /v1/tasks/<task_id>/results?wait_count=5&wait_time=30s` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code `206 (Partial Content)` is returned to indicate that the result is incomplete.
 
 ### Server-sent Events (SSE) API (experimental)
 
