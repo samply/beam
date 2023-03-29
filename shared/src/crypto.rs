@@ -552,9 +552,10 @@ pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool,Err
     return Ok(is_equal);
 }
 
+/// Selects the newest certificate from a vector of certs by comparing the `not_before` time
 pub fn get_newest_cert(certs: &mut Vec<CryptoPublicPortion>) -> Option<CryptoPublicPortion> {
-    certs.sort_by(|a, b| b.cert.not_before().compare(a.cert.not_before()).expect("Unable to select newest certificate")); // sort by newest
-    certs.pop()
+    certs.sort_by(|a, b| a.cert.not_before().compare(b.cert.not_before()).expect("Unable to select newest certificate")); // sort: newest last
+    certs.pop() // return last (newest) certificate
 }
 
 /// Selecs the best fitting certificate from a vector of certs according to:
