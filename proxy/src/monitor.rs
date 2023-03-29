@@ -12,9 +12,9 @@ use tower_http::services::{ServeDir, ServeFile};
 
 
 pub fn router() -> Router {
-    let servic = ServeDir::new("./monitorer/dist").not_found_service(ServeFile::new("./monitorer/dist/index.html"));
+    let servic = ServeDir::new("./dist").not_found_service(ServeFile::new("./dist/index.html"));
     Router::new()
-        .route("/api/events", get(stream_recorded_tasks))
+        .route("/monitor/events", get(stream_recorded_tasks))
         .fallback_service(servic)
 }
 

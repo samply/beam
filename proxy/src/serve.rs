@@ -6,16 +6,18 @@ use hyper_tls::HttpsConnector;
 use shared::{config, errors::SamplyBeamError, config_shared, config_proxy, http_client::SamplyHttpClient};
 use tracing::{info, debug, warn, error};
 
-use crate::{serve_health, serve_tasks, banner};
+use crate::{serve_health, serve_tasks, banner, monitor};
 
 pub(crate) async fn serve(config: config_proxy::Config, client: SamplyHttpClient) -> anyhow::Result<()> {
     let router_tasks = serve_tasks::router(&client);
 
     let router_health = serve_health::router();
+
+    let router_monitorer = monitor::router();
     
-    let app = 
-        router_tasks
+    let app = router_tasks
         .merge(router_health)
+        .merge(router_monitorer)
         .layer(axum::middleware::from_fn(shared::middleware::log))
         .layer(axum::middleware::map_response(banner::set_server_header));
 
