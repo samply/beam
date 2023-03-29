@@ -250,7 +250,7 @@ function curl_post_file {
 }
 
 function task_with_ttl {
-    sed "s/\[TTL\]/$1/g"
+    sed "s/\[TTL\]/\"$1\"/g"
 }
 
 export -f curl_get curl_post curl_post_file curl_put start stop clean testing fail success task_with_ttl

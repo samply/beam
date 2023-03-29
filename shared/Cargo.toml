@@ -54,6 +54,7 @@ backoff = { version = "0.4.0", features = ["tokio"] }
 clap = { version = "4.0.12", features = ["env", "derive"] }
 
 http = "0.2.8"
+fundu = "0.4.3"
 
 [dev-dependencies]
 tokio-test = "0.4.2"

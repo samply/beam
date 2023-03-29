@@ -432,6 +432,7 @@ impl<T: MsgState> Msg for MsgTaskResult<T> {
 mod serialize_time {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+    use fundu::parse_duration;
     use serde::{self, Deserialize, Deserializer, Serializer};
     use tracing::{debug, error, warn};
 
@@ -446,16 +447,17 @@ mod serialize_time {
                 Duration::ZERO
             }
         };
-        s.serialize_u64(ttl.as_secs())
+        s.serialize_str(&ttl.as_secs().to_string())
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let ttl: u64 = u64::deserialize(deserializer)?;
-        let expire = SystemTime::now() + Duration::from_secs(ttl);
-        debug!("Deserialized u64 {} to time {:?}", ttl, expire);
+        let duration = &String::deserialize(deserializer)?;
+        let ttl = parse_duration(&duration).map_err(serde::de::Error::custom)?;
+        let expire = SystemTime::now() + ttl;
+        debug!("Deserialized {:?} to time {:?}", duration, expire);
         Ok(expire)
     }
 }
