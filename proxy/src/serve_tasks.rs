@@ -21,7 +21,7 @@ use shared::{
 use tokio::io::BufReader;
 use tracing::{debug, error, warn, trace, info};
 
-use crate::auth::AuthenticatedApp;
+use crate::{auth::AuthenticatedApp, monitor::{MONITORER, self}};
 
 #[derive(Clone, FromRef)]
 struct TasksState {
@@ -369,7 +369,9 @@ async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
         match serde_json::from_value::<MsgSignedHelper>(json) {
             Ok(signed) => {
                 let msg = MsgSigned::<EncryptedMessage>::verify(&signed.jwt).await?.msg;
-                Ok(serde_json::to_value(decrypt_msg(msg)?).expect("Should serialize fine"))
+                let plain = decrypt_msg(msg)?;
+                MONITORER.send(monitor::IncomingMessage(&plain));
+                Ok(serde_json::to_value(plain).expect("Should serialize fine"))
             }
             Err(e) => Err(SamplyBeamError::JsonParseError(format!("Failed to parse broker response as a signed encrypted message. Err is {e}")))
         }
@@ -414,6 +416,8 @@ async fn encrypt_request(
             }
         }
     };
+
+    MONITORER.send(monitor::OutgoingMessage(&msg));
     // Sanity/security checks: From address sane?
     if msg.get_from() != sender {
         return Err(ERR_FAKED_FROM);

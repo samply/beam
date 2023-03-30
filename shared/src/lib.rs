@@ -155,7 +155,7 @@ impl<M: Msg + DeserializeOwned> MsgSigned<M> {
 #[dynamic]
 pub static EMPTY_VEC_APPORPROXYID: Vec<AppOrProxyId> = Vec::new();
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MsgEmpty {
     pub from: AppOrProxyId,
 }
@@ -174,7 +174,7 @@ impl Msg for MsgEmpty {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum MessageType<State> where State: MsgState {
     // Maybe add MessageSigned and Encrypted versions

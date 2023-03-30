@@ -17,24 +17,19 @@ use axum::{
 use hyper::{body::Buf, Body, HeaderMap, Method, Request, StatusCode, Uri};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
-use shared::once_cell::sync::Lazy;
+use shared::{once_cell::sync::Lazy, PlainMessage};
 use shared::{MsgId, MsgTaskRequest};
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{error, info};
 
-/// If monitoring is active this function will await the full request and response bodys
-pub async fn monitor_and_log(
+pub async fn monitor(
     s: ConnectInfo<SocketAddr>,
-    mut req: Request<Body>,
+    req: Request<Body>,
     next: Next<Body>,
 ) -> Response {
-    // TODO combine req and response into single type
-    MONITORER.send(&mut req);
-    // TODO put this where it was and just layer this middleware
-    let mut resp = shared::middleware::log(s, req, next).await;
-    MONITORER.send(&mut resp);
-    resp
+    // Maybe use this to log everthing
+    todo!()
 }
 
 pub fn router() -> Router {
@@ -59,10 +54,6 @@ pub async fn stream_recorded_tasks() -> impl IntoResponse {
         error!("All senders have been droped or reciever is lagging. connection closed");
     };
     Sse::new(task_stream)
-}
-
-pub trait IntoMonitoringUpdate {
-    fn into_monitoring(self) -> Option<MonitoringUpdate>;
 }
 
 pub struct Monitorer {
@@ -97,16 +88,14 @@ impl Monitorer {
 
     /// Sends an update to the monitorer
     /// Returns the number of listeners
-    pub fn send(&self, update: impl IntoMonitoringUpdate) {
+    pub fn send(&self, update: impl Into<MonitoringUpdate>) {
         if !self.should_record.load(Ordering::Relaxed) {
             return;
         }
-        if let Some(update) = update.into_monitoring() {
-            if self.task_sender.send(update).is_err() {
+            if self.task_sender.send(update.into()).is_err() {
                 info!("Noone is listening");
                 MONITORER.stop_recording();
             };
-        }
     }
 }
 
@@ -126,6 +115,9 @@ pub enum MonitoringUpdate {
         #[serde(with = "hyper_serde")]
         headers: HeaderMap,
     },
+    OutgoingMessage(PlainMessage),
+    IncomingMessage(PlainMessage),
+
 }
 
 impl MonitoringUpdate {
@@ -134,21 +126,39 @@ impl MonitoringUpdate {
     }
 }
 
-impl IntoMonitoringUpdate for &mut Request<Body> {
-    fn into_monitoring(self) -> Option<MonitoringUpdate> {
-        Some(MonitoringUpdate::Request {
-            method: self.method().to_owned(),
-            headers: self.headers().to_owned(),
-            uri: self.uri().to_owned(),
-        })
+/// Wraper Type to differniate between in and outgoing request messages
+pub struct IncomingMessage<'a>(pub &'a PlainMessage);
+
+impl<'a> From<IncomingMessage<'a>> for MonitoringUpdate {
+    fn from(value: IncomingMessage<'a>) -> Self {
+        Self::IncomingMessage(value.0.clone())
     }
 }
 
-impl IntoMonitoringUpdate for &mut Response {
-    fn into_monitoring(self) -> Option<MonitoringUpdate> {
-        Some(MonitoringUpdate::Response {
-            status: self.status(),
-            headers: self.headers().to_owned(),
-        })
+/// Wraper Type to differniate between in and outgoing request messages
+pub struct OutgoingMessage<'a>(pub &'a PlainMessage);
+
+impl<'a> From<OutgoingMessage<'a>> for MonitoringUpdate {
+    fn from(value: OutgoingMessage<'a>) -> Self {
+        Self::OutgoingMessage(value.0.clone())
+    }
+}
+
+impl From<&Request<Body>> for MonitoringUpdate {
+    fn from(value: &Request<Body>) -> Self {
+        MonitoringUpdate::Request {
+            method: value.method().to_owned(),
+            headers: value.headers().to_owned(),
+            uri: value.uri().to_owned(),
+        }
+    }
+}
+
+impl From<&Response> for MonitoringUpdate {
+    fn from(value: &Response) -> Self {
+        MonitoringUpdate::Response {
+            status: value.status(),
+            headers: value.headers().to_owned(),
+        }
     }
 }

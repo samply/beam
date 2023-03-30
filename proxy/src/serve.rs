@@ -18,7 +18,7 @@ pub(crate) async fn serve(config: config_proxy::Config, client: SamplyHttpClient
     let app = router_tasks
         .merge(router_health)
         .merge(router_monitorer)
-        .layer(axum::middleware::from_fn(monitor::monitor_and_log))
+        .layer(axum::middleware::from_fn(shared::middleware::log))
         .layer(axum::middleware::map_response(banner::set_server_header));
 
     let mut apps_joined = String::new();
