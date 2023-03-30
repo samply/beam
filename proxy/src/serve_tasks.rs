@@ -25,11 +25,11 @@ use crate::auth::AuthenticatedApp;
 
 #[derive(Clone, FromRef)]
 struct TasksState {
-    client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>,
+    client: SamplyHttpClient,
     config: config_proxy::Config
 }
 
-pub(crate) fn router(client: &Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> Router {
+pub(crate) fn router(client: &SamplyHttpClient) -> Router {
     let config = config::CONFIG_PROXY.clone();
     let state = TasksState {
         client: client.clone(),

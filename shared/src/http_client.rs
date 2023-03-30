@@ -1,8 +1,10 @@
-use std::{time::Duration, collections::HashSet};
+use std::{time::Duration, collections::HashSet, ops::Deref};
 
-use http::Uri;
-use hyper::{Client, client::{HttpConnector, connect::Connect, conn}, service::Service};
+use axum::async_trait;
+use http::{Uri, Request, Response};
+use hyper::{Client, client::{HttpConnector, connect::Connect, conn}, service::Service, Body};
 use hyper_proxy::{Intercept, Proxy, ProxyConnector, Custom};
+use hyper_timeout::TimeoutConnector;
 use hyper_tls::{HttpsConnector, native_tls::{TlsConnector, Certificate}};
 use mz_http_proxy::hyper::connector;
 use once_cell::sync::OnceCell;
@@ -22,6 +24,7 @@ pub fn build(ca_certificates: &Vec<X509>, timeout: Option<Duration>, keepalive: 
     let proxy_connector = connector()
         .map_err(|e| panic!("Unable to build HTTP client: {}", e)).unwrap();
     let mut proxy_connector = proxy_connector.with_connector(https);
+
     if ! ca_certificates.is_empty() {
         let mut tls = TlsConnector::builder();
         for cert in ca_certificates {
@@ -54,8 +57,15 @@ pub fn build(ca_certificates: &Vec<X509>, timeout: Option<Duration>, keepalive: 
         num => format!("{num} trusted certificates")
     };
     info!("Using {proxies} and {certs} for TLS termination.");
+
+    let mut timeout_connector = hyper_timeout::TimeoutConnector::new(proxy_connector);
+    timeout_connector.set_connect_timeout(timeout);
+    timeout_connector.set_read_timeout(timeout);
+    timeout_connector.set_write_timeout(timeout);
+
+    let client = Client::builder().build(timeout_connector);
     
-    Ok(Client::builder().build(proxy_connector))
+    Ok(client)
 }
 
 #[cfg(test)]
@@ -68,7 +78,7 @@ mod test {
     use hyper_tls::HttpsConnector;
     use openssl::x509::X509;
 
-    use super::build_hyper_client;
+    use crate::http_client::{SamplyHttpClient, self};
 
     const HTTP: &str = "http://ip-api.com/json";
     const HTTPS: &str = "https://ifconfig.me/";
@@ -94,7 +104,7 @@ mod test {
         run(HTTP.parse().unwrap(), client).await;
     }
 
-    async fn run(url: Uri, client: Client<impl Connect + Clone + Send + Sync + 'static>) {
+    async fn run(url: Uri, client: SamplyHttpClient) {
         let req = Request::builder()
             .uri(url)
             .body(body::Body::empty())
