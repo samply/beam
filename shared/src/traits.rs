@@ -32,7 +32,7 @@ S: Send + Sync
                     let wait_time = DurationParser::default()
                         .default_unit(fundu::TimeUnit::MilliSecond)
                         .parse(&wait_time_str)
-                        .map_err(|_| (StatusCode::BAD_REQUEST, "For long-polling, please define &wait_time=<millisecs> and &wait_count=<count>."))?;
+                        .map_err(|_| (StatusCode::BAD_REQUEST, "For long-polling, please define &wait_time=<duration with unit> (e.g. 1000ms) and &wait_count=<count>."))?;
                     Ok(Self { wait_time: Some(wait_time), wait_count})
                 } else {
                     Ok(Self { wait_time: None, wait_count })
