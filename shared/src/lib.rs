@@ -155,6 +155,7 @@ impl<M: Msg + DeserializeOwned> MsgSigned<M> {
 pub static EMPTY_VEC_APPORPROXYID: Vec<AppOrProxyId> = Vec::new();
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct MsgEmpty {
     pub from: AppOrProxyId,
 }
