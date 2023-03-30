@@ -38,7 +38,7 @@ S: Send + Sync
                     Ok(Self { wait_time: None, wait_count })
                 }
             },
-            Err(_) => Err((StatusCode::BAD_REQUEST, "For long-polling, please define &wait_time=<millisecs> and &wait_count=<count>.")),
+            Err(_) => Err((StatusCode::BAD_REQUEST, "For long-polling, please define &wait_time=<duration with unit> (e.g. 1000ms) and &wait_count=<count>.")),
         }
     }
 }
