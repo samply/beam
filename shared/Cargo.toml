@@ -26,7 +26,6 @@ hyper = { version = "0.14.19", features = ["full"] }
 hyper-tls = "0.5.0"
 hyper-proxy = "0.9.1"
 mz-http-proxy = { version = "0.1.0", features = ["hyper"] }
-hyper-timeout = "0.4"
 
 # Logging
 tracing = "0.1.35"

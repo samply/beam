@@ -2,7 +2,6 @@ use std::{net::AddrParseError, str::Utf8Error, string::FromUtf8Error};
 
 use http::StatusCode;
 use openssl::error::ErrorStack;
-use tokio::time::error::Elapsed;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SamplyBeamError {

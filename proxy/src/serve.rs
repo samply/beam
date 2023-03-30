@@ -3,12 +3,12 @@ use std::{fmt::Write, net::SocketAddr};
 use hyper::{Client, client::HttpConnector, header};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use shared::{config, errors::SamplyBeamError, config_shared, config_proxy, http_client::SamplyHttpClient};
+use shared::{config, errors::SamplyBeamError, config_shared, config_proxy};
 use tracing::{info, debug, warn, error};
 
 use crate::{serve_health, serve_tasks, banner};
 
-pub(crate) async fn serve(config: config_proxy::Config, client: SamplyHttpClient) -> anyhow::Result<()> {
+pub(crate) async fn serve(config: config_proxy::Config, client: Client<ProxyConnector<HttpsConnector<HttpConnector>>>) -> anyhow::Result<()> {
     let router_tasks = serve_tasks::router(&client);
 
     let router_health = serve_health::router();
