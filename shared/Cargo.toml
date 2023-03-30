@@ -1,8 +1,9 @@
 [package]
 name = "shared"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "Apache-2.0"
+documentation = "https://github.com/samply/beam"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -25,6 +26,7 @@ hyper = { version = "0.14.19", features = ["full"] }
 hyper-tls = "0.5.0"
 hyper-proxy = "0.9.1"
 mz-http-proxy = { version = "0.1.0", features = ["hyper"] }
+hyper-timeout = "0.4"
 
 # Logging
 tracing = "0.1.35"
@@ -46,12 +48,13 @@ once_cell = "1.13.0"
 # Error handling
 thiserror = "1.0.31"
 anyhow = "1.0.58"
+backoff = { version = "0.4.0", features = ["tokio"] }
 
 # Command Line Interface
 clap = { version = "4.0.12", features = ["env", "derive"] }
 
 http = "0.2.8"
-tokio-retry = "0.3.0"
+fundu = "0.4.3"
 
 [dev-dependencies]
 tokio-test = "0.4.2"

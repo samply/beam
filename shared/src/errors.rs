@@ -1,6 +1,8 @@
 use std::{net::AddrParseError, str::Utf8Error, string::FromUtf8Error};
 
+use http::StatusCode;
 use openssl::error::ErrorStack;
+use tokio::time::error::Elapsed;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SamplyBeamError {
@@ -14,10 +16,22 @@ pub enum SamplyBeamError {
     InvalidPath,
     #[error("Invalid Client ID: {0}")]
     InvalidClientIdString(String),
+    #[error("Unable to parse JSON: {0}")]
+    JsonParseError(String),
+    #[error("Decryption error: {0}")]
+    DecryptError(&'static str),
     #[error("Signing / encryption failed: {0}")]
     SignEncryptError(String),
-    #[error("Communication with Samply.PKI failed: {0}")]
-    VaultError(String),
+    #[error("Samply.PKI error: Vault is still sealed.")]
+    VaultSealed,
+    #[error("Samply.PKI error: Unable to connect to Vault: {0}")]
+    VaultUnreachable(hyper::Error),
+    #[error("Samply.PKI error: Vault has not been initialized, yet.")]
+    VaultNotInitialized,
+    #[error("Samply.PKI error: Vault has asked with code {0} to redirect to {1}; this should not happen.")]
+    VaultRedirectError(StatusCode, String),
+    #[error("Samply.PKI error: {0}")]
+    VaultOtherError(String),
     #[error("Unable to read config: {0}. Please check your environment and parameters.")]
     ConfigurationFailed(String),
     #[error("Internal synchronization error: {0}")]
@@ -33,7 +47,9 @@ pub enum SamplyBeamError {
     #[error("Unable to parse HTTP response: {0}")]
     HttpParseError(FromUtf8Error),
     #[error("X509 certificate invalid: {0}")]
-    CertificateError(&'static str)
+    CertificateError(#[from] CertificateInvalidReason),
+    #[error("Timeout executing HTTP request: {0}")]
+    HttpTimeoutError(Elapsed),
 }
 
 impl From<AddrParseError> for SamplyBeamError {
@@ -60,4 +76,25 @@ impl From<hyper::Error> for SamplyBeamError {
     fn from(e: hyper::Error) -> Self {
         Self::HttpRequestError(e)
     }
+}
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum CertificateInvalidReason {
+    #[error("Cannot find common name in certificate")]
+    NoCommonName,
+    #[error("Invalid Certificate CN: Did not contain '.'")]
+    InvalidCommonName,
+    #[error("Unable to read serial")]
+    WrongSerial,
+    #[error("Certificate's start/end date is invalid (e.g. expired)")]
+    InvalidDate,
+    #[error("Problem with the certificate's public key")]
+    InvalidPublicKey,
+    #[error("Internal error: {0}")]
+    InternalError(String),
+    #[error("Not disclosed: Broker consideres this certificate invalid")]
+    NotDisclosedByBroker,
+    #[error("Other problem: {0}")]
+    Other(String),
+
 }

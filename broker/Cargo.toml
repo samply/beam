@@ -1,8 +1,9 @@
 [package]
 name = "broker"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "Apache-2.0"
+documentation = "https://github.com/samply/beam"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -23,6 +24,7 @@ axum = { version = "0.6", features = [ "query" ] }
 
 anyhow = "*"
 thiserror = "1.0.31"
+backoff = { version = "0.4.0", features = ["tokio"] }
 
 # Logging is imported through shared
 tracing = "0.1.35"
@@ -31,6 +33,10 @@ tracing = "0.1.35"
 hyper = { version = "0.14.19", features = ["full"] }
 hyper-tls = "0.5.0"
 hyper-proxy = "0.9.1"
+
+# Server-sent Events (SSE) support
+async-stream = "0.3.4"
+futures-core = { version = "0.3.26", default-features = false }
 
 [build-dependencies]
 build-data = "0"

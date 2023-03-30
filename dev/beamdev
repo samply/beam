@@ -39,6 +39,18 @@ export P2="http://localhost:8082" # for scripts
 
 export ARCH=$(docker version --format "{{.Server.Arch}}")
 
+function image_for_docker() {
+     # Pick the correct Ubuntu version for the Docker image,
+     # so the locally-built rust binary works regarding libssl
+     if [[ "$(pkg-config --modversion libssl)" =~ ^3.* ]]; then
+          echo "ubuntu:latest" # Use libssl3
+     else
+          echo -n "" # Don't change (uses libssl1.1)
+     fi
+}
+
+export IMGNAME="$(image_for_docker)"
+
 function check_prereqs() {
      set +e
      if [[ "$(curl --version)" != *" libcurl/"* ]]; then
@@ -56,29 +68,48 @@ function check_prereqs() {
      set -e
 }
 
-function build_rust() {
+function build() {
+    BUILD_DOCKER=0
     BACK=$(pwd)
     cd $SD/..
-    BUILD=$(cargo build --message-format=json)
-    BROKER=$(echo $BUILD | jq 'select(.executable != null)' |jq -r 'select(.target.name == "broker")' | jq -r .executable)
-    PROXY=$(echo $BUILD | jq 'select(.executable != null)' | jq -r 'select(.target.name == "proxy")' | jq -r .executable)
-    mkdir -p artifacts/binaries-$ARCH
-    rsync "$BROKER" "$PROXY" artifacts/binaries-$ARCH/
+    BROKER=./target/debug/broker
+    PROXY=./target/debug/proxy
+    if [ ! -x ./artifacts/binaries-$ARCH ]; then
+        echo "Binaries missing -- building ..."
+        BUILD="$(cargo build --message-format=json)"
+        echo "Will rebuild docker image since binaries had not been there."
+        mkdir -p artifacts/binaries-$ARCH
+        rsync "$BROKER" "$PROXY" artifacts/binaries-$ARCH/
+        BUILD_DOCKER=1
+    elif [ -z "$(docker images -q samply/beam-broker:$TAG)" ] || [ -z "$(docker images -q samply/beam-proxy:$TAG)" ]; then
+        echo "Will rebuild docker image since it is missing."
+        BUILD_DOCKER=1
+    elif [ -x ./target ]; then
+        echo "Checking for changed Rust source code ..."
+        BUILD="$(cargo build --message-format=json)"
+        if echo $BUILD | jq 'select(.fresh==false)' | grep -q 'fresh'; then
+            echo "Will rebuild docker image due to changes in rust binaries."
+            rsync "$BROKER" "$PROXY" artifacts/binaries-$ARCH/
+            BUILD_DOCKER=1
+        fi
+    fi
+    if [ $BUILD_DOCKER -eq 1 ]; then
+        build_docker
+    else
+        echo "Not rebuilding docker image since nothing has changed."
+    fi
     cd $BACK
 }
 
 function build_docker() {
-    BACK=$(pwd)
+    BACK2=$(pwd)
     cd $SD
-    docker-compose build --build-arg TARGETARCH=$ARCH
-    cd $BACK
-}
-
-function build() {
-  if [ ! -e $SD/../../artifacts/binaries-$ARCH/proxy ]; then
-    build_rust
-  fi
-  build_docker
+    if [ -z "$IMGNAME" ]; then
+        docker-compose build --build-arg TARGETARCH=$ARCH
+    else
+        docker-compose build --build-arg TARGETARCH=$ARCH --build-arg IMGNAME=$IMGNAME
+    fi
+    cd $BACK2
 }
 
 function clean() {
@@ -90,16 +121,16 @@ function start {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    [ -x ../artifacts/binaries-$ARCH ] || build_rust
-    docker-compose up --no-recreate --abort-on-container-exit
+    build
+    docker-compose up --no-build --no-recreate --abort-on-container-exit
 }
 
 function start_bg {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    [ -x ../artifacts/binaries-$ARCH ] || build_rust
-    docker-compose up --no-recreate -d
+    build
+    docker-compose up --no-build --no-recreate -d
     for ADDR in $P1 $P2; do
         TRIES=1
         while [ $TRIES -ne 0 ]; do
@@ -173,6 +204,17 @@ function curl_get {
     echo "$JSON"
 }
 
+function curl_get_sse {
+    APP_ID="$1"
+    shift
+    BODY_FILE=$(mktemp)
+    JSON=$(curl -s -H "content-type: application/json" -H "Authorization: ApiKey $APP_ID $APP_KEY" -H "Accept: text/event-stream" -w %{json} -o $BODY_FILE $@)
+    BODY=$(cat $BODY_FILE | sed 's/\"/\\\"/g')
+    JSON=$(echo "$JSON" | jq ". + {\"body\": \"${BODY}\" }")
+    rm $BODY_FILE
+    echo "$JSON"
+}
+
 function curl_put {
     APP_ID="$1"
     shift
@@ -208,7 +250,7 @@ function curl_post_file {
 }
 
 function task_with_ttl {
-    sed "s/\[TTL\]/$1/g"
+    sed "s/\[TTL\]/\"$1\"/g"
 }
 
 export -f curl_get curl_post curl_post_file curl_put start stop clean testing fail success task_with_ttl

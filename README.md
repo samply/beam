@@ -59,6 +59,8 @@ using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
 connected via a central broker. Each party runs an application, called `app`.
 We will simulate this application.
 
+Note: cURL versions before 7.82 do not support the `--json` option. In this case, please use `--data` instead.
+
 The used BeamIds are the following:
 
 | System             | BeamID                       |
@@ -78,7 +80,7 @@ at party 2 is capable of solving it, so it asks `proxy1.broker.example.de` to
 create that new task:
 
 ```
-curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"],"ttl":600}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
+curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"],"ttl":"60s"}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
 ```
 
 `Proxy1` replies:
@@ -150,7 +152,7 @@ Tasks are represented in the following structure:
       "max_tries": 5
     }
   },
-  "ttl": 3600,
+  "ttl": "30s",
   "metadata": "The broker can read and use this field e.g., to apply filters on behalf of an app"
 }
 ```
@@ -161,7 +163,7 @@ Tasks are represented in the following structure:
 - `body`: Description of work to be done. Not interpreted by the Broker.
 - `failure_strategy`: Advises each client how to handle failures. Possible values `discard`, `retry`.
 - `failure_strategy.retry`: How often to retry (`max_tries`) a failed task and how long to wait in between each try (`backoff_millisecs`).
-- `ttl`: Time-to-live in milliseconds. Once this reaches zero, the broker will expunge the task along with its results.
+- `ttl`: Time-to-live. If not stated differently (by adding 'm', 'h', 'ms', etc.), this value is interpreted as seconds. Once this reaches zero, the broker will expunge the task along with its results.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Result](#result) for more examples) and can be handled by the broker (thus intentionally not encrypted).
 
 ### Result
@@ -211,7 +213,7 @@ A failed task:
 
 ### Create task
 
-Create a new task to be worked on by defined workers. Currently, the body is restricted to 10MB in size. 
+Create a new task to be worked on by defined workers. Currently, the body is restricted to 10MB in size.
 
 Method: `POST`  
 URL: `/v1/tasks`  
@@ -307,13 +309,46 @@ Date: Mon, 27 Jun 2022 14:26:45 GMT
 As part of making this API performant, all reading endpoints support long-polling as an efficient alternative to regular (repeated) polling. Using this function requires the following parameters:
 
 - `wait_count`: The API call will block until this many results are available ...
-- `wait_time`: ... or this many milliseconds have passed, whichever comes first.
+- `wait_time`: ... or this time has passed (if not stated differntly, e.g., by adding 'm', 'h', 'ms', ..., this is interpreted as seconds), whichever comes first.
 
 For example, retrieving a task's results:
 
 - `GET /v1/tasks/<task_id>/results` will return immediately with however many results are available,
 - `GET /v1/tasks/<task_id>/results?wait_count=5` will block forever until 5 results are available,
-- `GET /v1/tasks/<task_id>/results?wait_count=5&wait_time=30000` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code `206 (Partial Content)` is returned to indicate that the result is incomplete.
+- `GET /v1/tasks/<task_id>/results?wait_count=5&wait_time=30s` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code `206 (Partial Content)` is returned to indicate that the result is incomplete.
+
+### Server-sent Events (SSE) API (experimental)
+
+To better support asynchronous use cases, such as web-based user interfaces streaming results, this development version supports a first implementation of [Server-Sent Events](https://www.rfc-editor.org/rfc/rfc8895.html#name-server-push-server-sent-eve) for *Result* retrieval. This allows Beam.Proxies to "subscribe" to tasks and get notifications for every new result without explicit polling. Similar to WebSockets, this is supported natively by JavaScript in web browsers. However, in contrast to WebSockets, SSE are standard long-lived HTTP requests that is likely to pass even strict firewalls.
+
+Please note: This feature is experimental and subject to changes.
+
+Method: `GET`  
+URL: `/v1/tasks/<task_id>/results?wait_count=3`  
+Header: `Accept: text/event-stream`  
+Parameters:
+
+- The same parameters as for long-polling, i.e. `to`, `from`, `filter=todo`, `wait_count`, and `wait_time` are supported.
+
+Returns a *stream* of results, cf. [here](#result):
+
+```
+HTTP/1.1 200 OK
+Content-Type: text/event-stream
+Cache-Control: no-cache
+Transfer-Encoding: chunked
+Date: Thu, 09 Mar 2023 16:28:47 GMT
+
+event: new_result
+data: {"body":"Unable to decrypt quantum state","from":"app2.proxy1.broker","metadata":{"complex":"A map (key complex) is possible, too"},"status":"permfailed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app1.proxy1.broker"]}
+
+event: new_result
+data: {"body":"Successfully quenched 1.43e14 flux pulse devices","from":"app1.proxy1.broker","metadata":["Arbitrary","types","are","possible"],"status":"succeeded","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app1.proxy1.broker"]}
+
+[...]
+```
+
+You can consume this output natively within many settings, including web browsers. For more information, see [Mozilla's developer documentation](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events)
 
 ### Health Check
 
@@ -325,12 +360,36 @@ Parameters:
 
 - None
 
-In the current version only an appropriate status code is returned once/if initialization has succeeded. However, in the future more detailed health information might be returned in the reply body.
+In the current version, the Beam.Proxy only returns an appropriate status code once/if initialization has succeeded. However, in the future more detailed health information might be returned in the reply body.
 
 ```
 HTTP/1.1 200 OK
 Content-Length: 0
 Date: Mon, 27 Jun 2022 14:26:45 GMT
+```
+
+The Beam.Broker implements a more informative health endpoint and returns a haalth summary and additional system details:
+
+```
+HTTP/1.1 200
+{
+  "summary": "healthy",
+  "vault": {
+    "status": "ok"
+  }
+}
+```
+
+or in  case of an issue, e.g.:
+
+```
+HTTP/1.1 503
+{
+  "summary": "unhealthy",
+  "vault": {
+    "status": "unavailable"
+  }
+}
 ```
 
 ## Development Environment
@@ -420,12 +479,37 @@ The data is symmetrically encrypted using the Autheticated Encryption with Authe
 - [x] Expiration of tasks and results
 - [x] Support TLS-terminating proxies
 
-## Latest version: Samply.Beam 0.5.0 -- 2023-02-03
+## Latest version: Samply.Beam 0.6.0 -- 2023-03-30
 
-This new major release of Samply.Beam introduces a breaking change in how cryptographic signatures are represented in the HTTP messages, allowing for more efficient, larger payloads.
-This change is incompatible with older versions of Samply.Beam, so please update both your broker and your clients.
+Samply.Beam version 0.6.0 represents another major milestone in the Beam development roadmap. We improved our network communication sizes by more than a factor of two, added (experimental) Server-Sent-Events for more efficient communication and heavily refactored the codebase to provide better maintainability and robustness. For all times, i.e. `wait_time` calls and BeamTask's `ttl` (time-to-live) field, the unit of time can be specified. This comes at the cost of an external API change: please adapt your applications to send the `ttl` as a string. Of course, this release, again, contains a lot of quality-of-life improvements regarding logging, building, development setups, etc. The following changelog gives more details.
 
-For the full changelog, please see [CHANGELOG.md](CHANGELOG.md).
+### Breaking changes
+
+* Improvement of internal message efficiency:
+In previous releases, the encrypted payload and the encapsulated encryption keys, both fields byte arrays, were encoded as JSON arrays of the ASCII representation of the corresponding decimal numbers. This, of course, potentially quadruples the payload size. We chose a base64-string encoding for those fields to strike a balance against network efficiency and encoding performance. Other encoding types, such as base85, turned out to be (depending on the payload) around 1300% slower.
+* All times given to Beam, both the time-to-live (ttl) field in the Beam Task and the `wait_time` long-polling parameter can be used with time units by adding `h` for hours, `m`for minutes, `ms` for milliseconds and so on. If no unit is given, seconds (`s`) is assumed. As this changes the `ttl` field from an integer to a string (with mandatory quotation marks), this is a braking change.
+* The log level for the hyper component (HTTP handling) is now set to `warn`, except if explicitly specified otherwise, e.g., by setting `RUST_LOG="debug,hyper=debug"`.
+
+### Major changes
+
+* We improved the resilience of the communication between the Beam.Broker and the central PKI (Hashicorp Vault) by a more explicit retry mechanism and improved logging.
+* We updated the certificate cache, resulting in a) less network communication and b) less parsing, hence improving performance and eliminating potential sources of errors.
+* The `v1/health` endpoint of Samply.Broker gives more information regarding the current system status, e.g. if the central vault is reachable/sealed.
+* A first experimental implementation of Server-sent Events (SSE) for fetching results is implemented. To use this API, set the request header `Accept: text/event-stream`. Note, however, that this feature is still experimental and subject to changes.
+
+### Minor improvements
+
+* We improved the dev build script to avoid out-of-sync binary and docker image generation.
+* The logging was improved throughout the board. Some Information were reduced in severity to `trace` level.
+* Beam development is now supported on both libssl1.1 and libssl3 Linuxes (e.g. Ubuntu 20.04 vs. Ubuntu 22.04). With the impending EOL of libssl 1.1, we hope for quick transition of the main linux distribution providers to fully remove libssl1.1 support in a future release.
+* Beam development will now automatically determine when to rebuild the Docker images.
+* Beam now gracefully (and quickly) exits in Docker environments where not all Unix signals are forwarded into containers.
+* `beamdev start` now starts a MITM proxy for debugging (access at http://localhost:9090)
+* Beams message types were heavily refactored for improved maintainability and cleaner, more ideomtaic code. 
+
+### Bugfixes
+* A bug, where some messages' signatures from the Beam.Broker to the Beam.Proxy were not properly validated, is fixed.
+* We fixed a bug, where the logging engine might be initialized and and lost some startup messages.
 
 ## Cryptography Notice
 

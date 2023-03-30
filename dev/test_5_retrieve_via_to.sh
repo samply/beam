@@ -14,7 +14,7 @@ success
 
 testing Create task TASK2_BY_A1P1_FOR_A1P2
 
-TASK2_BY_A1P1_FOR_A1P2="$(echo "$TASK2_BY_A1P1_FOR_A1P2" | task_with_ttl 3)"
+TASK2_BY_A1P1_FOR_A1P2="$(echo "$TASK2_BY_A1P1_FOR_A1P2" | task_with_ttl 4s)"
 RET=$(echo $TASK2_BY_A1P1_FOR_A1P2 | curl_post $APP1_P1 -v $P1/v1/tasks)
 CODE=$(echo $RET | jq -r .response_code)
 
@@ -65,7 +65,7 @@ success
 
 testing After expiration, we should be able to re-create the same task
 
-TASK_BY_A1P1_FOR_A1P2="$(echo "$TASK2_BY_A1P1_FOR_A1P2" | task_with_ttl 4)"
+TASK_BY_A1P1_FOR_A1P2="$(echo "$TASK2_BY_A1P1_FOR_A1P2" | task_with_ttl 10s)"
 RET=$(echo $TASK_BY_A1P1_FOR_A1P2 | curl_post $APP1_P1 -v $P1/v1/tasks)
 CODE=$(echo $RET | jq -r .response_code)
 

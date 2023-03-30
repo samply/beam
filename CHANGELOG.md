@@ -1,8 +1,39 @@
+# Samply.Beam 0.6.0 -- 2023-03-30
+
+Samply.Beam version 0.6.0 represents another major milestone in the Beam development roadmap. We improved our network communication sizes by more than a factor of two, added (experimental) Server-Sent-Events for more efficient communication and heavily refactored the codebase to provide better maintainability and robustness. For all times, i.e. `wait_time` calls and BeamTask's `ttl` (time-to-live) field, the unit of time can be specified. This comes at the cost of an external API change: please adapt your applications to send the `ttl` as a string. Of course, this release, again, contains a lot of quality-of-life improvements regarding logging, building, development setups, etc. The following changelog gives more details.
+
+## Breaking changes
+
+* Improvement of internal message efficiency:
+In previous releases, the encrypted payload and the encapsulated encryption keys, both fields byte arrays, were encoded as JSON arrays of the ASCII representation of the corresponding decimal numbers. This, of course, potentially quadruples the payload size. We chose a base64-string encoding for those fields to strike a balance against network efficiency and encoding performance. Other encoding types, such as base85, turned out to be (depending on the payload) around 1300% slower.
+* All times given to Beam, both the time-to-live (ttl) field in the Beam Task and the `wait_time` long-polling parameter can be used with time units by adding `h` for hours, `m`for minutes, `ms` for milliseconds and so on. If no unit is given, seconds (`s`) is assumed. As this changes the `ttl` field from an integer to a string (with mandatory quotation marks), this is a braking change.
+* The log level for the hyper component (HTTP handling) is now set to `warn`, except if explicitly specified otherwise, e.g., by setting `RUST_LOG="debug,hyper=debug"`.
+
+## Major changes
+
+* We improved the resilience of the communication between the Beam.Broker and the central PKI (Hashicorp Vault) by a more explicit retry mechanism and improved logging.
+* We updated the certificate cache, resulting in a) less network communication and b) less parsing, hence improving performance and eliminating potential sources of errors.
+* The `v1/health` endpoint of Samply.Broker gives more information regarding the current system status, e.g. if the central vault is reachable/sealed.
+* A first experimental implementation of Server-sent Events (SSE) for fetching results is implemented. To use this API, set the request header `Accept: text/event-stream`. Note, however, that this feature is still experimental and subject to changes.
+
+## Minor improvements
+
+* We improved the dev build script to avoid out-of-sync binary and docker image generation.
+* The logging was improved throughout the board. Some Information were reduced in severity to `trace` level.
+* Beam development is now supported on both libssl1.1 and libssl3 Linuxes (e.g. Ubuntu 20.04 vs. Ubuntu 22.04). With the impending EOL of libssl 1.1, we hope for quick transition of the main linux distribution providers to fully remove libssl1.1 support in a future release.
+* Beam development will now automatically determine when to rebuild the Docker images.
+* Beam now gracefully (and quickly) exits in Docker environments where not all Unix signals are forwarded into containers.
+* `beamdev start` now starts a MITM proxy for debugging (access at http://localhost:9090)
+* Beams message types were heavily refactored for improved maintainability and cleaner, more ideomtaic code. 
+
+## Bugfixes
+* A bug, where some messages' signatures from the Beam.Broker to the Beam.Proxy were not properly validated, is fixed.
+* We fixed a bug, where the logging engine might be initialized and and lost some startup messages.
+
 # Samply.Beam 0.5.0 -- 2023-02-03
 
 This new major release of Samply.Beam introduces a breaking change in how cryptographic signatures are represented in the HTTP messages, allowing for more efficient, larger payloads.
 This change is incompatible with older versions of Samply.Beam, so please update both your broker and your clients.
-
 
 # Samply.Beam 0.4.2 -- 2023-02-01
 
@@ -50,7 +81,6 @@ If your current setup relies on the previous behaviour, please check your CA and
 ### End-to-end encryption
 
 This version fully implements end-to-end-encryption between the Beam.Proxies. This breaks downwards compatibility and requires all Beam.Proxies, as well as the central Beam.Broker, to run at least this version (v0.4.0).
-
 
 ## Major changes
 

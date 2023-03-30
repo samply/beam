@@ -1,5 +1,6 @@
 use std::{ops::Deref, fmt::Display, hash::Hash, str::FromStr};
 
+use itertools::Itertools;
 use serde::{Serialize, Deserialize, de::Visitor};
 use once_cell::sync::OnceCell;
 
@@ -192,6 +193,22 @@ impl BeamId for AnyBeamId {
 pub enum AppOrProxyId {
     AppId(AppId),
     ProxyId(ProxyId),
+}
+
+impl AppOrProxyId {
+    pub fn get_proxy_id(&self) -> ProxyId {
+        match self {
+            AppOrProxyId::AppId(app) => app.proxy_id(),
+            AppOrProxyId::ProxyId(proxy) => proxy.clone() 
+        }
+    }
+
+    pub fn hide_broker(&self) -> String {
+        match self {
+            AppOrProxyId::AppId(app) => app.0.splitn(3, '.').take(2).join("."),
+            AppOrProxyId::ProxyId(proxy) => proxy.0.split_once('.').map(|(proxy, _broker)| proxy).unwrap_or_default().to_string(),
+        }
+    }
 }
 
 impl Display for AppOrProxyId {

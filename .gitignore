@@ -3,3 +3,4 @@
 artifacts/
 dev/pki/*
 !dev/pki/pki
+**/mitmproxy/
