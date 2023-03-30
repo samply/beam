@@ -1,15 +1,17 @@
 <script lang="ts">
     import { onMount } from "svelte";
+    import type { MonitoringUpdate } from "../types";
 
 
-    let requests = [];
+    let requests: Array<MonitoringUpdate> = [];
 
     onMount(() => {
         // TODO change this to actual host
         let sse_stream = new EventSource("http://localhost:8082/monitor/events");
         sse_stream.addEventListener("message", (e) => {
             // We cant push as we need svelte to understand that we updated this and need to rerender
-            requests = [...requests, e.data];
+            let update = JSON.parse(e.data) as MonitoringUpdate
+            requests = [...requests, update];
         })
     })
 </script>
