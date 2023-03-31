@@ -2,6 +2,7 @@
     import { onMount } from "svelte";
     import { Task } from "../task";
     import type { MonitoringUpdate, MsgTaskResult } from "../types";
+    import TaskView from "./TaskView.svelte";
 
 
     let tasks: Array<Task> = [];
@@ -11,7 +12,7 @@
     function append_result(result: MsgTaskResult) {
         let task = tasks.find((t) => result.task === t.task.id);
         if (task !== undefined) {
-            task.results.push(result);
+            task.add_result(result);
         } else {
             console.log("Could not find task for result", result);
         }
@@ -61,9 +62,11 @@
     <h2>Request Traffic</h2>
 </header>
 <ul>
-    {#each tasks as request}
-        {#if filters.every((filter) => filter(request))}
-            <li>{request}</li>
+    {#each tasks as task}
+        {#if filters.every((filter) => filter(task))}
+            <li>
+                <TaskView task />
+            </li>
         {/if}
     {/each}
 </ul>

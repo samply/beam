@@ -1,5 +1,5 @@
 <script lang="ts">
-    import RequestList from "./lib/EventList.svelte";
+    import EventList from "./lib/EventList.svelte";
     import Nav from "./lib/Nav.svelte";
 </script>
 
@@ -9,7 +9,7 @@
     </aside>
 
     <div class="content">
-        <RequestList />
+        <EventList />
     </div>
 </main>
 
