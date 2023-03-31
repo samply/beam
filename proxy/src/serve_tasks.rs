@@ -134,6 +134,7 @@ async fn handler_tasks_nostream(
     if !bytes.is_empty() {
         if let Ok(json) = serde_json::from_slice::<Value>(&bytes) {
             let json = to_server_error(validate_and_decrypt(json).await)?;
+            MONITORER.send((&parts, &json));
             trace!("Decrypted Msg: {:#?}", json);
             bytes = serde_json::to_vec(&json).unwrap().into();
             trace!(

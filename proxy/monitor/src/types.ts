@@ -28,7 +28,7 @@ export interface MsgTaskRequest extends MsgEmpty {
     } | "discard"
 }
 
-export type Msg = MsgEmpty | MsgTaskRequest | MsgTaskRequest
+export type Msg = MsgEmpty | MsgTaskRequest | MsgTaskResult
 
 export type MonitoringUpdate = {
     request: {
@@ -41,6 +41,6 @@ export type MonitoringUpdate = {
     response: {
         status: number,
         headers: Map<string, string>,
-        json: Msg | Array<Msg>
+        json: Msg | Array<MsgTaskResult>
     }
 }

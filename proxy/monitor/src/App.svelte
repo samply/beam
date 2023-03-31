@@ -1,5 +1,5 @@
 <script lang="ts">
-    import RequestList from "./lib/RequestList.svelte";
+    import RequestList from "./lib/EventList.svelte";
     import Nav from "./lib/Nav.svelte";
 </script>
 
