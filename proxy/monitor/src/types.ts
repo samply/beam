@@ -31,7 +31,16 @@ export interface MsgTaskRequest extends MsgEmpty {
 export type Msg = MsgEmpty | MsgTaskRequest | MsgTaskRequest
 
 export type MonitoringUpdate = {
-    outgoing_message: Msg
+    request: {
+        uri: string,
+        method: string,
+        headers: Map<string, string>,
+        json: Msg
+    }
 } | {
-    incoming_message: Msg
+    response: {
+        status: number,
+        headers: Map<string, string>,
+        json: Msg | Array<Msg>
+    }
 }

@@ -8,7 +8,7 @@ use axum::{
     async_trait,
     body::Bytes,
     extract::{ConnectInfo, Path, State},
-    http::request,
+    http::{request, response},
     middleware::Next,
     response::{sse::Event, IntoResponse, Response, Sse},
     routing::get,
@@ -23,11 +23,7 @@ use tokio::sync::broadcast::{self, Receiver, Sender};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing::{error, info};
 
-pub async fn monitor(
-    s: ConnectInfo<SocketAddr>,
-    req: Request<Body>,
-    next: Next<Body>,
-) -> Response {
+pub async fn monitor(s: ConnectInfo<SocketAddr>, req: Request<Body>, next: Next<Body>) -> Response {
     // Maybe use this to log everthing
     todo!()
 }
@@ -92,10 +88,10 @@ impl Monitorer {
         if !self.should_record.load(Ordering::Relaxed) {
             return;
         }
-            if self.task_sender.send(update.into()).is_err() {
-                info!("Noone is listening");
-                MONITORER.stop_recording();
-            };
+        if self.task_sender.send(update.into()).is_err() {
+            info!("Noone is listening");
+            MONITORER.stop_recording();
+        };
     }
 }
 
@@ -109,16 +105,15 @@ pub enum MonitoringUpdate {
         method: Method,
         #[serde(with = "hyper_serde")]
         headers: HeaderMap,
+        json: PlainMessage,
     },
     Response {
         #[serde(with = "hyper_serde")]
         status: StatusCode,
         #[serde(with = "hyper_serde")]
         headers: HeaderMap,
+        json: Value,
     },
-    OutgoingMessage(PlainMessage),
-    IncomingMessage(PlainMessage),
-
 }
 
 impl MonitoringUpdate {
@@ -127,39 +122,23 @@ impl MonitoringUpdate {
     }
 }
 
-/// Wraper Type to differniate between in and outgoing request messages
-pub struct IncomingMessage<'a>(pub &'a PlainMessage);
-
-impl<'a> From<IncomingMessage<'a>> for MonitoringUpdate {
-    fn from(value: IncomingMessage<'a>) -> Self {
-        Self::IncomingMessage(value.0.clone())
-    }
-}
-
-/// Wraper Type to differniate between in and outgoing request messages
-pub struct OutgoingMessage<'a>(pub &'a PlainMessage);
-
-impl<'a> From<OutgoingMessage<'a>> for MonitoringUpdate {
-    fn from(value: OutgoingMessage<'a>) -> Self {
-        Self::OutgoingMessage(value.0.clone())
-    }
-}
-
-impl From<&Request<Body>> for MonitoringUpdate {
-    fn from(value: &Request<Body>) -> Self {
+impl From<(&request::Parts, &PlainMessage)> for MonitoringUpdate {
+    fn from((parts, json): (&request::Parts, &PlainMessage)) -> Self {
         MonitoringUpdate::Request {
-            method: value.method().to_owned(),
-            headers: value.headers().to_owned(),
-            uri: value.uri().to_owned(),
+            method: parts.method.to_owned(),
+            headers: parts.headers.to_owned(),
+            uri: parts.uri.to_owned(),
+            json: json.to_owned(),
         }
     }
 }
 
-impl From<&Response> for MonitoringUpdate {
-    fn from(value: &Response) -> Self {
+impl From<(&response::Parts, &Value)> for MonitoringUpdate {
+    fn from((parts, json): (&response::Parts, &Value)) -> Self {
         MonitoringUpdate::Response {
-            status: value.status(),
-            headers: value.headers().to_owned(),
+            status: parts.status,
+            headers: parts.headers.to_owned(),
+            json: json.to_owned(),
         }
     }
 }

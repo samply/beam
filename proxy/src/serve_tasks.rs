@@ -182,10 +182,10 @@ async fn handler_tasks_stream(
         warn!("Got unexpected response code from server: {code}. Returning error message as-is: \"{error_msg}\"");
         return Err((code, error_msg));
     }
+    let (parts, mut body) = resp.into_parts();
 
     let outgoing = async_stream::stream! {
-        let incoming = resp
-            .body_mut()
+        let incoming = body
             .map(|result| result.map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, format!("IO Error: {error}"))))
             .into_async_read();
 
@@ -254,7 +254,10 @@ async fn handler_tasks_stream(
                             continue;
                         };
                         let json = match validate_and_decrypt(json).await {
-                            Ok(json) => json,
+                            Ok(json) => {
+                                MONITORER.send((&parts, &json));
+                                json
+                            },
                             Err(err) => {
                                 warn!("Got an error decrypting Broker's reply: {err}");
                                 continue;
@@ -370,7 +373,6 @@ async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
             Ok(signed) => {
                 let msg = MsgSigned::<EncryptedMessage>::verify(&signed.jwt).await?.msg;
                 let plain = decrypt_msg(msg)?;
-                MONITORER.send(monitor::IncomingMessage(&plain));
                 Ok(serde_json::to_value(plain).expect("Should serialize fine"))
             }
             Err(e) => Err(SamplyBeamError::JsonParseError(format!("Failed to parse broker response as a signed encrypted message. Err is {e}")))
@@ -417,7 +419,7 @@ async fn encrypt_request(
         }
     };
 
-    MONITORER.send(monitor::OutgoingMessage(&msg));
+    MONITORER.send((&parts, &msg));
     // Sanity/security checks: From address sane?
     if msg.get_from() != sender {
         return Err(ERR_FAKED_FROM);
