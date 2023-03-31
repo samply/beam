@@ -3,6 +3,7 @@
     import ResultView from "./ResultView.svelte";
 
     export let task: Task;
+    $: console.log(typeof task);
 </script>
 
 <div class="task">
@@ -11,7 +12,7 @@
         {#each [...task.results] as [to, result]}
             <li>
                 {#if result}
-                <ResultView result />
+                <ResultView {result} />
                 {:else}
                 <span>To: {to}</span>
                 {/if}

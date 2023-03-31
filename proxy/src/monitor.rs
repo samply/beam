@@ -97,6 +97,7 @@ impl Monitorer {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
+// TODO: Make this internally tagged as ts is better at understading it
 pub enum MonitoringUpdate {
     Request {
         #[serde(with = "hyper_serde")]
