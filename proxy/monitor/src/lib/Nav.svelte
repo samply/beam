@@ -5,7 +5,7 @@
 
 <nav>
     <a href="/" target="_blank" rel="noreferrer">
-      <img src={beamLogo} class="logo" alt="Vite Logo" />
+      <img src={beamLogo} class="logo" alt="Beam Logo" />
     </a>
 </nav>
 
@@ -21,8 +21,6 @@ nav {
 .logo {
     height: 4em;
     padding: .5em;
-    will-change: filter;
-    transition: filter 300ms;
 }
     
 </style>

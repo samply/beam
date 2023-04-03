@@ -22,5 +22,10 @@
 </div>
 
 <style>
-
+.task {
+    background-color: var(--color-gray);
+    border-radius: 2rem;
+    margin: 1rem;
+    text-align: start;
+}
 </style>

@@ -61,7 +61,7 @@
 </script>
 
 <header>
-    <h2>Request Traffic</h2>
+    <h2>Tasks</h2>
 </header>
 <ul>
     {#each $tasks as task}
