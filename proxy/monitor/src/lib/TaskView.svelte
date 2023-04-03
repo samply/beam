@@ -18,7 +18,7 @@
 </script>
 
 <div class="task">
-    <div>From: {task.task.from}</div>
+    <div>Task from: {task.task.from}</div>
     <Body json={task.task.body} />
     <span>Results:</span>
     <ul>
@@ -54,5 +54,11 @@
     margin: 1rem;
     text-align: start;
     padding: 1rem;
+}
+li {
+    list-style: none;
+}
+ul {
+    padding-left: 20px;
 }
 </style>

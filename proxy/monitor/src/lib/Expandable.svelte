@@ -1,21 +1,34 @@
-
 <script lang="ts">
+    import { slide } from 'svelte/transition';
     let expanded = false;
 </script>
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
-<div on:click|stopPropagation={() => expanded = !expanded} class="head">
-    <slot name="head">
-        Expand
-    </slot>
+<div on:click|stopPropagation={() => (expanded = !expanded)} class="head" class:expanded>
+    <slot name="head">Expand</slot>
 </div>
 
-<div  hidden={!expanded}>
+{#if expanded}
+<div transition:slide class="body">
     <slot />
 </div>
+{/if}
 
 <style>
     .head:hover {
         cursor: pointer;
+        user-select: none;
+    }
+    .head:before {
+        content: '▸';
+        font-size: 18px;
+        float: left;
+        margin-right: 5px;
+    }
+    .expanded:before {
+        content: '▾';
+    }
+    .body {
+        padding-left: 20px;
     }
 </style>

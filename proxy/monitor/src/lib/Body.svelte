@@ -6,7 +6,7 @@
 
 {#if typeof json === "string" && json.length > 100}
     <Expandable>
-        <span slot="head">Body: large string body. Click to show.</span>
+        <span slot="head">Large string body. Click to show.</span>
         <div class="body">
             Body: 
             <JSONTree value={json} />
