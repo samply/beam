@@ -13,7 +13,7 @@ function append_result(result: MsgTaskResult) {
         console.log("Could not find task for result", result);
     }
 }
-        // TODO change this to actual host
+
 const sse_stream = new EventSource("/monitor/events");
 sse_stream.addEventListener("message", (e) => {
     // We cant push as we need svelte to understand that we updated this and need to rerender
@@ -21,7 +21,6 @@ sse_stream.addEventListener("message", (e) => {
     if ("request" in update) {
         let msg = update.request.json;
         let request = update.request;
-        console.log("request:", request);
         // We have a MsgTaskRequest from some App in the proxies network to the beam network
         if ("id" in msg) {
             tasks.update((ts) => [...ts, new Task(msg as MsgTaskRequest)]);
@@ -34,7 +33,6 @@ sse_stream.addEventListener("message", (e) => {
     } else if ("response" in update) {
         let msg = update.response.json;
         let response = update.response;
-        console.log("response:", response);
 
         if (Array.isArray(msg)) {
             msg.forEach(append_result);

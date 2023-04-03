@@ -2,6 +2,7 @@
     import type { MsgTaskResult } from "../types";
     import Expandable from "./Expandable.svelte";
     import Body from "./Body.svelte";
+    import JSONTree from 'svelte-json-tree';
 
     export let result: MsgTaskResult;
 
@@ -20,6 +21,17 @@
         </div>
 
         <Body json={result.body} />
+        <Expandable>
+            <span slot="head">Show extra info</span>
+            <div>
+                Id: {result.task}
+                <br />
+                Status: {result.status}
+                <br />
+                Metadata:
+                <JSONTree value={result.metadata} />
+            </div>
+        </Expandable>
     </Expandable>
 </div>
 
