@@ -14,9 +14,9 @@
         {#each [...task.results] as [to, result]}
             <li>
                 {#if result}
-                <ResultView {result} />
+                    <ResultView {result} />
                 {:else}
-                <span>To: {to}</span>
+                    <span>Pending result from: {to}</span>
                 {/if}
             </li>
         {/each}

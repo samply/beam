@@ -12,11 +12,13 @@
             <JSONTree value={json} />
         </div>
     </Expandable>
-{/if}
-<div class="body">
+{:else}
+ <div class="body">
     Body: 
     <JSONTree value={json} />
 </div>
+{/if}
+
 
 <style>
 .body {

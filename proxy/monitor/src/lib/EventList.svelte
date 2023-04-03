@@ -18,8 +18,8 @@
             <li>
                 <TaskView {task} />
             </li>
-        {:else}
-            <pre>Not rendering Task from {task.task.from}</pre>
+        <!-- {:else}
+            <pre>Not rendering Task from {task.task.from}</pre> -->
         {/if}
     {/each}
 </ul>

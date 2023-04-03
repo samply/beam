@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { MsgTaskResult, WorkStatus } from "../types";
+    import type { MsgTaskResult } from "../types";
     import Expandable from "./Expandable.svelte";
     import Body from "./Body.svelte";
 
@@ -9,14 +9,15 @@
 
 <div class="result">
     <Expandable>
-        <span slot="head" class="status" style="background: var(--color-{result.status});">From: {result.from}</span>
-        <ul>
-            {#each result.to as to}
-                <li>
-                    To: {to}
-                </li>
-            {/each}
-        </ul>
+        <span slot="head" class="status" title="{result.status}" style="background: var(--color-{result.status});">From: {result.from}</span>
+        <div>
+            Result for:
+            <ul>
+                {#each result.to as to}
+                    <li>{to}</li>
+                {/each}
+            </ul>
+        </div>
 
         <Body json={result.body} />
     </Expandable>
