@@ -13,6 +13,10 @@
     -moz-osx-font-smoothing: grayscale;
     -webkit-text-size-adjust: 100%;
     --color-gray: whitesmoke;
+    --color-pending: yellow;
+    --color-succeeded: lightgreen;
+    --color-tempfailed: lightcoral;
+    --color-permfailed: #ff1e1e9c;
 }
 
 a {

@@ -13,3 +13,9 @@
 <div  hidden={!expanded}>
     <slot />
 </div>
+
+<style>
+    .head:hover {
+        cursor: pointer;
+    }
+</style>
