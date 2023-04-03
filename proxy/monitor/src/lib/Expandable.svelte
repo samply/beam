@@ -21,7 +21,6 @@
     }
     .head:before {
         content: '▸';
-        font-size: 18px;
         float: left;
         margin-right: 5px;
     }
