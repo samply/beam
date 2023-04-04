@@ -8,7 +8,7 @@
     let from_filter_value = writable("");
     let from_filter = derived(from_filter_value, ($from_filter_value) => (task: Task) => {
         // If from_filter is not an empty string or undefined always return true otherwise check from field
-        return !$from_filter_value || task.task.from === $from_filter_value
+        return !$from_filter_value || task.task.from.includes($from_filter_value)
     });
     let filters = derived([from_filter], (filters) => filters, [$from_filter]);
     // Update filtered tasks whenever a new task or a new filter gets added
@@ -22,8 +22,9 @@
 </header>
 <div>
     <div class="settings">
-        <input type="text" class="task-filter" bind:value={$from_filter_value}>
         <button on:click={() => $tasks = []}>Clear Tasks</button>
+        <span>Filter from:</span>
+        <input type="text" class="task-filter" bind:value={$from_filter_value}>
     </div>
     <ul>
         {#each $filtered_tasks as task}
@@ -43,10 +44,13 @@
     }
     .task-filter {
         border-radius: 1rem;
-        font-size: large;
+        font-size: inherit;
+        padding: .2rem .4rem;
     }
     .settings {
         display: flex;
+        align-items: center;
+        padding: 0 10cqw;
         gap: 1rem;
     }
 </style>
