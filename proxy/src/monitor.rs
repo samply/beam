@@ -6,7 +6,7 @@ use std::{
 
 use axum::{
     async_trait,
-    body::Bytes,
+    body::{boxed, Bytes, Full},
     extract::{ConnectInfo, Path, State},
     http::{request, response},
     middleware::Next,
@@ -14,13 +14,13 @@ use axum::{
     routing::get,
     Router,
 };
-use hyper::{body::Buf, Body, HeaderMap, Method, Request, StatusCode, Uri};
+use hyper::{body::Buf, header, Body, HeaderMap, Method, Request, StatusCode, Uri};
+use rust_embed::{utils, RustEmbed};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 use shared::{once_cell::sync::Lazy, PlainMessage};
 use shared::{MsgId, MsgTaskRequest};
 use tokio::sync::broadcast::{self, Receiver, Sender};
-use tower_http::services::{ServeDir, ServeFile};
 use tracing::{error, info};
 
 pub async fn monitor(s: ConnectInfo<SocketAddr>, req: Request<Body>, next: Next<Body>) -> Response {
@@ -28,11 +28,50 @@ pub async fn monitor(s: ConnectInfo<SocketAddr>, req: Request<Body>, next: Next<
     todo!()
 }
 
+#[derive(RustEmbed)]
+#[folder = "dist"]
+struct Assets;
+
+const INDEX_HTML: &str = "index.html";
+
 pub fn router() -> Router {
-    let servic = ServeDir::new("./dist").not_found_service(ServeFile::new("./dist/index.html"));
     Router::new()
         .route("/monitor/events", get(stream_recorded_tasks))
-        .fallback_service(servic)
+        .fallback(static_handler)
+}
+
+async fn static_handler(uri: Uri) -> impl IntoResponse {
+    let path = uri.path().trim_start_matches('/');
+    println!("trying to match: {path}, env: {:?}", std::env::current_dir());
+    let ass = Assets::iter().collect::<Vec<_>>();
+    println!("assets: {ass:#?}");
+
+    if path.is_empty() || path == INDEX_HTML {
+        return index_html();
+    }
+
+    if let Some(content) = Assets::get(path) {
+        Response::builder()
+            .header(header::CONTENT_TYPE, content.metadata.mimetype())
+            .body(boxed(Full::from(content.data)))
+            .unwrap()
+    } else {
+        if path.contains('.') {
+            return StatusCode::NOT_FOUND.into_response();
+        };
+        index_html()
+    }
+}
+
+fn index_html() -> Response {
+    if let Some(content) = Assets::get(INDEX_HTML) {
+        Response::builder()
+            .header(header::CONTENT_TYPE, "text/html")
+            .body(boxed(Full::from(content.data)))
+            .unwrap()
+    } else {
+        StatusCode::NOT_FOUND.into_response()
+    }
 }
 
 // TODO this needs some form of Auth
