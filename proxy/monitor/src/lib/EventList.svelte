@@ -10,7 +10,13 @@
         // If from_filter is not an empty string or undefined always return true otherwise check from field
         return !$from_filter_value || task.task.from.includes($from_filter_value)
     });
-    let filters = derived([from_filter], (filters) => filters, [$from_filter]);
+
+    let done_filter = writable(false);
+    let hide_done_filter = derived(done_filter, ($done_filter) => (task: Task) => {
+        return !$done_filter || Array.from(task.results.values()).every(result => result?.status === "succeeded")
+    });
+
+    let filters = derived([from_filter, hide_done_filter], (filters) => filters, [$from_filter, $hide_done_filter]);
     // Update filtered tasks whenever a new task or a new filter gets added
     let filtered_tasks = derived(
         [tasks, filters],
@@ -23,6 +29,7 @@
 <div>
     <div class="settings">
         <button on:click={() => $tasks = []}>Clear Tasks</button>
+        <button class:done_filter={$done_filter} on:click={() => $done_filter = !$done_filter}>Hide completed</button>
         <span>Filter from:</span>
         <input type="text" class="task-filter" bind:value={$from_filter_value}>
     </div>
@@ -41,6 +48,7 @@
     }
     button {
         background-color: var(--color-gray);
+        outline: none;
     }
     .task-filter {
         border-radius: 1rem;
@@ -52,5 +60,8 @@
         align-items: center;
         padding: 0 10cqw;
         gap: 1rem;
+    }
+    .done_filter {
+        outline: solid #646cff 2px;
     }
 </style>
