@@ -15,7 +15,6 @@
     let filtered_tasks = derived(
         [tasks, filters],
         ([$tasks, $filters]) => $tasks.filter(task => $filters.every(filter => filter(task))));
-    $: console.log($filtered_tasks, $from_filter_value);
 </script>
 
 <header>
@@ -23,7 +22,7 @@
 </header>
 <div>
     <div class="settings">
-        <input type="text" bind:value={$from_filter_value}>
+        <input type="text" class="task-filter" bind:value={$from_filter_value}>
         <button on:click={() => $tasks = []}>Clear Tasks</button>
     </div>
     <ul>
@@ -38,5 +37,16 @@
 <style>
     li {
         list-style: none;
+    }
+    button {
+        background-color: var(--color-gray);
+    }
+    .task-filter {
+        border-radius: 1rem;
+        font-size: large;
+    }
+    .settings {
+        display: flex;
+        gap: 1rem;
     }
 </style>
