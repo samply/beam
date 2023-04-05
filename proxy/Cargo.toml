@@ -42,7 +42,7 @@ futures = "0.3.26"
 async-sse = "5.1.0"
 async-stream = "0.3.4"
 hyper_serde = "0.13.0"
-rust-embed = { version = "6.6", features = ["axum-ex", "mime-guess"] }
+rust-embed = { version = "6.6", features = ["axum-ex", "mime-guess", "debug-embed"] }
 
 [build-dependencies]
 build-data = "0"

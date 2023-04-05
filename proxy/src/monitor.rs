@@ -42,9 +42,6 @@ pub fn router() -> Router {
 
 async fn static_handler(uri: Uri) -> impl IntoResponse {
     let path = uri.path().trim_start_matches('/');
-    println!("trying to match: {path}, env: {:?}", std::env::current_dir());
-    let ass = Assets::iter().collect::<Vec<_>>();
-    println!("assets: {ass:#?}");
 
     if path.is_empty() || path == INDEX_HTML {
         return index_html();

@@ -46,8 +46,6 @@ services:
     image: samply/beam-proxy:${TAG}
     ports:
       - 8081:8081
-    volumes:
-      - ../proxy/dist:/dist
     environment:
       BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY1_ID}
