@@ -133,8 +133,8 @@ impl Monitorer {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
-// TODO: Make this internally tagged as ts is better at understading it
 pub enum MonitoringUpdate {
+    /// Request from a proxy internal app to the broker
     Request {
         #[serde(with = "hyper_serde")]
         uri: Uri,
@@ -144,6 +144,7 @@ pub enum MonitoringUpdate {
         headers: HeaderMap,
         json: PlainMessage,
     },
+    /// Response from the broker to a proxy internal app
     Response {
         #[serde(with = "hyper_serde")]
         status: StatusCode,

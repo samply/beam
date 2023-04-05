@@ -23,7 +23,7 @@ sse_stream.addEventListener("message", (e) => {
         let request = update.request;
         // We have a MsgTaskRequest from some App in the proxies network to the beam network
         if ("id" in msg) {
-            tasks.update((ts) => [...ts, new Task(msg as MsgTaskRequest)]);
+            tasks.update((ts) => [...ts, new Task(msg as MsgTaskRequest, false)]);
         // We have a MsgTaskResult from some App in the proxies network
         } else if ("status" in msg) {
             append_result(msg);
@@ -38,7 +38,7 @@ sse_stream.addEventListener("message", (e) => {
             msg.forEach(append_result);
         }
         if ("id" in msg) {
-            tasks.update((ts) => [...ts, new Task(msg as MsgTaskRequest)]);
+            tasks.update((ts) => [...ts, new Task(msg as MsgTaskRequest, true)]);
         } else if ("status" in msg) {
             append_result(msg);
         } else {

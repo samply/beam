@@ -18,7 +18,11 @@
 </script>
 
 <div class="task">
-    <div>Task from: {task.task.from}</div>
+    {#if task.is_incoming}
+    <div>Task from remote app: {task.task.from}</div>
+    {:else}
+    <div>Task from local app: {task.task.from}</div>
+    {/if}
     <Body json={task.task.body} />
     <span>Results:</span>
     <ul>
