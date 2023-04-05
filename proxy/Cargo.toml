@@ -43,6 +43,7 @@ async-sse = "5.1.0"
 async-stream = "0.3.4"
 hyper_serde = "0.13.0"
 rust-embed = { version = "6.6", features = ["axum-ex", "mime-guess", "debug-embed"] }
+axum-extra = { version = "0.7", features = ["cookie"] }
 
 [build-dependencies]
 build-data = "0"

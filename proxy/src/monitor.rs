@@ -22,6 +22,7 @@ use shared::{once_cell::sync::Lazy, PlainMessage, config::CONFIG_PROXY};
 use shared::{MsgId, MsgTaskRequest};
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tracing::{error, info};
+use axum_extra::extract::cookie::CookieJar;
 
 pub async fn monitor(s: ConnectInfo<SocketAddr>, req: Request<Body>, next: Next<Body>) -> Response {
     // Maybe use this to log everthing
@@ -71,10 +72,10 @@ fn index_html() -> Response {
     }
 }
 
-pub async fn stream_recorded_tasks(headers: HeaderMap) -> Response {
-    if headers
-        .get(header::AUTHORIZATION)
-        .map(|value| value == CONFIG_PROXY.maintanance_key.as_bytes())
+pub async fn stream_recorded_tasks(cookies: CookieJar) -> Response {
+    if !cookies
+        .get("maintanance_key")
+        .map(|cookie| cookie.value() == CONFIG_PROXY.maintanance_key)
         .unwrap_or(false) 
     {
         return StatusCode::UNAUTHORIZED.into_response();

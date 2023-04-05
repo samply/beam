@@ -14,7 +14,13 @@ function append_result(result: MsgTaskResult) {
     }
 }
 
-const sse_stream = new EventSource("/monitor/events");
+const api_token = prompt("Please enter your maintanance key");
+document.cookie = `maintanance_key=${api_token}`
+
+const sse_stream = new EventSource("/monitor/events", {
+    withCredentials: true
+});
+
 sse_stream.addEventListener("message", (e) => {
     // We cant push as we need svelte to understand that we updated this and need to rerender
     let update = JSON.parse(e.data) as MonitoringUpdate;
@@ -48,3 +54,10 @@ sse_stream.addEventListener("message", (e) => {
         console.log("Unknown update", update);
     }
 })
+
+sse_stream.addEventListener("error", () => {
+    if (sse_stream.CLOSED) {
+        alert("Invalid maintanance key");
+        location.reload();
+    }
+});
