@@ -8,7 +8,7 @@ use axum::{
     async_trait,
     body::{boxed, Bytes, Full},
     extract::{ConnectInfo, Path, State},
-    http::{request, response},
+    http::{request, response, HeaderName},
     middleware::Next,
     response::{sse::Event, IntoResponse, Response, Sse},
     routing::get,
@@ -18,7 +18,7 @@ use hyper::{body::Buf, header, Body, HeaderMap, Method, Request, StatusCode, Uri
 use rust_embed::{utils, RustEmbed};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
-use shared::{once_cell::sync::Lazy, PlainMessage};
+use shared::{once_cell::sync::Lazy, PlainMessage, config::CONFIG_PROXY};
 use shared::{MsgId, MsgTaskRequest};
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tracing::{error, info};
@@ -71,8 +71,14 @@ fn index_html() -> Response {
     }
 }
 
-// TODO this needs some form of Auth
-pub async fn stream_recorded_tasks() -> impl IntoResponse {
+pub async fn stream_recorded_tasks(headers: HeaderMap) -> Response {
+    if headers
+        .get(header::AUTHORIZATION)
+        .map(|value| value == CONFIG_PROXY.maintanance_key.as_bytes())
+        .unwrap_or(false) 
+    {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
     MONITORER.start_recording();
     let mut receiver = MONITORER.get_receiver();
     let task_stream = async_stream::stream! {
@@ -85,7 +91,7 @@ pub async fn stream_recorded_tasks() -> impl IntoResponse {
         // I think this will never happen
         error!("All senders have been droped or reciever is lagging. connection closed");
     };
-    Sse::new(task_stream)
+    Sse::new(task_stream).into_response()
 }
 
 pub struct Monitorer {

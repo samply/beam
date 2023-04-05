@@ -53,6 +53,7 @@ services:
       APP_0_KEY: ${APP_KEY}
       APP_1_ID: ${APP2_ID_SHORT}
       APP_1_KEY: ${APP_KEY}
+      MAINTANANCE_KEY: ${MAINTANANCE_KEY}
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
@@ -75,6 +76,7 @@ services:
       APP_0_KEY: ${APP_KEY}
       APP_1_ID: ${APP2_ID_SHORT}
       APP_1_KEY: ${APP_KEY}
+      MAINTANANCE_KEY: ${MAINTANANCE_KEY}
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
       RUST_LOG: ${RUST_LOG}
