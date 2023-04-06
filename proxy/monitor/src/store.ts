@@ -42,8 +42,7 @@ sse_stream.addEventListener("message", (e) => {
 
         if (Array.isArray(msg)) {
             msg.forEach(append_result);
-        }
-        if ("id" in msg) {
+        } else if ("id" in msg) {
             tasks.update((ts) => [...ts, new Task(msg as MsgTaskRequest, true)]);
         } else if ("status" in msg) {
             append_result(msg);
