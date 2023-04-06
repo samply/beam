@@ -1,12 +1,11 @@
-import { writable } from "svelte/store";
+import { get, writable } from "svelte/store";
 import { Task } from "./task";
 import type { MonitoringUpdate, MsgTaskRequest, MsgTaskResult } from "./types";
 
 export const tasks = writable<Task[]>([])
         
 function append_result(result: MsgTaskResult) {
-    let task: Task;
-    tasks.subscribe((ts => task = ts.find((t) => result.task === t.task.id)));
+    let task: Task = get(tasks).find((t) => result.task === t.task.id);
     if (task) {
         task.add_result(result);
     } else {
