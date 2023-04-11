@@ -1,4 +1,4 @@
-use std::{time::Duration, sync::Arc, fmt::Display};
+use std::{fmt::Display, sync::Arc, time::Duration};
 
 use serde::Serialize;
 use tokio::sync::RwLock;
@@ -35,17 +35,17 @@ impl Default for VaultStatus {
 }
 
 pub struct Health {
-    pub vault: VaultStatus
+    pub vault: VaultStatus,
 }
 
 pub struct Senders {
-    pub vault: tokio::sync::watch::Sender<VaultStatus>
+    pub vault: tokio::sync::watch::Sender<VaultStatus>,
 }
 
 impl Health {
     pub fn make() -> (Senders, Arc<RwLock<Self>>) {
         let health = Health {
-            vault: VaultStatus::default()
+            vault: VaultStatus::default(),
         };
         let (vault_tx, mut vault_rx) = tokio::sync::watch::channel(VaultStatus::default());
         let health = Arc::new(RwLock::new(health));
@@ -57,16 +57,17 @@ impl Health {
                 let mut health = health2.write().await;
                 match &new_val {
                     VaultStatus::Ok => info!("Vault connection is now healthy"),
-                    x => warn!("Vault connection is degraded: {}", serde_json::to_string(x).unwrap_or_default()),
+                    x => warn!(
+                        "Vault connection is degraded: {}",
+                        serde_json::to_string(x).unwrap_or_default()
+                    ),
                 }
                 health.vault = new_val;
             }
         };
         tokio::task::spawn(vault_watcher);
 
-        let senders = Senders {
-            vault: vault_tx
-        };
+        let senders = Senders { vault: vault_tx };
         (senders, health)
     }
 }

@@ -24,4 +24,4 @@ jobs:
           repository: ${{ github.repository }}-${{ matrix.component }}
           readme: "./README.md"
           replace_pattern: "](./"
-          replace_with: "](${{ github.server_url }}/${{ github.repository }}/raw/${{ github.ref_name }}/"
+          replace_with: "](https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/"

@@ -1,4 +1,4 @@
-use std::{str::FromStr, convert::Infallible, fmt::Display};
+use std::{convert::Infallible, fmt::Display, str::FromStr};
 
 pub enum SseEventType {
     NewTask,
@@ -9,7 +9,7 @@ pub enum SseEventType {
     DeletedTask,
     Error,
     Undefined,
-    Unknown(String)
+    Unknown(String),
 }
 
 impl AsRef<str> for SseEventType {
@@ -47,7 +47,7 @@ impl FromStr for SseEventType {
             "deleted_task" => Self::DeletedTask,
             "error" => Self::Error,
             "message" => Self::Undefined,
-            unknown => Self::Unknown(unknown.to_string())
+            unknown => Self::Unknown(unknown.to_string()),
         })
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "shared"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 license = "Apache-2.0"
 documentation = "https://github.com/samply/beam"
@@ -54,7 +54,7 @@ backoff = { version = "0.4.0", features = ["tokio"] }
 clap = { version = "4.0.12", features = ["env", "derive"] }
 
 http = "0.2.8"
-fundu = "0.4.3"
+fundu = "0.5.0"
 
 [dev-dependencies]
 tokio-test = "0.4.2"
