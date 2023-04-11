@@ -1,6 +1,6 @@
 # Samply.Beam 0.6.1 -- 2023-04-11
 
-This minor easter update is just a maintainance update. We updated our time-parsing dependency [fundu](https://crates.io/crates/fundu) to the next major version and fixed a bug in our CI/CD pipeline. With this fix, the project description is now correctly sent to Docker Hub. Internally, we improved the formatting of the source code.
+This minor easter update is just a maintainance release. We updated our time-parsing dependency [fundu](https://crates.io/crates/fundu) to the next major version and fixed a bug in our CI/CD pipeline. With this fix, the project description is now correctly sent to Docker Hub. Internally, we improved the formatting of the source code.
 
 # Samply.Beam 0.6.0 -- 2023-03-30
 
