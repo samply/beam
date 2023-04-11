@@ -1,32 +1,58 @@
-use std::{time::{Duration, SystemTime}, convert::Infallible, str::FromStr};
+use std::{
+    convert::Infallible,
+    str::FromStr,
+    time::{Duration, SystemTime},
+};
 
-use axum::{Router, routing::{any, put, get}, response::{Response, Sse, sse::Event, IntoResponse}, http::{HeaderValue, request::Parts}, extract::{State, FromRef, BodyStream}, body::Bytes};
-use futures::{stream::{StreamExt, TryStreamExt}, Stream, TryFutureExt};
+use axum::{
+    body::Bytes,
+    extract::{BodyStream, FromRef, State},
+    http::{request::Parts, HeaderValue},
+    response::{sse::Event, IntoResponse, Response, Sse},
+    routing::{any, get, put},
+    Router,
+};
+use futures::{
+    stream::{StreamExt, TryStreamExt},
+    Stream, TryFutureExt,
+};
 use httpdate::fmt_http_date;
 use hyper::{
-    body, body::HttpBody,
+    body,
+    body::HttpBody,
     client::{connect::Connect, HttpConnector},
-    header, Body, Client, Request, StatusCode, Uri, service::Service, HeaderMap,
+    header,
+    service::Service,
+    Body, Client, HeaderMap, Request, StatusCode, Uri,
 };
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
-use serde::{de::DeserializeOwned, Serialize, Deserialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use shared::{
-    beam_id::{AppId, AppOrProxyId, ProxyId}, config::{self, CONFIG_PROXY}, config_proxy, crypto_jwt, errors::SamplyBeamError, EncryptableMsg, DecryptableMsg,
-    EncryptedMsgTaskRequest, EncryptedMsgTaskResult, Msg, MsgEmpty, MsgId, MsgSigned,
-    MsgTaskRequest, MsgTaskResult, crypto::{self, CryptoPublicPortion}, http_client::SamplyHttpClient, sse_event::SseEventType, PlainMessage, MessageType, EncryptedMessage, config_shared::ConfigCrypto,
+    beam_id::{AppId, AppOrProxyId, ProxyId},
+    config::{self, CONFIG_PROXY},
+    config_proxy,
+    config_shared::ConfigCrypto,
+    crypto::{self, CryptoPublicPortion},
+    crypto_jwt,
+    errors::SamplyBeamError,
+    http_client::SamplyHttpClient,
+    sse_event::SseEventType,
+    DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest,
+    EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest,
+    MsgTaskResult, PlainMessage,
 };
 use tokio::io::BufReader;
-use tracing::{debug, error, warn, trace, info};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::auth::AuthenticatedApp;
 
 #[derive(Clone, FromRef)]
 struct TasksState {
     client: SamplyHttpClient,
-    config: config_proxy::Config
+    config: config_proxy::Config,
 }
 
 pub(crate) fn router(client: &SamplyHttpClient) -> Router {
@@ -59,7 +85,12 @@ const ERR_FAKED_FROM: (StatusCode, &str) = (
     "You are not authorized to send on behalf of this app.",
 );
 
-async fn forward_request(mut req: Request<Body>, config: &config_proxy::Config, sender: &AppId, client: &SamplyHttpClient) -> Result<hyper::Response<Body>, (StatusCode, &'static str)> {
+async fn forward_request(
+    mut req: Request<Body>,
+    config: &config_proxy::Config,
+    sender: &AppId,
+    client: &SamplyHttpClient,
+) -> Result<hyper::Response<Body>, (StatusCode, &'static str)> {
     // Create uri to contact broker
     let path = req.uri().path();
     let path_query = req
@@ -71,8 +102,11 @@ async fn forward_request(mut req: Request<Body>, config: &config_proxy::Config, 
         Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
             .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
     *req.uri_mut() = target_uri;
-    
-    req.headers_mut().append(header::VIA, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")));
+
+    req.headers_mut().append(
+        header::VIA,
+        HeaderValue::from_static(env!("SAMPLY_USER_AGENT")),
+    );
     let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
     let req = sign_request(encrypted_msg, parts, &config, None).await?;
     trace!("Requesting: {:?}", req);
@@ -88,9 +122,10 @@ async fn handler_task(
     State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
     headers: HeaderMap,
-    req: Request<Body>
+    req: Request<Body>,
 ) -> Result<Response, (StatusCode, String)> {
-    let found = &headers.get(header::ACCEPT)
+    let found = &headers
+        .get(header::ACCEPT)
         .unwrap_or(&HeaderValue::from_static(""))
         .to_str()
         .unwrap_or_default()
@@ -100,15 +135,17 @@ async fn handler_task(
         .is_some();
 
     let result = if *found {
-        handler_tasks_stream(client, config, sender, req).await?
+        handler_tasks_stream(client, config, sender, req)
+            .await?
             .into_response()
     } else {
-        handler_tasks_nostream(client, config, sender, req).await
+        handler_tasks_nostream(client, config, sender, req)
+            .await
             .map_err(|e| (e.0, e.1.to_string()))?
             .into_response()
     };
 
-    return Ok(result)
+    return Ok(result);
 }
 
 async fn handler_tasks_nostream(
@@ -118,9 +155,8 @@ async fn handler_tasks_nostream(
     req: Request<Body>,
 ) -> Result<Response<Body>, (StatusCode, &'static str)> {
     // Validate Query, forward to server, get response.
-    
-    let resp = forward_request(req, &config, &sender, &client).await?;
 
+    let resp = forward_request(req, &config, &sender, &client).await?;
 
     // Check reply's signature
 
@@ -152,7 +188,11 @@ async fn handler_tasks_nostream(
     let body = Body::from(bytes);
 
     if let Some(header) = parts.headers.remove(header::CONTENT_LENGTH) {
-        debug!("Removed header: \"{}: {}\"", header::CONTENT_LENGTH, header.to_str().unwrap_or("(invalid value)"));
+        debug!(
+            "Removed header: \"{}: {}\"",
+            header::CONTENT_LENGTH,
+            header.to_str().unwrap_or("(invalid value)")
+        );
     }
 
     let resp = Response::from_parts(parts, body);
@@ -164,18 +204,17 @@ async fn handler_tasks_stream(
     client: SamplyHttpClient,
     config: config_proxy::Config,
     sender: AppId,
-    req: Request<Body>
+    req: Request<Body>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
     // Validate Query, forward to server, get response.
-    
-    let mut resp = forward_request(req, &config, &sender, &client).await
+
+    let mut resp = forward_request(req, &config, &sender, &client)
+        .await
         .map_err(|err| (err.0, err.1.into()))?;
 
     let code = resp.status();
-    if ! code.is_success() {
-        let bytes = body::to_bytes(resp.into_body())
-            .await
-            .ok();
+    if !code.is_success() {
+        let bytes = body::to_bytes(resp.into_body()).await.ok();
         let error_msg = bytes
             .and_then(|v| String::from_utf8(v.into()).ok())
             .unwrap_or("(unable to parse reply)".into());
@@ -239,7 +278,7 @@ async fn handler_tasks_stream(
                             warn!("Got \"{other}\" event -- parsing.");
                         }
                     }
-                    
+
                     // Check reply's signature
 
                     if !event_as_bytes.is_empty() {
@@ -299,43 +338,60 @@ fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, (StatusCode,
     })
 }
 
-
 // TODO: This could be a middleware
 pub async fn sign_request(
     body: EncryptedMessage,
     mut parts: Parts,
     config: &config_proxy::Config,
-    private_crypto: Option<&ConfigCrypto>
+    private_crypto: Option<&ConfigCrypto>,
 ) -> Result<Request<Body>, (StatusCode, &'static str)> {
     let from = body.get_from();
 
-    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, private_crypto).await.map_err(|e| {
-        error!("Crypto failed: {}", e);
-        ERR_INTERNALCRYPTO
-    })?;
-    let (_, sig) = token_without_extended_signature.rsplit_once('.').ok_or_else(||{error!("Cannot get initial token's signature. Token: {}",token_without_extended_signature); ERR_INTERNALCRYPTO})?;
+    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, private_crypto)
+        .await
+        .map_err(|e| {
+            error!("Crypto failed: {}", e);
+            ERR_INTERNALCRYPTO
+        })?;
+    let (_, sig) = token_without_extended_signature
+        .rsplit_once('.')
+        .ok_or_else(|| {
+            error!(
+                "Cannot get initial token's signature. Token: {}",
+                token_without_extended_signature
+            );
+            ERR_INTERNALCRYPTO
+        })?;
     let mut headers_mut = parts.headers;
     headers_mut.insert(
         header::DATE,
         HeaderValue::from_str(&fmt_http_date(SystemTime::now()))
             .expect("Internal error: Unable to format system time"),
     );
-    let digest = crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig, &from)
-        .map_err(|_| ERR_INTERNALCRYPTO)?;
-    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, private_crypto).await.map_err(|e| {
-        error!("Crypto failed: {}", e);
-        ERR_INTERNALCRYPTO
-    })?;
+    let digest =
+        crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig, &from)
+            .map_err(|_| ERR_INTERNALCRYPTO)?;
+    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, private_crypto)
+        .await
+        .map_err(|e| {
+            error!("Crypto failed: {}", e);
+            ERR_INTERNALCRYPTO
+        })?;
     let body: Body = token_without_extended_signature.into();
     let mut auth_header = String::from("SamplyJWT ");
     auth_header.push_str(&token_with_extended_signature);
     headers_mut.insert(header::HOST, config.broker_host_header.clone());
 
-    let length = HttpBody::size_hint(&body).exact().ok_or_else(|| {error!("Cannot calculate length of request"); ERR_BODY})?;
-    if let Some(old) = headers_mut.insert(
-        header::CONTENT_LENGTH,
-        length.into()) {
-            debug!("Exchanged old Content-Length header ({}) with new one ({})", old.to_str().unwrap_or("(header invalid)"), length);
+    let length = HttpBody::size_hint(&body).exact().ok_or_else(|| {
+        error!("Cannot calculate length of request");
+        ERR_BODY
+    })?;
+    if let Some(old) = headers_mut.insert(header::CONTENT_LENGTH, length.into()) {
+        debug!(
+            "Exchanged old Content-Length header ({}) with new one ({})",
+            old.to_str().unwrap_or("(header invalid)"),
+            length
+        );
     }
 
     headers_mut.insert(
@@ -351,13 +407,12 @@ pub async fn sign_request(
     Ok(req)
 }
 
-
 #[async_recursion::async_recursion]
 async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
     // It might be possible to use MsgSigned directly instead but there are issues impl Deserialize for MsgSigned<EncryptedMessage>
     #[derive(Deserialize)]
     struct MsgSignedHelper {
-        jwt: String
+        jwt: String,
     }
     if let Value::Array(arr) = json {
         let mut results = Vec::with_capacity(arr.len());
@@ -368,19 +423,27 @@ async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
     } else if json.is_object() {
         match serde_json::from_value::<MsgSignedHelper>(json) {
             Ok(signed) => {
-                let msg = MsgSigned::<EncryptedMessage>::verify(&signed.jwt).await?.msg;
+                let msg = MsgSigned::<EncryptedMessage>::verify(&signed.jwt)
+                    .await?
+                    .msg;
                 Ok(serde_json::to_value(decrypt_msg(msg)?).expect("Should serialize fine"))
             }
-            Err(e) => Err(SamplyBeamError::JsonParseError(format!("Failed to parse broker response as a signed encrypted message. Err is {e}")))
+            Err(e) => Err(SamplyBeamError::JsonParseError(format!(
+                "Failed to parse broker response as a signed encrypted message. Err is {e}"
+            ))),
         }
     } else {
-        Err(SamplyBeamError::JsonParseError(format!("Broker respondend with invalid json {json:#?}")))
+        Err(SamplyBeamError::JsonParseError(format!(
+            "Broker respondend with invalid json {json:#?}"
+        )))
     }
 }
 
-
 fn decrypt_msg<M: DecryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> {
-    msg.decrypt(&AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()), crypto::get_own_privkey())
+    msg.decrypt(
+        &AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()),
+        crypto::get_own_privkey(),
+    )
 }
 
 async fn encrypt_request(
@@ -425,9 +488,7 @@ async fn encrypt_request(
     Ok((body, parts))
 }
 
-async fn encrypt_msg<M: EncryptableMsg>(
-    msg: M,
-) -> Result<M::Output, SamplyBeamError> {
+async fn encrypt_msg<M: EncryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> {
     let receivers_keys = crypto::get_proxy_public_keys(msg.get_to()).await?;
     msg.encrypt(&receivers_keys)
 }

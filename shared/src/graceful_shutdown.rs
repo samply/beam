@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use tokio::signal::unix::{signal,SignalKind};
+use tokio::signal::unix::{signal, SignalKind};
 use tracing::info;
 
 #[cfg(unix)]

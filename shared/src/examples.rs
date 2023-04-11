@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use rand::Rng;
 use serde_json::json;
 
-use crate::{beam_id::{BeamId, AppId, BrokerId, ProxyId}, MsgId, MsgTaskRequest, config, MsgTaskResult, MsgSigned, FailureStrategy};
+use crate::{
+    beam_id::{AppId, BeamId, BrokerId, ProxyId},
+    config, FailureStrategy, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult,
+};
 
 #[cfg(debug_assertions)]
 pub fn print_example_objects() -> bool {
@@ -18,10 +21,18 @@ pub fn print_example_objects() -> bool {
         };
         let (tasks, results) = generate_example_tasks(broker_id, proxy_id);
         for (num, task) in tasks.iter().enumerate() {
-            println!("export TASK{}='{}'", num, serde_json::to_string(task).unwrap().replace('\'', "\'"));
+            println!(
+                "export TASK{}='{}'",
+                num,
+                serde_json::to_string(task).unwrap().replace('\'', "\'")
+            );
         }
         for (num, result) in results.iter().enumerate() {
-            println!("export RESULT{}='{}'", num, serde_json::to_string(&result).unwrap().replace('\'', "\'"));
+            println!(
+                "export RESULT{}='{}'",
+                num,
+                serde_json::to_string(&result).unwrap().replace('\'', "\'")
+            );
         }
         true
     } else {
@@ -29,12 +40,18 @@ pub fn print_example_objects() -> bool {
     }
 }
 
-pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) -> (Vec<MsgTaskRequest>,Vec<MsgTaskResult>) {
-    let broker = broker.unwrap_or_else(|| BrokerId::new(&config::CONFIG_SHARED.broker_domain).unwrap());
+pub fn generate_example_tasks(
+    broker: Option<BrokerId>,
+    proxy: Option<ProxyId>,
+) -> (Vec<MsgTaskRequest>, Vec<MsgTaskResult>) {
+    let broker =
+        broker.unwrap_or_else(|| BrokerId::new(&config::CONFIG_SHARED.broker_domain).unwrap());
     let proxy = {
         if let Some(id) = proxy {
-            if ! id.can_be_signed_by(&broker) {
-                panic!("Submitted proxy_id ({id}) cannot be signed by submitted broker_id ({broker})");
+            if !id.can_be_signed_by(&broker) {
+                panic!(
+                    "Submitted proxy_id ({id}) cannot be signed by submitted broker_id ({broker})"
+                );
             }
             id
         } else {
@@ -48,8 +65,11 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
         app1.clone().into(),
         vec![app1.clone().into(), app2.clone().into()],
         "My important task".into(),
-        FailureStrategy::Retry { backoff_millisecs: 1000, max_tries: 5 },
-        json!(["The", "Broker", "can", "read", "and", "filter", "this"])
+        FailureStrategy::Retry {
+            backoff_millisecs: 1000,
+            max_tries: 5,
+        },
+        json!(["The", "Broker", "can", "read", "and", "filter", "this"]),
     );
 
     let response_by_app1 = MsgTaskResult {
@@ -58,7 +78,7 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
         task: task_for_apps_1_2.id,
         status: crate::WorkStatus::Succeeded,
         body: "All done!".into(),
-        metadata: json!("A normal string works, too!")
+        metadata: json!("A normal string works, too!"),
     };
     let response_by_app2 = MsgTaskResult {
         from: app2.into(),
@@ -66,7 +86,7 @@ pub fn generate_example_tasks(broker: Option<BrokerId>, proxy: Option<ProxyId>) 
         task: task_for_apps_1_2.id,
         status: crate::WorkStatus::PermFailed,
         body: "Unable to complete".into(),
-        metadata: json!({ "I": { "like": [ "results", "cake" ] } })
+        metadata: json!({ "I": { "like": [ "results", "cake" ] } }),
     };
     let mut tasks = Vec::new();
     for task in [task_for_apps_1_2] {
@@ -86,8 +106,7 @@ impl AppId {
         let mut rnd = random_str();
         rnd.push('.');
         rnd.push_str(&parent.to_string());
-        Self::new(&rnd)
-            .expect("Internal error: Tried to construct faulty random AppId")
+        Self::new(&rnd).expect("Internal error: Tried to construct faulty random AppId")
     }
 }
 
@@ -96,8 +115,7 @@ impl ProxyId {
         let mut rnd = random_str();
         rnd.push('.');
         rnd.push_str(&parent.to_string());
-        Self::new(&rnd)
-            .expect("Internal error: Tried to construct faulty random ProxyId")
+        Self::new(&rnd).expect("Internal error: Tried to construct faulty random ProxyId")
     }
 }
 

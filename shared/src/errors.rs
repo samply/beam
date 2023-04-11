@@ -96,5 +96,4 @@ pub enum CertificateInvalidReason {
     NotDisclosedByBroker,
     #[error("Other problem: {0}")]
     Other(String),
-
 }
