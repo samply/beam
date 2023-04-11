@@ -2,23 +2,23 @@
 
 use axum::async_trait;
 use beam_id::{AppId, AppOrProxyId, BeamId, ProxyId};
-use crypto_jwt::extract_jwt;
-use errors::SamplyBeamError;
-use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
-use openssl::base64;
-use serde_json::{json, Value};
-use sha2::Sha256;
-use static_init::dynamic;
-use tracing::debug;
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     XChaCha20Poly1305, XNonce,
 };
+use crypto_jwt::extract_jwt;
+use errors::SamplyBeamError;
 use itertools::Itertools;
+use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
+use openssl::base64;
 use rsa::{PaddingScheme, PublicKey, RsaPrivateKey, RsaPublicKey};
+use serde_json::{json, Value};
+use sha2::Sha256;
+use static_init::dynamic;
+use tracing::debug;
 
 use std::{
-    fmt::{Display, Debug},
+    fmt::{Debug, Display},
     ops::Deref,
     time::{Duration, Instant, SystemTime},
 };
@@ -51,9 +51,9 @@ pub mod config_broker;
 pub mod config_proxy;
 
 pub mod beam_id;
+pub mod graceful_shutdown;
 pub mod http_client;
 pub mod middleware;
-pub mod graceful_shutdown;
 
 pub mod examples;
 
@@ -147,7 +147,10 @@ impl<M: Msg + DeserializeOwned> MsgSigned<M> {
         let msg = extract_jwt(token).await?.2.custom;
 
         debug!("Message has been verified succesfully.");
-        Ok(MsgSigned { msg, jwt: token.to_string() })
+        Ok(MsgSigned {
+            msg,
+            jwt: token.to_string(),
+        })
     }
 }
 
@@ -176,7 +179,10 @@ impl Msg for MsgEmpty {
 
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
-pub enum MessageType<State> where State: MsgState {
+pub enum MessageType<State>
+where
+    State: MsgState,
+{
     // Maybe add MessageSigned and Encrypted versions
     MsgTaskRequest(MsgTaskRequest<State>),
     MsgTaskResult(MsgTaskResult<State>),
@@ -193,7 +199,7 @@ impl EncryptableMsg for PlainMessage {
         match self {
             Self::MsgTaskRequest(m) => Self::Output::MsgTaskRequest(m.convert_self(body)),
             Self::MsgTaskResult(m) => Self::Output::MsgTaskResult(m.convert_self(body)),
-            Self::MsgEmpty(m) => Self::Output::MsgEmpty(m)
+            Self::MsgEmpty(m) => Self::Output::MsgEmpty(m),
         }
     }
 
@@ -206,7 +212,10 @@ impl EncryptableMsg for PlainMessage {
     }
 }
 
-const MESSAGE_EMPTY_ENCRYPTION: &Encrypted = &Encrypted { encrypted: Vec::new(), encryption_keys: Vec::new() };
+const MESSAGE_EMPTY_ENCRYPTION: &Encrypted = &Encrypted {
+    encrypted: Vec::new(),
+    encryption_keys: Vec::new(),
+};
 
 impl DecryptableMsg for EncryptedMessage {
     type Output = PlainMessage;
@@ -215,7 +224,7 @@ impl DecryptableMsg for EncryptedMessage {
         match self {
             Self::MsgTaskRequest(m) => Self::Output::MsgTaskRequest(m.convert_self(body)),
             Self::MsgTaskResult(m) => Self::Output::MsgTaskResult(m.convert_self(body)),
-            Self::MsgEmpty(m) => Self::Output::MsgEmpty(m)
+            Self::MsgEmpty(m) => Self::Output::MsgEmpty(m),
         }
     }
 
@@ -257,8 +266,7 @@ impl<T: MsgState> Msg for MessageType<T> {
     }
 }
 
-pub trait DecryptableMsg: Msg + Serialize + Sized
-{
+pub trait DecryptableMsg: Msg + Serialize + Sized {
     type Output: Msg + DeserializeOwned;
 
     fn get_encryption(&self) -> &Encrypted;
@@ -271,8 +279,13 @@ pub trait DecryptableMsg: Msg + Serialize + Sized
         my_id: &AppOrProxyId,
         my_priv_key: &RsaPrivateKey,
     ) -> Result<Self::Output, SamplyBeamError> {
-        let Encrypted { encrypted, encryption_keys } = self.get_encryption();
-        let to_array_index: usize = self.get_to().iter()
+        let Encrypted {
+            encrypted,
+            encryption_keys,
+        } = self.get_encryption();
+        let to_array_index: usize = self
+            .get_to()
+            .iter()
             .position(|entry| {
                 let entry_str = entry.to_string();
 
@@ -324,21 +337,21 @@ pub trait DecryptableMsg: Msg + Serialize + Sized
     }
 }
 
-
-pub trait EncryptableMsg: Msg + Serialize + Sized
-{
+pub trait EncryptableMsg: Msg + Serialize + Sized {
     type Output: Msg;
 
     fn convert_self(self, body: Encrypted) -> Self::Output;
     fn get_plain(&self) -> &Plain;
 
     #[allow(clippy::or_fun_call)]
-    fn encrypt(self, receivers_public_keys: &Vec<RsaPublicKey>) -> Result<Self::Output, SamplyBeamError> {
+    fn encrypt(
+        self,
+        receivers_public_keys: &Vec<RsaPublicKey>,
+    ) -> Result<Self::Output, SamplyBeamError> {
         // Generate Symmetric Key and Nonce
         let mut rng = rand::thread_rng();
         let symmetric_key = XChaCha20Poly1305::generate_key(&mut rng);
         let nonce = XChaCha20Poly1305::generate_nonce(&mut rng);
-
 
         // Encrypt symmetric key with receivers' public keys
         let (encrypted_keys, err): (Vec<_>, Vec<_>) = receivers_public_keys
@@ -372,7 +385,6 @@ pub trait EncryptableMsg: Msg + Serialize + Sized
         let mut nonce_and_ciphertext = nonce.to_vec();
         nonce_and_ciphertext.append(&mut ciphertext);
 
-
         Ok(self.convert_self(Encrypted {
             encrypted: nonce_and_ciphertext,
             encryption_keys: encrypted_keys,
@@ -385,7 +397,6 @@ pub trait Msg: Serialize {
     fn get_to(&self) -> &Vec<AppOrProxyId>;
     fn get_metadata(&self) -> &Value;
 }
-
 
 impl<M: Msg> Msg for MsgSigned<M> {
     fn get_from(&self) -> &AppOrProxyId {
@@ -428,7 +439,6 @@ impl<T: MsgState> Msg for MsgTaskResult<T> {
         &self.metadata
     }
 }
-
 
 mod serialize_time {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -482,7 +492,9 @@ impl MsgState for Plain {}
 
 impl<T: Into<String>> From<T> for Plain {
     fn from(val: T) -> Self {
-        Plain { body: Some(val.into()) }
+        Plain {
+            body: Some(val.into()),
+        }
     }
 }
 
@@ -510,11 +522,24 @@ impl EncryptableMsg for MsgTaskRequest {
     type Output = MsgTaskRequest<Encrypted>;
 
     fn convert_self(self, body: Encrypted) -> Self::Output {
-        let Self { id, from, to, expire, failure_strategy, metadata, .. } = self;
+        let Self {
+            id,
+            from,
+            to,
+            expire,
+            failure_strategy,
+            metadata,
+            ..
+        } = self;
         Self::Output {
             body,
-            id, from, to, expire, failure_strategy, metadata,
-            results: Default::default()
+            id,
+            from,
+            to,
+            expire,
+            failure_strategy,
+            metadata,
+            results: Default::default(),
         }
     }
 
@@ -527,18 +552,30 @@ impl DecryptableMsg for MsgTaskRequest<Encrypted> {
     type Output = MsgTaskRequest;
 
     fn convert_self(self, body: String) -> Self::Output {
-        let Self { id, from, to, expire, failure_strategy, metadata, .. } = self;
+        let Self {
+            id,
+            from,
+            to,
+            expire,
+            failure_strategy,
+            metadata,
+            ..
+        } = self;
         Self::Output {
             body: Plain::from(body),
-            id, from, to, expire, failure_strategy, metadata,
-            results: Default::default()
+            id,
+            from,
+            to,
+            expire,
+            failure_strategy,
+            metadata,
+            results: Default::default(),
         }
     }
 
     fn get_encryption(&self) -> &Encrypted {
         &self.body
     }
-
 }
 
 pub type EncryptedMsgTaskRequest = MsgTaskRequest<Encrypted>;
@@ -546,7 +583,9 @@ pub type EncryptedMsgTaskResult = MsgTaskResult<Encrypted>;
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct MsgTaskResult<State = Plain>
-where State: MsgState {
+where
+    State: MsgState,
+{
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub task: MsgId,
@@ -561,17 +600,27 @@ impl DecryptableMsg for MsgTaskResult<Encrypted> {
     type Output = MsgTaskResult;
 
     fn convert_self(self, body: String) -> Self::Output {
-        let Self { from, to, task, status, metadata, .. } = self;
+        let Self {
+            from,
+            to,
+            task,
+            status,
+            metadata,
+            ..
+        } = self;
         Self::Output {
             body: Plain::from(body),
-            from, to, task, status, metadata
+            from,
+            to,
+            task,
+            status,
+            metadata,
         }
     }
 
     fn get_encryption(&self) -> &Encrypted {
         &self.body
     }
-
 }
 
 impl EncryptableMsg for MsgTaskResult<Plain> {
@@ -582,10 +631,21 @@ impl EncryptableMsg for MsgTaskResult<Plain> {
     }
 
     fn convert_self(self, body: Encrypted) -> Self::Output {
-        let Self { from, to, task, status, metadata, .. } = self;
+        let Self {
+            from,
+            to,
+            task,
+            status,
+            metadata,
+            ..
+        } = self;
         Self::Output {
             body,
-            from, to, task, status, metadata
+            from,
+            to,
+            task,
+            status,
+            metadata,
         }
     }
 }
@@ -621,13 +681,12 @@ impl HasWaitId<String> for EncryptedMsgTaskResult {
 impl<M, I> HasWaitId<I> for MsgSigned<M>
 where
     M: HasWaitId<I> + Msg,
-    I: PartialEq
+    I: PartialEq,
 {
     fn wait_id(&self) -> I {
         self.msg.wait_id()
     }
 }
-
 
 impl<T: MsgState> MsgTaskRequest<T> {
     pub fn id(&self) -> &MsgId {
@@ -757,11 +816,13 @@ mod tests {
 
         // Encrypt Message
         let receivers_public_keys = vec![p1_public, p2_public];
-        let msg_encr = msg.clone()
+        let msg_encr = msg
+            .clone()
             .encrypt(&receivers_public_keys)
             .expect("Could not encrypt message");
         // Decrypt for both proxies
-        let msg_p1_decr = msg_encr.clone()
+        let msg_p1_decr = msg_encr
+            .clone()
             .decrypt(&p1_id, &p1_private)
             .expect("Cannot decrypt message");
         let msg_p2_decr = msg_encr
@@ -801,14 +862,17 @@ mod tests {
 
         // Encrypt Message
         let receivers_public_keys = vec![p1_public, p2_public];
-        let msg_encr = msg.clone()
+        let msg_encr = msg
+            .clone()
             .encrypt(&receivers_public_keys)
             .expect("Could not encrypt message");
         // Decrypt for both proxies
-        let msg_p1_decr = msg_encr.clone()
+        let msg_p1_decr = msg_encr
+            .clone()
             .decrypt(&p1_id, &p1_private)
             .expect("Cannot decrypt message");
-        let msg_p2_decr = msg_encr.clone()
+        let msg_p2_decr = msg_encr
+            .clone()
             .decrypt(&p2_id, &p2_private)
             .expect("Cannot decrypt message");
 
@@ -834,12 +898,12 @@ impl<T: MsgState + Debug> Debug for MsgTaskRequest<T> {
 impl<T: MsgState + Debug> Debug for MsgTaskResult<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EncryptedMsgTaskResult")
-        .field("from", &self.from)
-        .field("to", &self.to)
-        .field("task", &self.task)
-        .field("status", &self.status)
-        .field("body", &self.body)
-        .field("metadata", &self.metadata)
-        .finish()
+            .field("from", &self.from)
+            .field("to", &self.to)
+            .field("task", &self.task)
+            .field("status", &self.status)
+            .field("body", &self.body)
+            .field("metadata", &self.metadata)
+            .finish()
     }
 }

@@ -1,29 +1,44 @@
 use clap::Parser;
 use openssl::x509::X509;
 
-use std::{net::SocketAddr, process::exit, collections::HashMap, fs::read_to_string, str::FromStr, path::{Path, PathBuf}};
+use std::{
+    collections::HashMap,
+    fs::read_to_string,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    process::exit,
+    str::FromStr,
+};
 
 use axum::http::HeaderValue;
 use hyper::Uri;
 use serde::Deserialize;
-use tracing::{info, debug};
+use tracing::{debug, info};
 
-use crate::{errors::SamplyBeamError, beam_id::{BeamId, ProxyId, AppId, self, BrokerId}};
+use crate::{
+    beam_id::{self, AppId, BeamId, BrokerId, ProxyId},
+    errors::SamplyBeamError,
+};
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     pub broker_uri: Uri,
     pub broker_host_header: HeaderValue,
     pub bind_addr: SocketAddr,
     pub proxy_id: ProxyId,
-    pub api_keys: HashMap<AppId,ApiKey>,
+    pub api_keys: HashMap<AppId, ApiKey>,
     pub tls_ca_certificates: Vec<X509>,
 }
 
 pub type ApiKey = String;
 
-#[derive(Parser,Debug)]
-#[clap(name("🌈 Samply.Beam.Proxy"), version, arg_required_else_help(true), after_help(crate::config_shared::CLAP_FOOTER))]
+#[derive(Parser, Debug)]
+#[clap(
+    name("🌈 Samply.Beam.Proxy"),
+    version,
+    arg_required_else_help(true),
+    after_help(crate::config_shared::CLAP_FOOTER)
+)]
 pub struct CliArgs {
     /// Local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8081").unwrap())]
@@ -32,7 +47,7 @@ pub struct CliArgs {
     /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
     #[clap(long, env, value_parser)]
     pub tls_ca_certificates_dir: Option<PathBuf>,
-    
+
     /// The broker's base URL, e.g. https://broker23.beam.samply.de
     #[clap(long, env, value_parser)]
     pub broker_url: Uri,
@@ -50,8 +65,8 @@ pub struct CliArgs {
     rootcert_file: PathBuf,
 
     /// (included for technical reasons)
-    #[clap(long,hide(true))]
-    test_threads: Option<String>
+    #[clap(long, hide(true))]
+    test_threads: Option<String>,
 }
 
 pub const APP_PREFIX: &str = "APP";
@@ -61,15 +76,18 @@ pub const APP_PREFIX: &str = "APP";
 /// APP_0_KEY=App1Secret
 /// APP_1_ID=app2
 /// APP_1_KEY=App2Secret
-fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBeamError>{
-    let vars = std::env::vars().collect::<HashMap<String,ApiKey>>();
+fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBeamError> {
+    let vars = std::env::vars().collect::<HashMap<String, ApiKey>>();
     let mut api_keys = HashMap::new();
     let mut i = 0;
     while let Some(app_id) = vars.get(&format!("{APP_PREFIX}_{i}_ID")) {
         if let Some(api_key) = vars.get(&format!("{APP_PREFIX}_{i}_KEY")) {
             let app_id = AppId::new(&format!("{app_id}.{proxy_id}"))?;
             if api_key.is_empty() {
-                return Err(SamplyBeamError::ConfigurationFailed(format!("Unable to assign empty API key for client {}", app_id)));
+                return Err(SamplyBeamError::ConfigurationFailed(format!(
+                    "Unable to assign empty API key for client {}",
+                    app_id
+                )));
             }
             api_keys.insert(app_id, api_key.clone());
         }
@@ -79,35 +97,48 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId,ApiKey>,SamplyBeamE
 }
 
 impl crate::config::Config for Config {
-    fn load() -> Result<Config,SamplyBeamError> {
+    fn load() -> Result<Config, SamplyBeamError> {
         let cli_args = CliArgs::parse();
         BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
-        let proxy_id = ProxyId::new(&cli_args.proxy_id)
-            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Invalid Beam ID \"{}\" supplied: {}", cli_args.proxy_id, e)))?;
+        let proxy_id = ProxyId::new(&cli_args.proxy_id).map_err(|e| {
+            SamplyBeamError::ConfigurationFailed(format!(
+                "Invalid Beam ID \"{}\" supplied: {}",
+                cli_args.proxy_id, e
+            ))
+        })?;
         let api_keys = parse_apikeys(&proxy_id)?;
         if api_keys.is_empty() {
             return Err(SamplyBeamError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {0}_0_ID=<clientname>, {0}_0_KEY=<key>", APP_PREFIX)));
         }
-        let tls_ca_certificates = crate::crypto::load_certificates_from_dir(cli_args.tls_ca_certificates_dir)
-            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory: {}", e)))?;
+        let tls_ca_certificates = crate::crypto::load_certificates_from_dir(
+            cli_args.tls_ca_certificates_dir,
+        )
+        .map_err(|e| {
+            SamplyBeamError::ConfigurationFailed(format!(
+                "Unable to read from TLS CA directory: {}",
+                e
+            ))
+        })?;
         let config = Config {
             broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
             broker_uri: cli_args.broker_url,
             bind_addr: cli_args.bind_addr,
             proxy_id,
             api_keys,
-            tls_ca_certificates
+            tls_ca_certificates,
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)
     }
 }
 
-fn uri_to_host_header(uri: &Uri) -> Result<HeaderValue,SamplyBeamError> {
-    let hostname: String = uri.host()
-        .ok_or(SamplyBeamError::WrongBrokerUri("URI's host is empty."))?.into();
+fn uri_to_host_header(uri: &Uri) -> Result<HeaderValue, SamplyBeamError> {
+    let hostname: String = uri
+        .host()
+        .ok_or(SamplyBeamError::WrongBrokerUri("URI's host is empty."))?
+        .into();
     let port = match uri.port() {
-        Some(p) => format!(":{}",p),
+        Some(p) => format!(":{}", p),
         None => String::from(""),
     };
     let host_header = hostname + &port;

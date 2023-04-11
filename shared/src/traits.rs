@@ -1,4 +1,9 @@
-use axum::{async_trait, extract::{FromRequest, Query, Path, FromRequestParts, self}, BoxError, http::StatusCode, RequestPartsExt};
+use axum::{
+    async_trait,
+    extract::{self, FromRequest, FromRequestParts, Path, Query},
+    http::StatusCode,
+    BoxError, RequestPartsExt,
+};
 use fundu::DurationParser;
 use http::request::Parts;
 
@@ -11,7 +16,7 @@ struct HowLongToBlockQueryExtractor {
 }
 
 #[test]
-fn test_duration_parsing() { 
+fn test_duration_parsing() {
     let mut parser = DurationParser::default();
     let parser = parser.default_unit(fundu::TimeUnit::MilliSecond);
     assert_eq!(parser.parse("1234s").unwrap().as_millis(), 1234000);
@@ -21,7 +26,7 @@ fn test_duration_parsing() {
 #[async_trait]
 impl<S> FromRequestParts<S> for HowLongToBlock
 where
-S: Send + Sync
+    S: Send + Sync,
 {
     type Rejection = (StatusCode, &'static str);
 
@@ -46,7 +51,7 @@ S: Send + Sync
 #[async_trait]
 impl<S> FromRequestParts<S> for MyUuid
 where
-S: Send + Sync
+    S: Send + Sync,
 {
     type Rejection = (StatusCode, &'static str);
 
