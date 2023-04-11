@@ -1,3 +1,7 @@
+# Samply.Beam 0.6.1 -- 2023-04-11
+
+This minor easter update is just a maintainance update. We updated our time-parsing dependency [fundu](https://crates.io/crates/fundu) to the next major version and fixed a bug in our CI/CD pipeline. With this fix, the project description is now correctly sent to Docker Hub. Internally, we improved the formatting of the source code.
+
 # Samply.Beam 0.6.0 -- 2023-03-30
 
 Samply.Beam version 0.6.0 represents another major milestone in the Beam development roadmap. We improved our network communication sizes by more than a factor of two, added (experimental) Server-Sent-Events for more efficient communication and heavily refactored the codebase to provide better maintainability and robustness. For all times, i.e. `wait_time` calls and BeamTask's `ttl` (time-to-live) field, the unit of time can be specified. This comes at the cost of an external API change: please adapt your applications to send the `ttl` as a string. Of course, this release, again, contains a lot of quality-of-life improvements regarding logging, building, development setups, etc. The following changelog gives more details.
