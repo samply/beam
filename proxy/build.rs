@@ -22,4 +22,21 @@ fn main() {
     build_data::set_BUILD_TIME();
     build_data::no_debug_rebuilds();
     println!("cargo:rustc-env=SAMPLY_USER_AGENT=Samply.Beam.{}/{}", env!("CARGO_PKG_NAME"), version());
+
+    if cfg!(feature = "monitor") {
+        use std::process::Command;
+        std::env::set_current_dir("./monitor").expect("monitor directory has been deleted");
+        Command::new("npm")
+            .arg("install")
+            .spawn()
+            .expect("npm needs to be installed to compile monitoring feature")
+            .wait()
+            .expect("Failed to run npm install command");
+        Command::new("npm")
+            .args([ "run", "build" ])
+            .spawn()
+            .expect("npm needs to be installed to compile monitoring feature")
+            .wait()
+            .expect("Failed to run npm run build command");
+    }
 }

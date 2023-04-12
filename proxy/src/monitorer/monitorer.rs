@@ -24,10 +24,10 @@ use tokio::sync::broadcast::{self, Receiver, Sender};
 use tracing::{error, info};
 use axum_extra::extract::cookie::CookieJar;
 
-pub async fn monitor(s: ConnectInfo<SocketAddr>, req: Request<Body>, next: Next<Body>) -> Response {
-    // Maybe use this to log everthing
-    todo!()
-}
+// pub async fn monitor(s: ConnectInfo<SocketAddr>, req: Request<Body>, next: Next<Body>) -> Response {
+//     // Maybe use this to log everthing
+//     todo!()
+// }
 
 #[derive(RustEmbed)]
 #[folder = "dist"]
@@ -110,7 +110,7 @@ impl Default for Monitorer {
     }
 }
 
-pub static MONITORER: Lazy<Monitorer> = Lazy::new(|| Monitorer::default());
+pub(crate) static MONITORER: Lazy<Monitorer> = Lazy::new(|| Monitorer::default());
 
 impl Monitorer {
     fn get_receiver(&self) -> Receiver<MonitoringUpdate> {

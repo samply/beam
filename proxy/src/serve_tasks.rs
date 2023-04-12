@@ -21,7 +21,7 @@ use shared::{
 use tokio::io::BufReader;
 use tracing::{debug, error, warn, trace, info};
 
-use crate::{auth::AuthenticatedApp, monitor::{MONITORER, self}};
+use crate::{auth::AuthenticatedApp, monitor};
 
 #[derive(Clone, FromRef)]
 struct TasksState {
@@ -134,7 +134,7 @@ async fn handler_tasks_nostream(
     if !bytes.is_empty() {
         if let Ok(json) = serde_json::from_slice::<Value>(&bytes) {
             let json = to_server_error(validate_and_decrypt(json).await)?;
-            MONITORER.send((&parts, &json));
+            monitor!((&parts, &json));
             trace!("Decrypted Msg: {:#?}", json);
             bytes = serde_json::to_vec(&json).unwrap().into();
             trace!(
@@ -256,7 +256,7 @@ async fn handler_tasks_stream(
                         };
                         let json = match validate_and_decrypt(json).await {
                             Ok(json) => {
-                                MONITORER.send((&parts, &json));
+                                monitor!((&parts, &json));
                                 json
                             },
                             Err(err) => {
@@ -420,7 +420,7 @@ async fn encrypt_request(
         }
     };
 
-    MONITORER.send((&parts, &msg));
+    monitor!((&parts, &msg));
     // Sanity/security checks: From address sane?
     if msg.get_from() != sender {
         return Err(ERR_FAKED_FROM);

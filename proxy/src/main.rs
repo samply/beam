@@ -18,7 +18,7 @@ mod serve_health;
 mod serve_tasks;
 mod banner;
 mod crypto;
-mod monitor;
+mod monitorer;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
