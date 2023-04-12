@@ -26,6 +26,7 @@ fn main() {
     if cfg!(feature = "monitor") {
         use std::process::Command;
         std::env::set_current_dir("./monitor").expect("monitor directory has been deleted");
+        println!("cargo:warning={:?}", std::env::vars().collect::<Vec<_>>());
         Command::new("npm")
             .arg("install")
             .spawn()
