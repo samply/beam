@@ -85,7 +85,7 @@ jobs:
         with:
           use-cross: ${{ env.is_cross }}
           command: build
-          args: --target ${{ env.rustarch }} ${{ env.profilestr }}
+          args: --target ${{ env.rustarch }} ${{ env.profilestr }} --all-features
       - name: Upload Artifact
         uses: actions/upload-artifact@v3
         with:
