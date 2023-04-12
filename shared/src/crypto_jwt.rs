@@ -133,7 +133,7 @@ pub async fn extract_jwt<T: DeserializeOwned + Serialize>(
 
 pub const JWT_VERIFICATION_OPTIONS: Lazy<VerificationOptions> = Lazy::new(|| VerificationOptions {
     accept_future: true,
-    max_token_length: Some(1024 * 1024 * 10), //10MB
+    max_token_length: Some(1024 * 1024 * 100), //100MB
     ..Default::default()
 });
 
