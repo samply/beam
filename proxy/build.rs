@@ -21,9 +21,9 @@ fn main() {
     build_data::set_BUILD_DATE();
     build_data::set_BUILD_TIME();
     build_data::no_debug_rebuilds();
-    println!("cargo:rustc-env=SAMPLY_USER_AGENT=Samply.Beam.{}/{}", env!("CARGO_PKG_NAME"), version());
 
-    if cfg!(feature = "monitor") {
+    // Compile the frontend with npm but not when we are using cross in the CI because we can compile it ahead of time and dont need to install npm in the docker containers that cross will spawn
+    if cfg!(feature = "monitor") && option_env!("CROSS_RUNNER").is_none() {
         use std::process::Command;
         std::env::set_current_dir("./monitor").expect("monitor directory has been deleted");
         println!("cargo:warning={:?}", std::env::vars().collect::<Vec<_>>());
