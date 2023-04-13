@@ -177,15 +177,27 @@ impl Msg for MsgEmpty {
     }
 }
 
+// Notes:
+// Shortest connection would be from beam-app to broker to beam-app without hops to the proxies
+// For beam connect this would enable things like websockets maybe
+// Beam connect could work in the future something like https://github.com/qwj/python-proxy supporting all kinds of protocols but using sockets under the hood
+// Broker would just need to forward socks connections like https://github.com/EAimTY/socks5-server/blob/master/socks5-server/examples/simple_socks5.rs
+#[derive(Debug, Deserialize, Serialize)]
+// This should maybe also be strictly serialized
+pub struct MsgSocketRequest {
+    from: AppOrProxyId,
+    to: AppOrProxyId,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MessageType<State>
 where
     State: MsgState,
 {
-    // Maybe add MessageSigned and Encrypted versions
     MsgTaskRequest(MsgTaskRequest<State>),
     MsgTaskResult(MsgTaskResult<State>),
+    // MsgSocketRequest(MsgSocketRequest),
     MsgEmpty(MsgEmpty),
 }
 
