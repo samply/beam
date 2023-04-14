@@ -473,19 +473,84 @@ mod serialize_time {
     }
 }
 
+// https://github.com/serde-rs/json/issues/360#issuecomment-330095360
+mod serde_base64 {
+    use serde::{Serializer, de, ser, Deserialize, Deserializer};
+    use openssl::base64;
+
+    pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+        where S: Serializer
+    {
+        serializer.serialize_str(&base64::encode_block(bytes))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+        where D: Deserializer<'de>
+    {
+        base64::decode_block(<&str>::deserialize(deserializer)?).map_err(de::Error::custom)
+    }
+
+    pub(crate) mod nested {
+        use serde::ser::SerializeSeq;
+
+        use super::{ser, de, Serializer, Deserializer, base64};
+
+        pub fn serialize<S>(bytes: &[Vec<u8>], serializer: S) -> Result<S::Ok, S::Error>
+            where S: Serializer
+        {
+            let mut seq_serializer = serializer.serialize_seq(Some(bytes.len()))?;
+            for byte_seq in bytes {
+                seq_serializer.serialize_element(&base64::encode_block(&byte_seq))?;
+            }
+            seq_serializer.end()
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Vec<u8>>, D::Error>
+            where D: Deserializer<'de>
+        {
+            <Vec<&str> as serde::Deserialize>::deserialize(deserializer)?
+                .into_iter()
+                .map(base64::decode_block)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(de::Error::custom)
+        }
+    }
+}
+
 pub trait MsgState: Serialize + Eq + PartialEq + Default {}
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct Encrypted {
+    #[serde(with = "serde_base64" )]
     pub encrypted: Vec<u8>,
+    #[serde(with = "serde_base64::nested" )]
     pub encryption_keys: Vec<Vec<u8>>,
+}
+
+impl Debug for Encrypted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Encrypted")
+            .field("encrypted len", &self.encrypted.len())
+            .field("encryption_keys", &self.encryption_keys)
+            .finish()
+    }
 }
 
 impl MsgState for Encrypted {}
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct Plain {
     pub body: Option<String>,
+}
+
+impl Debug for Plain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut formated = f.debug_struct("Plain");
+        match &self.body {
+            Some(body) if body.len() < 1000 => formated.field("body len", &body.len()),
+            _ => formated.field("body", &self.body),
+        }.finish()
+    }
 }
 
 impl MsgState for Plain {}
@@ -499,7 +564,7 @@ impl<T: Into<String>> From<T> for Plain {
 }
 
 // When const generic enums get stableized this could get beautiful
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MsgTaskRequest<State = Plain>
 where
     State: MsgState,
@@ -581,7 +646,7 @@ impl DecryptableMsg for MsgTaskRequest<Encrypted> {
 pub type EncryptedMsgTaskRequest = MsgTaskRequest<Encrypted>;
 pub type EncryptedMsgTaskResult = MsgTaskResult<Encrypted>;
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct MsgTaskResult<State = Plain>
 where
     State: MsgState,
@@ -878,32 +943,5 @@ mod tests {
 
         assert_eq!(msg_p1_decr, msg_p2_decr);
         assert_eq!(msg, msg_p1_decr);
-    }
-}
-
-impl<T: MsgState + Debug> Debug for MsgTaskRequest<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EncryptedMsgTaskRequest")
-            .field("id", &self.id)
-            .field("from", &self.from)
-            .field("to", &self.to)
-            .field("body", &self.body)
-            .field("expire", &self.expire)
-            .field("failure_strategy", &self.failure_strategy)
-            .field("metadata", &self.metadata)
-            .finish()
-    }
-}
-
-impl<T: MsgState + Debug> Debug for MsgTaskResult<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EncryptedMsgTaskResult")
-            .field("from", &self.from)
-            .field("to", &self.to)
-            .field("task", &self.task)
-            .field("status", &self.status)
-            .field("body", &self.body)
-            .field("metadata", &self.metadata)
-            .finish()
     }
 }
