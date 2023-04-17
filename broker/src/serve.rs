@@ -28,7 +28,6 @@ pub(crate) async fn serve(health: Arc<RwLock<Health>>) -> anyhow::Result<()> {
         .merge(serve_pki::router())
         .merge(serve_health::router(health))
         .layer(axum::middleware::from_fn(shared::middleware::log))
-        .layer(axum::middleware::from_fn(shared::middleware::check_client_version))
         .layer(axum::middleware::map_response(banner::set_server_header));
 
     info!(

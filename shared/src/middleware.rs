@@ -81,9 +81,10 @@ pub async fn log(
     let method = req.method().clone();
     let uri = req.uri().clone();
     let ip = get_ip(&req, &info);
+    let user_agent = req.headers().get(header::USER_AGENT).cloned();
 
     let mut info = LoggingInfo::new(method, uri, ip);
-    // This channel may or may not recieve an AppOrProxyId from verify_with_extended_header
+    // This channel may or may not receive an AppOrProxyId from verify_with_extended_header
     let (tx, mut rx) = oneshot::channel();
     req.extensions_mut().insert(tx);
 
@@ -94,7 +95,26 @@ pub async fn log(
         info.set_proxy_name(proxy);
     }
 
-    let line = info.get_log();
+    let mut line = info.get_log();
+
+    if let Some(their_version_header) = user_agent {
+        let warn = match compare_version(&their_version_header) {
+            BeamWithMatchingVersion | NotBeam => {
+                // we're happy
+                None
+            },
+            BeamWithMismatchingVersion(their_ver) => {
+                Some(format!(" WARNING: Client had mismatching version \"{their_ver}\""))
+            },
+            BeamWithInvalidVersion(their_ver) => {
+                Some(format!(" WARNING: Client had INVALID version \"{their_ver}\""))
+            },
+        };
+        if let Some(warn) = warn {
+            line.push_str(&warn);
+        }
+    }
+
     if resp.status().is_success() {
         info!(target: "in", "{}", line);
     } else {
@@ -110,27 +130,4 @@ fn get_ip(req: &Request<Body>, info: &SocketAddr) -> IpAddr {
         .and_then(|v| v.split(',').next())
         .and_then(|v| v.parse().ok())
         .unwrap_or(info.ip())
-}
-
-pub async fn check_client_version(
-    req: Request<Body>,
-    next: Next<Body>,
-) -> Response {
-    let headers = req.headers();
-
-    if let Some(their_version_header) = headers.get(header::USER_AGENT) {
-        match compare_version(their_version_header) {
-            BeamWithMatchingVersion | NotBeam => {
-                // we're happy
-            },
-            BeamWithMismatchingVersion(their_ver) => {
-                warn!("Beam.Proxy has mismatching version: {their_ver}");
-            },
-            BeamWithInvalidVersion(their_ver) => {
-                error!("Beam.Proxy has invalid version: {their_ver}");
-            },
-        }
-    }
-
-    next.run(req).await
 }
