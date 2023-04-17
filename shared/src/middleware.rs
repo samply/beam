@@ -16,9 +16,9 @@ use http::{
 };
 use hyper::Body;
 use tokio::sync::{oneshot, Mutex};
-use tracing::{info, instrument, span, warn, Level};
+use tracing::{info, instrument, span, warn, Level, error};
 
-use crate::beam_id::AppOrProxyId;
+use crate::{beam_id::AppOrProxyId, compare_client_server_version::{compare_version, Verdict::*}};
 
 const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 
@@ -110,4 +110,27 @@ fn get_ip(req: &Request<Body>, info: &SocketAddr) -> IpAddr {
         .and_then(|v| v.split(',').next())
         .and_then(|v| v.parse().ok())
         .unwrap_or(info.ip())
+}
+
+pub async fn check_client_version(
+    req: Request<Body>,
+    next: Next<Body>,
+) -> Response {
+    let headers = req.headers();
+
+    if let Some(their_version_header) = headers.get(header::USER_AGENT) {
+        match compare_version(their_version_header) {
+            BeamWithMatchingVersion | NotBeam => {
+                // we're happy
+            },
+            BeamWithMismatchingVersion(their_ver) => {
+                warn!("Beam.Proxy has mismatching version: {their_ver}");
+            },
+            BeamWithInvalidVersion(their_ver) => {
+                error!("Beam.Proxy has invalid version: {their_ver}");
+            },
+        }
+    }
+
+    next.run(req).await
 }

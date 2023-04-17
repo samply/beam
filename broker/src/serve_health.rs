@@ -3,7 +3,6 @@ use std::sync::Arc;
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 use hyper::{HeaderMap, header};
 use serde::Serialize;
-use shared::compare_client_server_version::{compare_version, Verdict::*};
 use tokio::sync::RwLock;
 use tracing::{warn, debug, error};
 
@@ -28,22 +27,8 @@ pub(crate) fn router(health: Arc<RwLock<Health>>) -> Router {
 
 // GET /v1/health
 async fn handler<'a>(
-    headers: HeaderMap,
     State(state): State<Arc<RwLock<Health>>>
 ) -> (StatusCode, Json<HealthOutput<'a>>) {
-    if let Some(their_version_header) = headers.get(header::USER_AGENT) {
-        match compare_version(their_version_header) {
-            BeamWithMatchingVersion | NotBeam => {
-                // we're happy
-            },
-            BeamWithMismatchingVersion(their_ver) => {
-                warn!("Beam.Proxy has mismatching version: {their_ver}");
-            },
-            BeamWithInvalidVersion(their_ver) => {
-                error!("Beam.Proxy has invalid version: {their_ver}");
-            },
-        }
-    }
     let state = state.read().await;
     let (statuscode, summary, status_vault) = match state.vault {
         VaultStatus::Ok => (StatusCode::OK, Verdict::Healthy, "ok"),
