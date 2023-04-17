@@ -21,7 +21,6 @@ pub(crate) async fn serve(
     let app = router_tasks
         .merge(router_health)
         .layer(axum::middleware::from_fn(shared::middleware::log))
-        .layer(axum::middleware::from_fn(shared::middleware::check_client_version))
         .layer(axum::middleware::map_response(banner::set_server_header));
 
     let mut apps_joined = String::new();

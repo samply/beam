@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
-use hyper::{HeaderMap, header};
 use serde::Serialize;
 use tokio::sync::RwLock;
-use tracing::{warn, debug, error};
 
 use crate::health::{Health, VaultStatus, Verdict};
 
