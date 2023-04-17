@@ -15,7 +15,7 @@ echo '
 
 # With a jwt size limit of 100MB the max size for a message body is about 55MB
 # because the encrypted body gets base64 encoded and the message gets base64 encoded again
-# when converted to a jwt when being send to the broker.
+# when converted to a jwt when being sent to the broker.
 # Each resulting in a 1.33 fold increase in size, which leads to a roughly 1.75 fold size increase for each message
 dd if=/dev/zero bs=55M status=none count=1 | sed "s/\x0/A/g" >> $TASK
 
