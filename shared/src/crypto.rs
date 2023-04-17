@@ -24,7 +24,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime},
 };
-use tokio::sync::{mpsc, oneshot, RwLock};
+use tokio::{sync::{mpsc, oneshot, RwLock}, time::Instant};
 use tracing::{debug, error, info, warn};
 
 use crate::{
@@ -139,6 +139,7 @@ impl CertificateCache {
                     serials.len(),
                     serials
                 );
+                let mut oldest_cert: Option<&X509> = None;
                 for serial in serials {
                     debug!("Fetching certificate with serial {}", serial);
                     let x509 = cache.serial_to_x509.get(serial);
@@ -160,6 +161,13 @@ impl CertificateCache {
                                         "Certificate with serial {} successfully retrieved.",
                                         serial
                                     );
+                                    if let Some(old_cert) = oldest_cert {
+                                        if old_cert.not_after() > x509.not_after()  {
+                                            oldest_cert = Some(x509);
+                                        }
+                                    } else {
+                                        oldest_cert = Some(x509);
+                                    }
                                     result.push(CertificateCacheEntry::Valid(x509.clone()));
                                     valid += 1;
                                 }
@@ -167,6 +175,13 @@ impl CertificateCache {
                         }
                     }
                 }
+            if let Some(old_cert) = oldest_cert {
+                tokio::spawn(async {
+                    let expire_date = asn1_time_to_system_time(old_cert.not_after()).unwrap_or(SystemTime::now());
+                    tokio::time::sleep((expire_date.duration_since(SystemTime::now())).unwrap_or(Duration::from_secs(0))).await;
+                    // Invalidate cert in cache
+                });
+            }
             };
         } // Drop Read Locks
         if result.is_empty() {
