@@ -28,7 +28,7 @@ pub async fn main() -> anyhow::Result<()> {
     let config = config::CONFIG_PROXY.clone();
     let client = http_client::build(
         &config::CONFIG_SHARED.tls_ca_certificates,
-        Some(Duration::from_secs(30)),
+        Some(Duration::from_secs(120)),
         Some(Duration::from_secs(20)),
     )
     .map_err(SamplyBeamError::HttpProxyProblem)?;
