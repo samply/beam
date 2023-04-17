@@ -353,7 +353,6 @@ pub async fn sign_request(
             error!("Crypto failed: {}", e);
             ERR_INTERNALCRYPTO
         })?;
-    info!("New body size: {}", token_without_extended_signature.len());
     let (_, sig) = token_without_extended_signature
         .rsplit_once('.')
         .ok_or_else(|| {
