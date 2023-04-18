@@ -139,7 +139,6 @@ impl CertificateCache {
                     serials.len(),
                     serials
                 );
-                let mut oldest_cert: Option<&X509> = None;
                 for serial in serials {
                     debug!("Fetching certificate with serial {}", serial);
                     let x509 = cache.serial_to_x509.get(serial);
@@ -161,13 +160,6 @@ impl CertificateCache {
                                         "Certificate with serial {} successfully retrieved.",
                                         serial
                                     );
-                                    if let Some(old_cert) = oldest_cert {
-                                        if old_cert.not_after() > x509.not_after()  {
-                                            oldest_cert = Some(x509);
-                                        }
-                                    } else {
-                                        oldest_cert = Some(x509);
-                                    }
                                     result.push(CertificateCacheEntry::Valid(x509.clone()));
                                     valid += 1;
                                 }
@@ -175,13 +167,7 @@ impl CertificateCache {
                         }
                     }
                 }
-            if let Some(old_cert) = oldest_cert {
-                tokio::spawn(async {
-                    let expire_date = asn1_time_to_system_time(old_cert.not_after()).unwrap_or(SystemTime::now());
-                    tokio::time::sleep((expire_date.duration_since(SystemTime::now())).unwrap_or(Duration::from_secs(0))).await;
-                    // Invalidate cert in cache
-                });
-            }
+            
             };
         } // Drop Read Locks
         if result.is_empty() {
@@ -263,6 +249,7 @@ impl CertificateCache {
         );
 
         let mut new_count = 0;
+        let mut oldest_cert: Option<X509> = None;
         //TODO Check for validity
         for serial in new_certificate_serials {
             debug!("Checking certificate with serial {serial}");
@@ -296,6 +283,13 @@ impl CertificateCache {
                     continue;
                 }
             };
+            if let Some(ref old_cert) = oldest_cert {
+                if old_cert.not_after() > opensslcert.not_after()  {
+                    oldest_cert = Some(opensslcert.clone());
+                }
+            } else {
+                oldest_cert = Some(opensslcert.clone());
+            }
             let commonnames: Vec<ProxyId> = opensslcert
                 .subject_name()
                 .entries()
@@ -345,6 +339,31 @@ impl CertificateCache {
                 debug!("Added certificate {} for cname {}", serial, cn);
                 new_count += 1;
             }
+        }
+        if let Some(old_cert) = oldest_cert {
+            tokio::spawn(async move {
+                // Sleep until expired
+                let expire_date = asn1_time_to_system_time(old_cert.not_after()).unwrap_or(SystemTime::now());
+                tokio::time::sleep((expire_date.duration_since(SystemTime::now())).unwrap_or(Duration::from_secs(0))).await;
+                // Invalidate cert in cache
+                {
+                    let mut cache_lock = CERT_CACHE.write().await;
+                    let Some(entry) = cache_lock
+                        .serial_to_x509
+                        .values_mut()
+                        .find(|other| if let CertificateCacheEntry::Valid(cert) = other {
+                            cert == &old_cert
+                        } else {
+                            false
+                        }
+                    ) else {
+                        warn!("Certificate that has expired is no longer in Cache: {old_cert:?}");
+                        return;
+                    };
+                    *entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate);
+                }
+                // Do the same for next oldest cert
+            });
         }
         Ok(new_count)
     }
