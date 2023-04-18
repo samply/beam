@@ -60,6 +60,9 @@ pub mod examples;
 
 pub mod sse_event;
 
+// Reexports
+pub use openssl;
+
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MyUuid(Uuid);
 impl MyUuid {

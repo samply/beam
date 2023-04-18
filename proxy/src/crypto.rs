@@ -12,7 +12,7 @@ use shared::{
     http_client::SamplyHttpClient,
     EncryptedMessage, MsgEmpty,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, error};
 
 use crate::serve_tasks::sign_request;
 
@@ -98,6 +98,12 @@ impl GetCerts for GetCertsFromBroker {
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError> {
         debug!("Retrieving im ca certificate ...");
         self.query("/v1/pki/certs/im-ca").await
+    }
+
+    async fn on_cert_expired(&self, _cert: shared::openssl::x509::X509) {
+        // TODO Tobias will find a smart solution ;)
+        error!("Cert expired restarting");
+        std::process::exit(13);
     }
 }
 

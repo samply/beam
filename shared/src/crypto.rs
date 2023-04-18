@@ -103,6 +103,7 @@ pub trait GetCerts: Sync + Send {
     async fn certificate_list(&self) -> Result<Vec<String>, SamplyBeamError>;
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String, SamplyBeamError>;
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError>;
+    async fn on_cert_expired(&self, _cert: X509) {}
 }
 
 impl CertificateCache {
@@ -446,7 +447,11 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
             };
             // Sleep until expired
             let expire_date = asn1_time_to_system_time(old_cert.not_after()).unwrap_or(SystemTime::now());
-            tokio::time::sleep((expire_date.duration_since(SystemTime::now())).unwrap_or(Duration::from_secs(0))).await;
+            let duration = (expire_date.duration_since(SystemTime::now())).unwrap_or(Duration::from_secs(0));
+            let secs = duration.as_secs();
+            info!("Oldest cert will expire in: {}d {}h {}m {}s", secs / (24 * 60 * 60), (secs % (24 * 60 * 60)) / (60 * 60), (secs % (60 * 60)) / 60, secs % 60);
+            tokio::time::sleep(duration).await;
+            info!("Invalidating old cert {:?} now", old_cert);
             // Invalidate cert in cache
             {
                 let mut cache_lock = cc3.write().await;
@@ -459,11 +464,12 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
                         false
                     }
                 ) else {
-                    warn!("Certificate that has expired is no longer in Cache: {old_cert:?}");
+                    warn!("Certificate that has expired was no longer in cache: {old_cert:?}");
                     return;
                 };
                 *entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate);
             }
+            CERT_GETTER.get().unwrap().on_cert_expired(old_cert).await;
         }
     });
     cc
