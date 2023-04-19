@@ -100,7 +100,7 @@ pub(crate) struct CertificateCache {
 
 #[async_trait]
 pub trait GetCerts: Sync + Send {
-    async fn certificate_list(&self) -> Result<Vec<String>, SamplyBeamError>;
+    async fn certificate_list_via_network(&self) -> Result<Vec<String>, SamplyBeamError>;
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String, SamplyBeamError>;
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError>;
     async fn on_cert_expired(&self, _expired_cert: X509) {}
@@ -119,7 +119,7 @@ impl CertificateCache {
         })
     }
 
-    pub async fn wait_and_remove_oldest_cert(cache: Arc<RwLock<Self>>) {
+    pub async fn wait_and_remove_oldest_cert(cache: Arc<RwLock<Self>>, abort_trigger: &mut mpsc::Receiver<()>) {
         // Get oldest cert, i.e. cert that will expire soonest
         let oldest_cert = cache.read().await
             .serial_to_x509
@@ -151,7 +151,11 @@ impl CertificateCache {
         let duration = expire_date.duration_since(SystemTime::now()).unwrap_or(Duration::from_secs(0)); // If 2 certs expire at the same time we want to expire them immediately
         let secs = duration.as_secs();
         info!("Oldest certificate will expire in: {}d {}h {}m {}s", secs / (24 * 60 * 60), (secs % (24 * 60 * 60)) / (60 * 60), (secs % (60 * 60)) / 60, secs % 60);
-        tokio::time::sleep(duration).await;
+        let aborted = tokio::select! {
+            _ = tokio::time::sleep(duration) => false,
+            _ = abort_trigger.recv() => true
+        };
+        if aborted { return; }
         info!("Invalidating old cert now: {:?}", oldest_cert);
         // Invalidate cert in cache
         {
@@ -288,8 +292,8 @@ impl CertificateCache {
     }
 
     async fn update_certificates_mut(&mut self) -> Result<usize, SamplyBeamError> {
-        info!("Updating certificates ...");
-        let certificate_list = CERT_GETTER.get().unwrap().certificate_list().await?;
+        info!("Updating certificates via network ...");
+        let certificate_list = CERT_GETTER.get().unwrap().certificate_list_via_network().await?;
         let new_certificate_serials: Vec<&String> = {
             certificate_list
                 .iter()
@@ -442,8 +446,9 @@ pub fn init_cert_getter<G: GetCerts + 'static>(getter: G) {
     }
 }
 
-pub async fn get_serial_list() -> Result<Vec<String>, SamplyBeamError> {
-    CERT_GETTER.get().unwrap().certificate_list().await
+pub async fn get_serial_list() -> Vec<String> {
+    let cache = CERT_CACHE.read().await;
+    cache.serial_to_x509.keys().cloned().collect()
 }
 
 pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
@@ -452,12 +457,23 @@ pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
 
 #[dynamic(lazy)]
 pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
-    let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<usize, SamplyBeamError>>>(1);
-    let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
+    let (tx_refresh, mut rx_refresh) = mpsc::channel::<oneshot::Sender<Result<usize, SamplyBeamError>>>(1);
+    let (tx_newcerts, mut rx_newcerts) = mpsc::channel::<()>(1);
+    let cc = Arc::new(RwLock::new(CertificateCache::new(tx_refresh).unwrap()));
     let cc2 = cc.clone();
     let cc3: Arc<RwLock<CertificateCache>> = cc.clone();
     tokio::task::spawn(async move {
-        while let Some(sender) = rx.recv().await {
+        loop {
+            let sender = tokio::select! {
+                Some(sender) = rx_refresh.recv() => {
+                    debug!("Certificate cache refresh triggered by another component.");
+                    Some(sender)
+                },
+                _ = tokio::time::sleep(Duration::from_secs(60)) => {
+                    debug!("Certificate cache refresh after 60 seconds ...");
+                    None
+                }
+            };
             let mut locked_cache = cc2.write().await;
             let result = locked_cache.update_certificates_mut().await;
             match &result {
@@ -467,19 +483,24 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
                 Ok(count) => {
                     if *count > 0 {
                         info!("Added {count} new certificates.");
+                        if let Err(e) = tx_newcerts.send(()).await {
+                            warn!("Unable to inform cert expirer about a newly arrived certificate. Continuing.");
+                        }
                     } else {
                         info!("No new certificates have been found.");
                     }
                 }
             };
-            if let Err(_err) = sender.send(result) {
-                warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
+            if let Some(sender) = sender {
+                if let Err(_err) = sender.send(result) {
+                    warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
+                }
             }
         }
     });
     tokio::spawn(async move {
         loop {
-            CertificateCache::wait_and_remove_oldest_cert(cc3.clone()).await;
+            CertificateCache::wait_and_remove_oldest_cert(cc3.clone(), &mut rx_newcerts).await;
         }
     });
     cc
@@ -809,7 +830,7 @@ async fn test_invalidation() {
     struct DummyCertGetter;
     #[async_trait]
     impl GetCerts for DummyCertGetter {
-        async fn certificate_list(&self) ->  Result<Vec<String>, SamplyBeamError> {
+        async fn certificate_list_via_network(&self) ->  Result<Vec<String>, SamplyBeamError> {
             todo!()
         }
         async fn certificate_by_serial_as_pem(&self, _serial: &str) ->  Result<String, SamplyBeamError> {

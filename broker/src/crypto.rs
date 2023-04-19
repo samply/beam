@@ -211,8 +211,8 @@ impl GetCertsFromPki {
 
 #[async_trait]
 impl GetCerts for GetCertsFromPki {
-    async fn certificate_list(&self) -> Result<Vec<String>, SamplyBeamError> {
-        debug!("Getting Cert List");
+    async fn certificate_list_via_network(&self) -> Result<Vec<String>, SamplyBeamError> {
+        debug!("Getting Cert List via network");
         let resp = self
             .resilient_vault_request(
                 &Method::from_bytes("LIST".as_bytes()).unwrap(),
