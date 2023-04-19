@@ -446,15 +446,14 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
                 continue;
             };
             // Sleep until expired
-            let expire_date = asn1_time_to_system_time(oldest_cert.not_after()).unwrap_or(SystemTime::now());
-            let duration = (expire_date.duration_since(SystemTime::now()));
-            let duration = match duration {
-                Ok(x) => x,
+            let expire_date = match asn1_time_to_system_time(oldest_cert.not_after()) {
+                Ok(t) => t,
                 Err(e) => {
-                    error!("Unable to read a certificate's expiration date: {}. Cert expiration will not work until this application is restarted. Offending certificate: {:?}", e, oldest_cert);
+                    error!("Unable to read a certificate's expiration date: {:?}. Cert expiration will not work until this application is restarted. Offending certificate: {:?}", e, oldest_cert);
                     return;
                 }
             };
+            let duration = expire_date.duration_since(SystemTime::now()).unwrap_or(Duration::from_secs(0)); // If 2 certs expire at the same time we want to expire them immediately
             let secs = duration.as_secs();
             info!("Oldest certificate will expire in: {}d {}h {}m {}s", secs / (24 * 60 * 60), (secs % (24 * 60 * 60)) / (60 * 60), (secs % (60 * 60)) / 60, secs % 60);
             tokio::time::sleep(duration).await;
