@@ -101,7 +101,8 @@ impl GetCerts for GetCertsFromBroker {
     }
 
     async fn on_cert_expired(&self, expired_cert: shared::openssl::x509::X509) {
-        let own_cert = &self.crypto_conf
+        // We can't use our own `ConfigCrypto` here as it is only an intermidate config for getting initial certs from the broker
+        let own_cert = shared::crypto::get_own_crypto_material()
             .public
             .as_ref()
             .expect("Fatal error: Unable to read our own certificate.");
