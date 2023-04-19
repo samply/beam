@@ -180,7 +180,7 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
         .remove::<ProxyLogger>()
         .expect("Should be set by middleware")
         .send(header_claims.custom.from.clone())
-        .expect("Reciever still lives in middleware");
+        .expect("Receiver still lives in middleware");
 
     // Check extra digest
 

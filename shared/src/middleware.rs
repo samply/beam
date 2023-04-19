@@ -83,7 +83,7 @@ pub async fn log(
     let ip = get_ip(&req, &info);
 
     let mut info = LoggingInfo::new(method, uri, ip);
-    // This channel may or may not recieve an AppOrProxyId from verify_with_extended_header
+    // This channel may or may not receive an AppOrProxyId from verify_with_extended_header
     let (tx, mut rx) = oneshot::channel();
     req.extensions_mut().insert(tx);
 
