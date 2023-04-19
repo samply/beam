@@ -100,10 +100,17 @@ impl GetCerts for GetCertsFromBroker {
         self.query("/v1/pki/certs/im-ca").await
     }
 
-    async fn on_own_cert_expired(&self, _cert: shared::openssl::x509::X509) {
-        // TODO Tobias will find a smart solution ;)
-        error!("Own cert has just expired -- exiting.");
-        std::process::exit(13);
+    async fn on_cert_expired(&self, expired_cert: shared::openssl::x509::X509) {
+        let own_cert = &self.crypto_conf
+            .public
+            .as_ref()
+            .expect("Fatal error: Unable to read our own certificate.");
+        let own_cert = &own_cert.cert;
+        if expired_cert.serial_number() == own_cert.serial_number() {
+            // TODO Tobias will find a smart solution ;)
+            error!("Our own cert has just expired -- exiting.");
+            std::process::exit(13);
+        }
     }
 }
 
