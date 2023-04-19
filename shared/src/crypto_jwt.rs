@@ -176,6 +176,12 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
                 ERR_SIG
             })?;
 
+    req.extensions
+        .remove::<ProxyLogger>()
+        .expect("Should be set by middleware")
+        .send(header_claims.custom.from.clone())
+        .expect("Receiver still lives in middleware");
+
     // Check extra digest
 
     let custom = header_claims.custom;
@@ -241,12 +247,6 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
         msg,
         jwt: token_without_extended_signature.to_string(),
     };
-    req.extensions
-        .remove::<ProxyLogger>()
-        .expect("Should be set by middleware")
-        .send(msg_signed.get_from().clone())
-        .expect("Reciever still lives in middleware");
-
     Ok(msg_signed)
 }
 

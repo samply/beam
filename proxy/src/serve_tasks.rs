@@ -442,7 +442,7 @@ async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
 fn decrypt_msg<M: DecryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> {
     msg.decrypt(
         &AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()),
-        crypto::get_own_privkey(),
+        &crypto::get_own_crypto_material().privkey_rsa,
     )
 }
 
