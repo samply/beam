@@ -168,7 +168,6 @@ impl CertificateCache {
                         }
                     }
                 }
-            
             };
         } // Drop Read Locks
         if result.is_empty() {
