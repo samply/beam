@@ -103,7 +103,7 @@ pub trait GetCerts: Sync + Send {
     async fn certificate_list(&self) -> Result<Vec<String>, SamplyBeamError>;
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String, SamplyBeamError>;
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError>;
-    async fn on_cert_expired(&self, _cert: X509) {}
+    async fn on_own_cert_expired(&self, _cert: X509) {}
 }
 
 impl CertificateCache {
@@ -468,7 +468,7 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
                 };
                 *entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate);
             }
-            CERT_GETTER.get().unwrap().on_cert_expired(old_cert).await;
+            CERT_GETTER.get().unwrap().on_own_cert_expired(old_cert).await;
         }
     });
     cc

@@ -96,13 +96,13 @@ impl GetCerts for GetCertsFromBroker {
     }
 
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError> {
-        debug!("Retrieving im ca certificate ...");
+        debug!("Retrieving intermediate CA certificate ...");
         self.query("/v1/pki/certs/im-ca").await
     }
 
-    async fn on_cert_expired(&self, _cert: shared::openssl::x509::X509) {
+    async fn on_own_cert_expired(&self, _cert: shared::openssl::x509::X509) {
         // TODO Tobias will find a smart solution ;)
-        error!("Cert expired restarting");
+        error!("Own cert has just expired -- exiting.");
         std::process::exit(13);
     }
 }
