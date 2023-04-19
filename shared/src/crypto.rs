@@ -84,7 +84,7 @@ impl TryFrom<&X509> for ProxyCertInfo {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum CertificateCacheEntry {
     Valid(X509),
     Invalid(CertificateInvalidReason),
@@ -117,6 +117,60 @@ impl CertificateCache {
             root_cert: None,
             im_cert: None,
         })
+    }
+
+    pub async fn wait_and_remove_oldest_cert(cache: Arc<RwLock<Self>>) {
+        // Get oldest cert, i.e. cert that will expire soonest
+        let oldest_cert = cache.read().await
+            .serial_to_x509
+            .values()
+            .filter_map(|entry| if let CertificateCacheEntry::Valid(cert) = entry {
+                Some(cert)
+            } else {
+                None
+            })
+            .min_by(|cert_a, cert_b| cert_a.not_after().compare(cert_b.not_after()).unwrap_or_else(|err| {
+                error!("Got error sorting certs: {err}");
+                std::cmp::Ordering::Greater
+            }))
+            .cloned();
+        // if we dont have any certs yet, wait
+        let Some(oldest_cert) = oldest_cert else {
+            // An inefficient sleep is fine here as this will never be called once certs have been populated.
+            tokio::time::sleep(Duration::from_secs(20)).await;
+            return;
+        };
+        // Sleep until expired
+        let expire_date = match asn1_time_to_system_time(oldest_cert.not_after()) {
+            Ok(t) => t,
+            Err(e) => {
+                error!("Unable to read a certificate's expiration date: {:?}. Cert expiration will not work until this application is restarted. Offending certificate: {:?}", e, oldest_cert);
+                return;
+            }
+        };
+        let duration = expire_date.duration_since(SystemTime::now()).unwrap_or(Duration::from_secs(0)); // If 2 certs expire at the same time we want to expire them immediately
+        let secs = duration.as_secs();
+        info!("Oldest certificate will expire in: {}d {}h {}m {}s", secs / (24 * 60 * 60), (secs % (24 * 60 * 60)) / (60 * 60), (secs % (60 * 60)) / 60, secs % 60);
+        tokio::time::sleep(duration).await;
+        info!("Invalidating old cert now: {:?}", oldest_cert);
+        // Invalidate cert in cache
+        {
+            let mut cache_lock = cache.write().await;
+            let Some(entry) = cache_lock
+                .serial_to_x509
+                .values_mut()
+                .find(|other| if let CertificateCacheEntry::Valid(cert) = other {
+                    cert == &oldest_cert
+                } else {
+                    false
+                }
+            ) else {
+                error!("Unable to find expired certificate in our cache; this should not happen: {oldest_cert:?}. Cert expiration will not work until this application is restarted.");
+                return;
+            };
+            *entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate);
+        }
+        CERT_GETTER.get().unwrap().on_cert_expired(oldest_cert).await;
     }
 
     /// Searches cache for a certificate with the given ClientId. If not found, updates cache from central vault. If then still not found, return None
@@ -401,7 +455,7 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
     let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<usize, SamplyBeamError>>>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
     let cc2 = cc.clone();
-    let cc3 = cc.clone();
+    let cc3: Arc<RwLock<CertificateCache>> = cc.clone();
     tokio::task::spawn(async move {
         while let Some(sender) = rx.recv().await {
             let mut locked_cache = cc2.write().await;
@@ -425,57 +479,7 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
     });
     tokio::spawn(async move {
         loop {
-            // Get oldest cert, i.e. cert that will expire soonest
-            let oldest_cert = cc3.read().await
-                .serial_to_x509
-                .values()
-                .filter_map(|entry| if let CertificateCacheEntry::Valid(cert) = entry {
-                    Some(cert)
-                } else {
-                    None
-                })
-                .min_by(|cert_a, cert_b| cert_a.not_after().compare(cert_b.not_after()).unwrap_or_else(|err| {
-                    error!("Got error sorting certs: {err}");
-                    std::cmp::Ordering::Greater
-                }))
-                .cloned();
-            // if we dont have any certs yet, wait
-            let Some(oldest_cert) = oldest_cert else {
-                // An inefficient sleep is fine here as this will never be called once certs have been populated.
-                tokio::time::sleep(Duration::from_secs(20)).await;
-                continue;
-            };
-            // Sleep until expired
-            let expire_date = match asn1_time_to_system_time(oldest_cert.not_after()) {
-                Ok(t) => t,
-                Err(e) => {
-                    error!("Unable to read a certificate's expiration date: {:?}. Cert expiration will not work until this application is restarted. Offending certificate: {:?}", e, oldest_cert);
-                    return;
-                }
-            };
-            let duration = expire_date.duration_since(SystemTime::now()).unwrap_or(Duration::from_secs(0)); // If 2 certs expire at the same time we want to expire them immediately
-            let secs = duration.as_secs();
-            info!("Oldest certificate will expire in: {}d {}h {}m {}s", secs / (24 * 60 * 60), (secs % (24 * 60 * 60)) / (60 * 60), (secs % (60 * 60)) / 60, secs % 60);
-            tokio::time::sleep(duration).await;
-            info!("Invalidating old cert now: {:?}", oldest_cert);
-            // Invalidate cert in cache
-            {
-                let mut cache_lock = cc3.write().await;
-                let Some(entry) = cache_lock
-                    .serial_to_x509
-                    .values_mut()
-                    .find(|other| if let CertificateCacheEntry::Valid(cert) = other {
-                        cert == &oldest_cert
-                    } else {
-                        false
-                    }
-                ) else {
-                    error!("Unable to find expired certificate in our cache; this should not happen: {oldest_cert:?}. Cert expiration will not work until this application is restarted.");
-                    return;
-                };
-                *entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate);
-            }
-            CERT_GETTER.get().unwrap().on_cert_expired(oldest_cert).await;
+            CertificateCache::wait_and_remove_oldest_cert(cc3.clone()).await;
         }
     });
     cc
@@ -797,4 +801,53 @@ pub async fn get_proxy_public_keys(
         None => Vec::new(),
     };
     Ok(receivers_keys)
+}
+
+#[tokio::test]
+async fn test_invalidation() {
+    // Setup fake CertGetter that does nothing
+    struct DummyCertGetter;
+    #[async_trait]
+    impl GetCerts for DummyCertGetter {
+        async fn certificate_list(&self) ->  Result<Vec<String>, SamplyBeamError> {
+            todo!()
+        }
+        async fn certificate_by_serial_as_pem(&self, _serial: &str) ->  Result<String, SamplyBeamError> {
+            todo!()
+        }
+        async fn im_certificate_as_pem(&self) ->  Result<String,SamplyBeamError> {
+            todo!()
+        }
+    }
+    CERT_GETTER.set(Box::new(DummyCertGetter)).unwrap_or_else(|_| panic!("Could not set cert"));
+    fn build_x509(ttl: Duration) -> X509 {
+        let mut builder = X509::builder().unwrap();
+        let duration = SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap() + ttl;
+        let not_after = Asn1Time::from_unix(duration.as_secs() as i64).unwrap();
+        builder.set_not_after(&not_after).unwrap();
+        builder.build()
+    }
+    let certs: HashMap<Serial, CertificateCacheEntry> = [1, 5, 10].into_iter()
+        .map(Duration::from_secs)
+        .map(build_x509)
+        .map(CertificateCacheEntry::Valid)
+        .enumerate()
+        .map(|(a, b)| (a.to_string(), b))
+        .collect();
+    let n = certs.len();
+
+    let (tx, rx) = mpsc::channel(1);
+    let cert_cache = CertificateCache { 
+        serial_to_x509: certs,
+        update_trigger: tx,
+        cn_to_serial: Default::default(),
+        im_cert: None,
+        root_cert: None,
+    };
+    let cache = Arc::new(RwLock::new(cert_cache));
+
+    for _ in 0..n {
+        CertificateCache::wait_and_remove_oldest_cert(cache.clone()).await;
+    }
+    assert!(cache.read().await.serial_to_x509.values().all(|cert| matches!(cert, CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate))));
 }
