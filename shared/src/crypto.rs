@@ -425,8 +425,8 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
     });
     tokio::spawn(async move {
         loop {
-            // Get oldest cert
-            let old_cert = cc3.read().await
+            // Get oldest cert, i.e. cert that will expire soonest
+            let oldest_cert = cc3.read().await
                 .serial_to_x509
                 .values()
                 .filter_map(|entry| if let CertificateCacheEntry::Valid(cert) = entry {
@@ -435,22 +435,30 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
                     None
                 })
                 .min_by(|cert_a, cert_b| cert_a.not_after().compare(cert_b.not_after()).unwrap_or_else(|err| {
-                    warn!("Got error sorting certs: {err}");
+                    error!("Got error sorting certs: {err}");
                     std::cmp::Ordering::Greater
                 }))
                 .cloned();
-            // if we dont have certs yet wait
-            let Some(old_cert) = old_cert else {
+            // if we dont have any certs yet, wait
+            let Some(oldest_cert) = oldest_cert else {
+                // An inefficient sleep is fine here as this will never be called once certs have been populated.
                 tokio::time::sleep(Duration::from_secs(20)).await;
                 continue;
             };
             // Sleep until expired
-            let expire_date = asn1_time_to_system_time(old_cert.not_after()).unwrap_or(SystemTime::now());
-            let duration = (expire_date.duration_since(SystemTime::now())).unwrap_or(Duration::from_secs(0));
+            let expire_date = asn1_time_to_system_time(oldest_cert.not_after()).unwrap_or(SystemTime::now());
+            let duration = (expire_date.duration_since(SystemTime::now()));
+            let duration = match duration {
+                Ok(x) => x,
+                Err(e) => {
+                    error!("Unable to read a certificate's expiration date: {}. Cert expiration will not work until this application is restarted. Offending certificate: {:?}", e, oldest_cert);
+                    return;
+                }
+            };
             let secs = duration.as_secs();
-            info!("Oldest cert will expire in: {}d {}h {}m {}s", secs / (24 * 60 * 60), (secs % (24 * 60 * 60)) / (60 * 60), (secs % (60 * 60)) / 60, secs % 60);
+            info!("Oldest certificate will expire in: {}d {}h {}m {}s", secs / (24 * 60 * 60), (secs % (24 * 60 * 60)) / (60 * 60), (secs % (60 * 60)) / 60, secs % 60);
             tokio::time::sleep(duration).await;
-            info!("Invalidating old cert {:?} now", old_cert);
+            info!("Invalidating old cert now: {:?}", oldest_cert);
             // Invalidate cert in cache
             {
                 let mut cache_lock = cc3.write().await;
@@ -458,17 +466,17 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
                     .serial_to_x509
                     .values_mut()
                     .find(|other| if let CertificateCacheEntry::Valid(cert) = other {
-                        cert == &old_cert
+                        cert == &oldest_cert
                     } else {
                         false
                     }
                 ) else {
-                    warn!("Certificate that has expired was no longer in cache: {old_cert:?}");
+                    error!("Unable to find expired certificate in our cache; this should not happen: {oldest_cert:?}. Cert expiration will not work until this application is restarted.");
                     return;
                 };
                 *entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate);
             }
-            CERT_GETTER.get().unwrap().on_own_cert_expired(old_cert).await;
+            CERT_GETTER.get().unwrap().on_own_cert_expired(oldest_cert).await;
         }
     });
     cc
