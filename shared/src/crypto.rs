@@ -155,7 +155,10 @@ impl CertificateCache {
             _ = tokio::time::sleep(duration) => false,
             _ = abort_trigger.recv() => true
         };
-        if aborted { return; }
+        if aborted { 
+            debug!("Aborted waiting for expirey of {oldest_cert:?}");
+            return; 
+        }
         info!("Invalidating old cert now: {:?}", oldest_cert);
         // Invalidate cert in cache
         {
@@ -180,62 +183,25 @@ impl CertificateCache {
     /// Searches cache for a certificate with the given ClientId. If not found, updates cache from central vault. If then still not found, return None
     pub async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<CertificateCacheEntry> {
         // TODO: What if multiple certs are found?
-        let mut result = Vec::new();
-        Self::update_certificates().await.unwrap_or_else(|e| {
-            // requires write lock.
-            warn!("Updating certificates failed: {}", e);
-            0
-        });
-        debug!("Getting cert(s) with cname {}", cname);
-        let mut valid = 0;
-        let mut invalid = 0;
-        {
-            // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
-            let cache = CERT_CACHE.read().await;
-            if let Some(serials) = cache.cn_to_serial.get(cname) {
-                debug!(
-                    "Considering {} certificates with matching CN: {:?}",
-                    serials.len(),
-                    serials
-                );
-                for serial in serials {
-                    debug!("Fetching certificate with serial {}", serial);
-                    let x509 = cache.serial_to_x509.get(serial);
-                    if let Some(x509) = x509 {
-                        match x509 {
-                            CertificateCacheEntry::Invalid(reason) => {
-                                result.push(x509.clone());
-                                invalid += 1;
-                            }
-                            CertificateCacheEntry::Valid(x509) => {
-                                if !x509_date_valid(x509).unwrap_or(true) {
-                                    let Ok(info) = crypto::ProxyCertInfo::try_from(x509) else {
-                                        warn!("Found invalid x509 certificate -- even unable to parse it.");
-                                        continue;
-                                    };
-                                    warn!("Found x509 certificate with invalid date: CN={}, serial={}", info.common_name, info.serial);
-                                } else {
-                                    debug!(
-                                        "Certificate with serial {} successfully retrieved.",
-                                        serial
-                                    );
-                                    result.push(CertificateCacheEntry::Valid(x509.clone()));
-                                    valid += 1;
-                                }
-                            }
-                        }
-                    }
-                }
-            };
-        } // Drop Read Locks
+        let mut result = get_all_certs_from_cache_by_cname(cname).await; // Drop Read Locks
         if result.is_empty() {
-            warn!(
-                "Did not find certificate for cname {}, even after update.",
-                cname
-            );
+            
+            // requires write lock.
+            Self::update_certificates().await.unwrap_or_else(|e| {
+                warn!("Updating certificates failed: {}", e);
+                0
+            });
+            result = get_all_certs_from_cache_by_cname(cname).await;
+            if result.is_empty() {
+                warn!(
+                    "Did not find certificate for cname {}, even after update.",
+                    cname
+                );
+            } 
         } else {
             debug!(
-                "Found {valid} valid and {invalid} invalid certificate(s) for cname {}.",
+                "Found {} valid certificate(s) for cname {} in cache.",
+                result.len(),
                 cname
             );
         }
@@ -427,6 +393,54 @@ impl CertificateCache {
                              String::from_utf8(self.root_cert.as_ref().unwrap().to_text().unwrap_or("Cannot convert root certificate to text".into())).unwrap_or("Invalid characters in root certificate".to_string())));
         Ok(())
     }
+}
+
+async fn get_all_certs_from_cache_by_cname(cname: &ProxyId) -> Vec<CertificateCacheEntry> {
+    let mut result = Vec::new();
+        
+    debug!("Getting cert(s) with cname {}", cname);
+    let mut valid = 0;
+    let mut invalid = 0;
+    {
+        // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
+        let cache = CERT_CACHE.read().await;
+        if let Some(serials) = cache.cn_to_serial.get(cname) {
+            debug!(
+                "Considering {} certificates with matching CN: {:?}",
+                serials.len(),
+                serials
+            );
+            for serial in serials {
+                debug!("Fetching certificate with serial {}", serial);
+                let x509 = cache.serial_to_x509.get(serial);
+                if let Some(x509) = x509 {
+                    match x509 {
+                        CertificateCacheEntry::Invalid(reason) => {
+                            result.push(x509.clone());
+                            invalid += 1;
+                        }
+                        CertificateCacheEntry::Valid(x509) => {
+                            if !x509_date_valid(x509).unwrap_or(true) {
+                                let Ok(info) = crypto::ProxyCertInfo::try_from(x509) else {
+                                    warn!("Found invalid x509 certificate -- even unable to parse it.");
+                                    continue;
+                                };
+                                warn!("Found x509 certificate with invalid date: CN={}, serial={}", info.common_name, info.serial);
+                            } else {
+                                debug!(
+                                    "Certificate with serial {} successfully retrieved.",
+                                    serial
+                                );
+                                result.push(CertificateCacheEntry::Valid(x509.clone()));
+                                valid += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+    result
 }
 
 /// Wrapper for initializing the CA chain. Must be called *after* config initialization
@@ -866,9 +880,10 @@ async fn test_invalidation() {
         root_cert: None,
     };
     let cache = Arc::new(RwLock::new(cert_cache));
+    let (tx, mut rx) = mpsc::channel(1);
 
     for _ in 0..n {
-        CertificateCache::wait_and_remove_oldest_cert(cache.clone()).await;
+        CertificateCache::wait_and_remove_oldest_cert(cache.clone(), &mut rx).await;
     }
     assert!(cache.read().await.serial_to_x509.values().all(|cert| matches!(cert, CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate))));
 }
