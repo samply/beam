@@ -121,19 +121,22 @@ impl CertificateCache {
 
     pub async fn wait_and_remove_oldest_cert(cache: Arc<RwLock<Self>>, abort_trigger: &mut mpsc::Receiver<()>) {
         // Get oldest cert, i.e. cert that will expire soonest
-        let oldest_cert = cache.read().await
-            .serial_to_x509
-            .values()
-            .filter_map(|entry| if let CertificateCacheEntry::Valid(cert) = entry {
-                Some(cert)
-            } else {
-                None
-            })
-            .min_by(|cert_a, cert_b| cert_a.not_after().compare(cert_b.not_after()).unwrap_or_else(|err| {
-                error!("Got error sorting certs: {err}");
-                std::cmp::Ordering::Greater
-            }))
-            .cloned();
+        let oldest_cert = {
+            let cache_lock = cache.read().await;
+            cache_lock
+                .serial_to_x509
+                .values()
+                .filter_map(|entry| if let CertificateCacheEntry::Valid(cert) = entry {
+                    Some(cert)
+                } else {
+                    None
+                })
+                .min_by(|cert_a, cert_b| cert_a.not_after().compare(cert_b.not_after()).unwrap_or_else(|err| {
+                    error!("Got error sorting certs: {err}");
+                    std::cmp::Ordering::Greater
+                }))
+                .cloned()
+        };
         // if we dont have any certs yet, wait
         let Some(oldest_cert) = oldest_cert else {
             // An inefficient sleep is fine here as this will never be called once certs have been populated.
@@ -244,6 +247,7 @@ impl CertificateCache {
             .send(tx)
             .await
             .expect("Internal Error: Certificate Store Updater is not listening for requests.");
+        debug!("Certificate update triggered -- waiting for results...");
         match rx.await {
             Ok(Ok(result)) => {
                 debug!("Certificate update successfully completed: Got {result} new certificates.");
@@ -253,7 +257,10 @@ impl CertificateCache {
                 error!("Unable to sync certificates: {e}");
                 Err(e)
             }
-            Err(e) => Err(SamplyBeamError::InternalSynchronizationError(e.to_string())),
+            Err(e) => {
+                warn!("Unable to receive notification about certificate updates: {e}.");
+                Err(SamplyBeamError::InternalSynchronizationError(e.to_string()))
+            },
         }
     }
 
@@ -488,11 +495,19 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
                     None
                 }
             };
+            let started = Instant::now();
             let mut locked_cache = cc2.write().await;
             let result = locked_cache.update_certificates_mut().await;
+            let elapsed = Instant::now() - started;
+            const FIVE_SECS: Duration = Duration::from_secs(5);
+            if elapsed > FIVE_SECS {
+                warn!("Certificate update request took {} seconds.", elapsed.as_secs());
+            } else {
+                debug!("Certificate update request took {} seconds.", elapsed.as_secs());
+            }
             match &result {
                 Err(e) => {
-                    warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped? Reason: {e}");
+                    warn!("Unable to update CertificateCache. Maybe it stopped? Reason: {e}.");
                 }
                 Ok(count) => {
                     if *count > 0 {

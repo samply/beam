@@ -459,7 +459,7 @@ impl Debug for Encrypted {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Encrypted")
             .field("encrypted len", &self.encrypted.len())
-            .field("encryption_keys", &self.encryption_keys)
+            .field("encryption_key_count", &self.encryption_keys.len())
             .finish()
     }
 }
