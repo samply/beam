@@ -277,6 +277,7 @@ impl CertificateCache {
             .send(tx)
             .await
             .expect("Internal Error: Certificate Store Updater is not listening for requests.");
+        debug!("Certificate update triggered -- waiting for results ...");
         match rx.await {
             Ok(Ok(result)) => {
                 debug!("Certificate update successfully completed: Got {result} new certificates.");
@@ -464,22 +465,31 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
     let cc3: Arc<RwLock<CertificateCache>> = cc.clone();
     tokio::task::spawn(async move {
         while let Some(sender) = rx.recv().await {
+            let uuid = uuid::Uuid::new_v4();
+            let started = Instant::now();
             let mut locked_cache = cc2.write().await;
             let result = locked_cache.update_certificates_mut().await;
+            let elapsed = Instant::now() - started;
+            const FIVE_SECS: Duration = Duration::from_secs(5);
+            if elapsed > FIVE_SECS {
+                warn!("Certificate update request took {} seconds; req={uuid}.", elapsed.as_secs());
+            } else {
+                debug!("Certificate update request took {} seconds; req={uuid}.", elapsed.as_secs());
+            }
             match &result {
                 Err(e) => {
-                    warn!("Unable to update CertificateCache. Maybe it stopped? Reason: {e}");
+                    warn!("Unable to update CertificateCache. Maybe it stopped? Reason: {e}, req={uuid}");
                 }
                 Ok(count) => {
                     if *count > 0 {
-                        info!("Added {count} new certificates.");
+                        info!("Added {count} new certificates, req={uuid}.");
                     } else {
-                        info!("No new certificates have been found.");
+                        info!("No new certificates have been found, req={uuid}");
                     }
                 }
             };
             if let Err(_err) = sender.send(result) {
-                warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
+                warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped? req={uuid}");
             }
         }
     });
