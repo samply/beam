@@ -15,6 +15,7 @@ use rsa::{
 };
 use sha2::{Digest, Sha256};
 use static_init::dynamic;
+use uuid::Uuid;
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
@@ -93,7 +94,7 @@ pub(crate) enum CertificateCacheEntry {
 pub(crate) struct CertificateCache {
     serial_to_x509: HashMap<Serial, CertificateCacheEntry>,
     cn_to_serial: HashMap<ProxyId, Vec<Serial>>,
-    update_trigger: mpsc::Sender<oneshot::Sender<Result<usize, SamplyBeamError>>>,
+    update_trigger: mpsc::Sender<(Uuid, oneshot::Sender<Result<usize, SamplyBeamError>>)>,
     root_cert: Option<X509>, // Might not be available at initialization time
     im_cert: Option<X509>,   // Might not be available at initialization time
 }
@@ -108,7 +109,7 @@ pub trait GetCerts: Sync + Send {
 
 impl CertificateCache {
     pub fn new(
-        update_trigger: mpsc::Sender<oneshot::Sender<Result<usize, SamplyBeamError>>>,
+        update_trigger: mpsc::Sender<(Uuid, oneshot::Sender<Result<usize, SamplyBeamError>>)>,
     ) -> Result<CertificateCache, SamplyBeamError> {
         Ok(Self {
             serial_to_x509: HashMap::new(),
@@ -268,27 +269,28 @@ impl CertificateCache {
 
     /// Manually update cache from fetching all certs from the central vault
     async fn update_certificates() -> Result<usize, SamplyBeamError> {
-        debug!("Triggering certificate update ...");
+        let uuid = Uuid::new_v4();
+        debug!("Triggering certificate update ... req={uuid}");
         let (tx, rx) = oneshot::channel::<Result<usize, SamplyBeamError>>();
         CERT_CACHE
             .read()
             .await
             .update_trigger
-            .send(tx)
+            .send((uuid, tx))
             .await
             .expect("Internal Error: Certificate Store Updater is not listening for requests.");
-        debug!("Certificate update triggered -- waiting for results ...");
+        debug!("Certificate update triggered -- waiting for results ... req={uuid}");
         match rx.await {
             Ok(Ok(result)) => {
-                debug!("Certificate update successfully completed: Got {result} new certificates.");
+                debug!("Certificate update successfully completed: Got {result} new certificates. req={uuid}");
                 Ok(result)
             }
             Ok(Err(e)) => {
-                error!("Unable to sync certificates: {e}");
+                error!("Unable to sync certificates: {e}. req={uuid}");
                 Err(e)
             }
             Err(e) => {
-                warn!("Unable to receive notification about certificate updates: {e}");
+                warn!("Unable to receive notification about certificate updates: {e}. req={uuid}");
                 Err(SamplyBeamError::InternalSynchronizationError(e.to_string()))
             },
         }
@@ -459,13 +461,12 @@ pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
 
 #[dynamic(lazy)]
 pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
-    let (tx, mut rx) = mpsc::channel::<oneshot::Sender<Result<usize, SamplyBeamError>>>(1);
+    let (tx, mut rx) = mpsc::channel::<(Uuid, oneshot::Sender<Result<usize, SamplyBeamError>>)>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
     let cc2 = cc.clone();
     let cc3: Arc<RwLock<CertificateCache>> = cc.clone();
     tokio::task::spawn(async move {
-        while let Some(sender) = rx.recv().await {
-            let uuid = uuid::Uuid::new_v4();
+        while let Some((uuid, sender)) = rx.recv().await {
             let started = Instant::now();
             let mut locked_cache = cc2.write().await;
             let result = locked_cache.update_certificates_mut().await;
