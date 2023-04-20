@@ -137,7 +137,7 @@ pub const JWT_VERIFICATION_OPTIONS: Lazy<VerificationOptions> = Lazy::new(|| Ver
     ..Default::default()
 });
 
-#[tracing::instrument]
+#[tracing::instrument(skip(token_without_extended_signature))]
 /// This verifys a Msg from sent to the Broker
 /// The Message is encoded in the JWT Claims of the body which is a JWT.
 /// There is never really a [`MsgSigned`] involved in Deserializing the message as the signature is just copyed from the body JWT.

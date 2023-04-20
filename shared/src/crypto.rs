@@ -15,7 +15,6 @@ use rsa::{
 };
 use sha2::{Digest, Sha256};
 use static_init::dynamic;
-use uuid::Uuid;
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
@@ -94,14 +93,14 @@ pub(crate) enum CertificateCacheEntry {
 pub(crate) struct CertificateCache {
     serial_to_x509: HashMap<Serial, CertificateCacheEntry>,
     cn_to_serial: HashMap<ProxyId, Vec<Serial>>,
-    update_trigger: mpsc::Sender<(Uuid, oneshot::Sender<Result<usize, SamplyBeamError>>)>,
+    update_trigger: mpsc::Sender<oneshot::Sender<Result<usize, SamplyBeamError>>>,
     root_cert: Option<X509>, // Might not be available at initialization time
     im_cert: Option<X509>,   // Might not be available at initialization time
 }
 
 #[async_trait]
 pub trait GetCerts: Sync + Send {
-    async fn certificate_list(&self) -> Result<Vec<String>, SamplyBeamError>;
+    async fn certificate_list_via_network(&self) -> Result<Vec<String>, SamplyBeamError>;
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String, SamplyBeamError>;
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError>;
     async fn on_cert_expired(&self, _expired_cert: X509) {}
@@ -109,7 +108,7 @@ pub trait GetCerts: Sync + Send {
 
 impl CertificateCache {
     pub fn new(
-        update_trigger: mpsc::Sender<(Uuid, oneshot::Sender<Result<usize, SamplyBeamError>>)>,
+        update_trigger: mpsc::Sender<oneshot::Sender<Result<usize, SamplyBeamError>>>,
     ) -> Result<CertificateCache, SamplyBeamError> {
         Ok(Self {
             serial_to_x509: HashMap::new(),
@@ -120,7 +119,7 @@ impl CertificateCache {
         })
     }
 
-    pub async fn wait_and_remove_oldest_cert(cache: Arc<RwLock<Self>>) {
+    pub async fn wait_and_remove_oldest_cert(cache: Arc<RwLock<Self>>, abort_trigger: &mut mpsc::Receiver<()>) {
         // Get oldest cert, i.e. cert that will expire soonest
         let oldest_cert = {
             let cache_lock = cache.read().await;
@@ -155,7 +154,14 @@ impl CertificateCache {
         let duration = expire_date.duration_since(SystemTime::now()).unwrap_or(Duration::from_secs(0)); // If 2 certs expire at the same time we want to expire them immediately
         let secs = duration.as_secs();
         info!("Oldest certificate will expire in: {}d {}h {}m {}s", secs / (24 * 60 * 60), (secs % (24 * 60 * 60)) / (60 * 60), (secs % (60 * 60)) / 60, secs % 60);
-        tokio::time::sleep(duration).await;
+        let aborted = tokio::select! {
+            _ = tokio::time::sleep(duration) => false,
+            _ = abort_trigger.recv() => true
+        };
+        if aborted { 
+            debug!("Aborted waiting for expirey of {oldest_cert:?}");
+            return; 
+        }
         info!("Invalidating old cert now: {:?}", oldest_cert);
         // Invalidate cert in cache
         {
@@ -180,65 +186,22 @@ impl CertificateCache {
     /// Searches cache for a certificate with the given ClientId. If not found, updates cache from central vault. If then still not found, return None
     pub async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<CertificateCacheEntry> {
         // TODO: What if multiple certs are found?
-        let mut result = Vec::new();
-        Self::update_certificates().await.unwrap_or_else(|e| {
-            // requires write lock.
-            warn!("Updating certificates failed: {}", e);
-            0
-        });
-        debug!("Getting cert(s) with cname {}", cname);
-        let mut valid = 0;
-        let mut invalid = 0;
-        {
-            // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
-            let cache = CERT_CACHE.read().await;
-            if let Some(serials) = cache.cn_to_serial.get(cname) {
-                debug!(
-                    "Considering {} certificates with matching CN: {:?}",
-                    serials.len(),
-                    serials
-                );
-                for serial in serials {
-                    debug!("Fetching certificate with serial {}", serial);
-                    let x509 = cache.serial_to_x509.get(serial);
-                    if let Some(x509) = x509 {
-                        match x509 {
-                            CertificateCacheEntry::Invalid(reason) => {
-                                result.push(x509.clone());
-                                invalid += 1;
-                            }
-                            CertificateCacheEntry::Valid(x509) => {
-                                if !x509_date_valid(x509).unwrap_or(true) {
-                                    let Ok(info) = crypto::ProxyCertInfo::try_from(x509) else {
-                                        warn!("Found invalid x509 certificate -- even unable to parse it.");
-                                        continue;
-                                    };
-                                    warn!("Found x509 certificate with invalid date: CN={}, serial={}", info.common_name, info.serial);
-                                } else {
-                                    debug!(
-                                        "Certificate with serial {} successfully retrieved.",
-                                        serial
-                                    );
-                                    result.push(CertificateCacheEntry::Valid(x509.clone()));
-                                    valid += 1;
-                                }
-                            }
-                        }
-                    }
-                }
-            };
-        } // Drop Read Locks
+        let mut result = get_all_certs_from_cache_by_cname(cname).await; // Drop Read Locks
         if result.is_empty() {
-            warn!(
-                "Did not find certificate for cname {}, even after update.",
-                cname
-            );
-        } else {
-            debug!(
-                "Found {valid} valid and {invalid} invalid certificate(s) for cname {}.",
-                cname
-            );
-        }
+            
+            // requires write lock.
+            Self::update_certificates().await.unwrap_or_else(|e| {
+                warn!("Updating certificates failed: {}", e);
+                0
+            });
+            result = get_all_certs_from_cache_by_cname(cname).await;
+            if result.is_empty() {
+                warn!(
+                    "Did not find certificate for cname {}, even after update.",
+                    cname
+                );
+            } 
+        } 
         result
     }
 
@@ -269,36 +232,35 @@ impl CertificateCache {
 
     /// Manually update cache from fetching all certs from the central vault
     async fn update_certificates() -> Result<usize, SamplyBeamError> {
-        let uuid = Uuid::new_v4();
-        debug!("Triggering certificate update ... req={uuid}");
+        debug!("Triggering certificate update ...");
         let (tx, rx) = oneshot::channel::<Result<usize, SamplyBeamError>>();
         CERT_CACHE
             .read()
             .await
             .update_trigger
-            .send((uuid, tx))
+            .send(tx)
             .await
             .expect("Internal Error: Certificate Store Updater is not listening for requests.");
-        debug!("Certificate update triggered -- waiting for results ... req={uuid}");
+        debug!("Certificate update triggered -- waiting for results...");
         match rx.await {
             Ok(Ok(result)) => {
-                debug!("Certificate update successfully completed: Got {result} new certificates. req={uuid}");
+                debug!("Certificate update successfully completed: Got {result} new certificates.");
                 Ok(result)
             }
             Ok(Err(e)) => {
-                error!("Unable to sync certificates: {e}. req={uuid}");
+                error!("Unable to sync certificates: {e}");
                 Err(e)
             }
             Err(e) => {
-                warn!("Unable to receive notification about certificate updates: {e}. req={uuid}");
+                warn!("Unable to receive notification about certificate updates: {e}.");
                 Err(SamplyBeamError::InternalSynchronizationError(e.to_string()))
             },
         }
     }
 
     async fn update_certificates_mut(&mut self) -> Result<usize, SamplyBeamError> {
-        info!("Updating certificates ...");
-        let certificate_list = CERT_GETTER.get().unwrap().certificate_list().await?;
+        info!("Updating certificates via network ...");
+        let certificate_list = CERT_GETTER.get().unwrap().certificate_list_via_network().await?;
         let new_certificate_serials: Vec<&String> = {
             certificate_list
                 .iter()
@@ -434,6 +396,58 @@ impl CertificateCache {
     }
 }
 
+async fn get_all_certs_from_cache_by_cname(cname: &ProxyId) -> Vec<CertificateCacheEntry> {
+    let mut result = Vec::new();
+        
+    debug!("Getting cert(s) with cname {}", cname);
+    let mut invalid = 0;
+    {
+        // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
+        let cache = CERT_CACHE.read().await;
+        if let Some(serials) = cache.cn_to_serial.get(cname) {
+            debug!(
+                "Considering {} certificates with matching CN: {:?}",
+                serials.len(),
+                serials
+            );
+            for serial in serials {
+                debug!("Fetching certificate with serial {}", serial);
+                let x509 = cache.serial_to_x509.get(serial);
+                if let Some(x509) = x509 {
+                    match x509 {
+                        CertificateCacheEntry::Invalid(reason) => {
+                            result.push(x509.clone());
+                            invalid += 1;
+                        }
+                        CertificateCacheEntry::Valid(x509) => {
+                            if !x509_date_valid(x509).unwrap_or(true) {
+                                let Ok(info) = crypto::ProxyCertInfo::try_from(x509) else {
+                                    warn!("Found invalid x509 certificate -- even unable to parse it.");
+                                    continue;
+                                };
+                                warn!("Found x509 certificate with invalid date: CN={}, serial={}", info.common_name, info.serial);
+                            } else {
+                                debug!(
+                                    "Certificate with serial {} successfully retrieved.",
+                                    serial
+                                );
+                                result.push(CertificateCacheEntry::Valid(x509.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        };
+    }
+    debug!(
+        "Found {} valid and {} invalid certificate(s) for cname {} in cache.",
+        result.len(),
+        invalid,
+        cname
+    );
+    result
+}
+
 /// Wrapper for initializing the CA chain. Must be called *after* config initialization
 pub async fn init_ca_chain() -> Result<(), SamplyBeamError> {
     let mut cache = CERT_CACHE.write().await;
@@ -451,8 +465,9 @@ pub fn init_cert_getter<G: GetCerts + 'static>(getter: G) {
     }
 }
 
-pub async fn get_serial_list() -> Result<Vec<String>, SamplyBeamError> {
-    CERT_GETTER.get().unwrap().certificate_list().await
+pub async fn get_serial_list() -> Vec<String> {
+    let cache = CERT_CACHE.read().await;
+    cache.serial_to_x509.keys().cloned().collect()
 }
 
 pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
@@ -461,42 +476,58 @@ pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
 
 #[dynamic(lazy)]
 pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
-    let (tx, mut rx) = mpsc::channel::<(Uuid, oneshot::Sender<Result<usize, SamplyBeamError>>)>(1);
-    let cc = Arc::new(RwLock::new(CertificateCache::new(tx).unwrap()));
+    let (tx_refresh, mut rx_refresh) = mpsc::channel::<oneshot::Sender<Result<usize, SamplyBeamError>>>(1);
+    let (tx_newcerts, mut rx_newcerts) = mpsc::channel::<()>(1);
+    let cc = Arc::new(RwLock::new(CertificateCache::new(tx_refresh).unwrap()));
     let cc2 = cc.clone();
     let cc3: Arc<RwLock<CertificateCache>> = cc.clone();
     tokio::task::spawn(async move {
-        while let Some((uuid, sender)) = rx.recv().await {
+        loop {
+            let sender = tokio::select! {
+                Some(sender) = rx_refresh.recv() => {
+                    debug!("Certificate cache refresh triggered by another component.");
+                    Some(sender)
+                },
+                _ = tokio::time::sleep(Duration::from_secs(60)) => {
+                    debug!("Certificate cache refresh after 60 seconds ...");
+                    None
+                }
+            };
             let started = Instant::now();
             let mut locked_cache = cc2.write().await;
             let result = locked_cache.update_certificates_mut().await;
             let elapsed = Instant::now() - started;
             const FIVE_SECS: Duration = Duration::from_secs(5);
             if elapsed > FIVE_SECS {
-                warn!("Certificate update request took {} seconds; req={uuid}.", elapsed.as_secs());
+                warn!("Certificate update request took {} seconds.", elapsed.as_secs());
             } else {
-                debug!("Certificate update request took {} seconds; req={uuid}.", elapsed.as_secs());
+                debug!("Certificate update request took {} seconds.", elapsed.as_secs());
             }
             match &result {
                 Err(e) => {
-                    warn!("Unable to update CertificateCache. Maybe it stopped? Reason: {e}, req={uuid}");
+                    warn!("Unable to update CertificateCache. Maybe it stopped? Reason: {e}.");
                 }
                 Ok(count) => {
                     if *count > 0 {
-                        info!("Added {count} new certificates, req={uuid}.");
+                        info!("Added {count} new certificates.");
+                        if let Err(e) = tx_newcerts.send(()).await {
+                            warn!("Unable to inform cert expirer about a newly arrived certificate. Continuing.");
+                        }
                     } else {
-                        info!("No new certificates have been found, req={uuid}");
+                        info!("No new certificates have been found.");
                     }
                 }
             };
-            if let Err(_err) = sender.send(result) {
-                warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped? req={uuid}");
+            if let Some(sender) = sender {
+                if let Err(_err) = sender.send(result) {
+                    warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
+                }
             }
         }
     });
     tokio::spawn(async move {
         loop {
-            CertificateCache::wait_and_remove_oldest_cert(cc3.clone()).await;
+            CertificateCache::wait_and_remove_oldest_cert(cc3.clone(), &mut rx_newcerts).await;
         }
     });
     cc
@@ -826,7 +857,7 @@ async fn test_invalidation() {
     struct DummyCertGetter;
     #[async_trait]
     impl GetCerts for DummyCertGetter {
-        async fn certificate_list(&self) ->  Result<Vec<String>, SamplyBeamError> {
+        async fn certificate_list_via_network(&self) ->  Result<Vec<String>, SamplyBeamError> {
             todo!()
         }
         async fn certificate_by_serial_as_pem(&self, _serial: &str) ->  Result<String, SamplyBeamError> {
@@ -862,9 +893,10 @@ async fn test_invalidation() {
         root_cert: None,
     };
     let cache = Arc::new(RwLock::new(cert_cache));
+    let (tx, mut rx) = mpsc::channel(1);
 
     for _ in 0..n {
-        CertificateCache::wait_and_remove_oldest_cert(cache.clone()).await;
+        CertificateCache::wait_and_remove_oldest_cert(cache.clone(), &mut rx).await;
     }
     assert!(cache.read().await.serial_to_x509.values().all(|cert| matches!(cert, CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate))));
 }

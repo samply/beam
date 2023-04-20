@@ -85,7 +85,8 @@ impl GetCertsFromBroker {
 
 #[async_trait]
 impl GetCerts for GetCertsFromBroker {
-    async fn certificate_list(&self) -> Result<Vec<String>, SamplyBeamError> {
+    async fn certificate_list_via_network(&self) -> Result<Vec<String>, SamplyBeamError> {
+        debug!("Retrieving cert list from Broker ...");
         self.query_vec("/v1/pki/certs").await
     }
 
