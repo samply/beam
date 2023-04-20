@@ -432,7 +432,6 @@ async fn get_all_certs_from_cache_by_cname(cname: &ProxyId) -> Vec<CertificateCa
                                     serial
                                 );
                                 result.push(CertificateCacheEntry::Valid(x509.clone()));
-                                valid += 1;
                             }
                         }
                     }
