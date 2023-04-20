@@ -8,6 +8,7 @@ mod serve;
 mod serve_health;
 mod serve_pki;
 mod serve_tasks;
+mod socks;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
@@ -51,7 +52,11 @@ pub async fn main() -> anyhow::Result<()> {
 
     let _ = config::CONFIG_CENTRAL.bind_addr; // Initialize config
 
-    serve::serve(health).await?;
+    tokio::try_join!(
+        serve::serve(health),
+        socks::serve()
+    )?;
+
 
     Ok(())
 }

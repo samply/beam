@@ -37,6 +37,8 @@ hyper-proxy = "0.9.1"
 # Server-sent Events (SSE) support
 async-stream = "0.3.4"
 futures-core = { version = "0.3.26", default-features = false }
+fast-socks5 = "0.8.2"
+tokio-stream = "0.1.12"
 
 [build-dependencies]
 build-data = "0"

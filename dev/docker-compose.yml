@@ -19,6 +19,7 @@ services:
     image: samply/beam-broker:${TAG}
     ports:
       - 8080:8080
+      - 8090:8090
     environment:
       BROKER_URL: ${BROKER_URL}
       PKI_ADDRESS: http://vault:8200
