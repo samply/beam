@@ -121,19 +121,22 @@ impl CertificateCache {
 
     pub async fn wait_and_remove_oldest_cert(cache: Arc<RwLock<Self>>) {
         // Get oldest cert, i.e. cert that will expire soonest
-        let oldest_cert = cache.read().await
-            .serial_to_x509
-            .values()
-            .filter_map(|entry| if let CertificateCacheEntry::Valid(cert) = entry {
-                Some(cert)
-            } else {
-                None
-            })
-            .min_by(|cert_a, cert_b| cert_a.not_after().compare(cert_b.not_after()).unwrap_or_else(|err| {
-                error!("Got error sorting certs: {err}");
-                std::cmp::Ordering::Greater
-            }))
-            .cloned();
+        let oldest_cert = {
+            let cache_lock = cache.read().await;
+            cache_lock
+                .serial_to_x509
+                .values()
+                .filter_map(|entry| if let CertificateCacheEntry::Valid(cert) = entry {
+                    Some(cert)
+                } else {
+                    None
+                })
+                .min_by(|cert_a, cert_b| cert_a.not_after().compare(cert_b.not_after()).unwrap_or_else(|err| {
+                    error!("Got error sorting certs: {err}");
+                    std::cmp::Ordering::Greater
+                }))
+                .cloned()
+        };
         // if we dont have any certs yet, wait
         let Some(oldest_cert) = oldest_cert else {
             // An inefficient sleep is fine here as this will never be called once certs have been populated.
