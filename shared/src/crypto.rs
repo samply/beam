@@ -283,7 +283,10 @@ impl CertificateCache {
                 error!("Unable to sync certificates: {e}");
                 Err(e)
             }
-            Err(e) => Err(SamplyBeamError::InternalSynchronizationError(e.to_string())),
+            Err(e) => {
+                warn!("Unable to receive notification about certificate updates: {e}");
+                Err(SamplyBeamError::InternalSynchronizationError(e.to_string()))
+            },
         }
     }
 
@@ -462,7 +465,7 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
             let result = locked_cache.update_certificates_mut().await;
             match &result {
                 Err(e) => {
-                    warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped? Reason: {e}");
+                    warn!("Unable to update CertificateCache. Maybe it stopped? Reason: {e}");
                 }
                 Ok(count) => {
                     if *count > 0 {
