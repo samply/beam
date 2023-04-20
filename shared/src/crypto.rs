@@ -85,12 +85,12 @@ impl TryFrom<&X509> for ProxyCertInfo {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum CertificateCacheEntry {
+pub enum CertificateCacheEntry {
     Valid(X509),
     Invalid(CertificateInvalidReason),
 }
 
-pub(crate) struct CertificateCache {
+pub struct CertificateCache {
     serial_to_x509: HashMap<Serial, CertificateCacheEntry>,
     cn_to_serial: HashMap<ProxyId, Vec<Serial>>,
     update_trigger: mpsc::Sender<oneshot::Sender<Result<usize, SamplyBeamError>>>,
@@ -103,6 +103,8 @@ pub trait GetCerts: Sync + Send {
     async fn certificate_list_via_network(&self) -> Result<Vec<String>, SamplyBeamError>;
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String, SamplyBeamError>;
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError>;
+    /// A callback that runs on a timer and returns if the cache changed
+    async fn on_timer(&self, _cache: &mut CertificateCache) -> bool { false }
     async fn on_cert_expired(&self, _expired_cert: X509) {}
 }
 
@@ -258,7 +260,7 @@ impl CertificateCache {
         }
     }
 
-    async fn update_certificates_mut(&mut self) -> Result<usize, SamplyBeamError> {
+    pub async fn update_certificates_mut(&mut self) -> Result<usize, SamplyBeamError> {
         info!("Updating certificates via network ...");
         let certificate_list = CERT_GETTER.get().unwrap().certificate_list_via_network().await?;
         let new_certificate_serials: Vec<&String> = {
@@ -495,7 +497,12 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
             };
             let started = Instant::now();
             let mut locked_cache = cc2.write().await;
-            let result = locked_cache.update_certificates_mut().await;
+            // Did the cache update
+            if CERT_GETTER.get().unwrap().on_timer(&mut locked_cache).await {
+                if let Err(e) = tx_newcerts.send(()).await {
+                    warn!("Unable to inform cert expirer about a newly arrived certificate. Continuing.");
+                }
+            }
             let elapsed = Instant::now() - started;
             const FIVE_SECS: Duration = Duration::from_secs(5);
             if elapsed > FIVE_SECS {
@@ -503,21 +510,6 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
             } else {
                 debug!("Certificate update request took {} seconds.", elapsed.as_secs());
             }
-            match &result {
-                Err(e) => {
-                    warn!("Unable to update CertificateCache. Maybe it stopped? Reason: {e}.");
-                }
-                Ok(count) => {
-                    if *count > 0 {
-                        info!("Added {count} new certificates.");
-                        if let Err(e) = tx_newcerts.send(()).await {
-                            warn!("Unable to inform cert expirer about a newly arrived certificate. Continuing.");
-                        }
-                    } else {
-                        info!("No new certificates have been found.");
-                    }
-                }
-            };
             if let Some(sender) = sender {
                 if let Err(_err) = sender.send(result) {
                     warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
