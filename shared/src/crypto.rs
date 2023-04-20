@@ -201,13 +201,7 @@ impl CertificateCache {
                     cname
                 );
             } 
-        } else {
-            debug!(
-                "Found {} valid certificate(s) for cname {} in cache.",
-                result.len(),
-                cname
-            );
-        }
+        } 
         result
     }
 
@@ -406,7 +400,6 @@ async fn get_all_certs_from_cache_by_cname(cname: &ProxyId) -> Vec<CertificateCa
     let mut result = Vec::new();
         
     debug!("Getting cert(s) with cname {}", cname);
-    let mut valid = 0;
     let mut invalid = 0;
     {
         // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
@@ -447,6 +440,12 @@ async fn get_all_certs_from_cache_by_cname(cname: &ProxyId) -> Vec<CertificateCa
             }
         };
     }
+    debug!(
+        "Found {} valid and {} invalid certificate(s) for cname {} in cache.",
+        result.len(),
+        invalid,
+        cname
+    );
     result
 }
 
