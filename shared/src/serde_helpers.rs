@@ -4,7 +4,7 @@ pub mod serialize_time {
 
     use fundu::parse_duration;
     use serde::{self, Deserialize, Deserializer, Serializer};
-    use tracing::{debug, error, warn};
+    use tracing::{debug, error, warn, trace};
 
     pub fn serialize<S>(time: &SystemTime, s: S) -> Result<S::Ok, S::Error>
     where
@@ -27,7 +27,7 @@ pub mod serialize_time {
         let duration = &String::deserialize(deserializer)?;
         let ttl = parse_duration(&duration).map_err(serde::de::Error::custom)?;
         let expire = SystemTime::now() + ttl;
-        debug!("Deserialized {:?} to time {:?}", duration, expire);
+        trace!("Deserialized {:?} to time {:?}", duration, expire);
         Ok(expire)
     }
 }
