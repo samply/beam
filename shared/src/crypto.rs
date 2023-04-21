@@ -497,10 +497,24 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
             };
             let started = Instant::now();
             let mut locked_cache = cc2.write().await;
-            // Did the cache update
-            if CERT_GETTER.get().unwrap().on_timer(&mut locked_cache).await {
+            let mut has_updated = false;
+            if let Some(sender) = sender {
+                let result = locked_cache.update_certificates_mut().await;
+                has_updated = match &result {
+                    Ok(updated) if *updated > 0 =>  true,
+                    _ => false
+                };
+                if let Err(_err) = sender.send(result) {
+                    warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
+                }
+            } else {
+                // Did the cache update
+                has_updated = CERT_GETTER.get().unwrap().on_timer(&mut locked_cache).await; {
+                }
+            }
+            if has_updated {
                 if let Err(e) = tx_newcerts.send(()).await {
-                    warn!("Unable to inform cert expirer about a newly arrived certificate. Continuing.");
+                    warn!("Unable to inform cert expirer about a newly arrived certificate. Err: {e}. Continuing.");
                 }
             }
             let elapsed = Instant::now() - started;
@@ -509,11 +523,6 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
                 warn!("Certificate update request took {} seconds.", elapsed.as_secs());
             } else {
                 debug!("Certificate update request took {} seconds.", elapsed.as_secs());
-            }
-            if let Some(sender) = sender {
-                if let Err(_err) = sender.send(result) {
-                    warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
-                }
             }
         }
     });
