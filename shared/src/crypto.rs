@@ -259,7 +259,7 @@ impl CertificateCache {
     }
 
     async fn update_certificates_mut(&mut self) -> Result<usize, SamplyBeamError> {
-        info!("Updating certificates via network ...");
+        debug!("Updating certificates via network ...");
         let certificate_list = CERT_GETTER.get().unwrap().certificate_list_via_network().await?;
         let new_certificate_serials: Vec<&String> = {
             certificate_list
@@ -514,7 +514,7 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
                             warn!("Unable to inform cert expirer about a newly arrived certificate. Continuing.");
                         }
                     } else {
-                        info!("No new certificates have been found.");
+                        debug!("No new certificates have been found.");
                     }
                 }
             };
