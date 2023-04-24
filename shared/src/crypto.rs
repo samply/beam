@@ -261,7 +261,7 @@ impl CertificateCache {
     }
 
     pub async fn update_certificates_mut(&mut self) -> Result<usize, SamplyBeamError> {
-        info!("Updating certificates via network ...");
+        debug!("Updating certificates via network ...");
         let certificate_list = CERT_GETTER.get().unwrap().certificate_list_via_network().await?;
         let new_certificate_serials: Vec<&String> = {
             certificate_list

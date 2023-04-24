@@ -287,7 +287,7 @@ impl GetCerts for GetCertsFromPki {
                     info!("Added {count} new certificates.");
                     true
                 } else {
-                    info!("No new certificates have been found.");
+                    debug!("No new certificates have been found.");
                     false
                 }
             }
