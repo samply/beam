@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::{collections::{HashMap, HashSet}, sync::Arc, net::{SocketAddr, IpAddr, Ipv4Addr}};
 
 use fast_socks5::{server::{Socks5Server, Config, Socks5Socket, Authentication}, AuthenticationMethod};
 use once_cell::sync::Lazy;
@@ -44,13 +44,47 @@ pub async fn serve() -> anyhow::Result<()> {
                 info!("{username} has connected to broker socket");
                 let mut waiting_cons = WAITING_CONNECTIONS.write().await;
                 if let Some(other) = waiting_cons.remove(password) {
-                    // Send connect signal to both sockets and tokio copy bidirectional
+                    if let Err(e) = tunnel(socket, other).await {
+                        warn!("Failed to send replys to sockets. Err: {e}");
+                    }
                 } else {
-                    WAITING_CONNECTIONS.write().await.insert(password.clone(), socket);
+                    waiting_cons.insert(password.clone(), socket);
                 }
             },
             Err(e) => warn!("{}", e),
         }
     }
+    Ok(())
+}
+
+/// Our version of the private send_reply of fast_socks https://github.com/dizda/fast-socks5/blob/master/src/server.rs#L726
+async fn send_reply_successfull_connection(socket: &mut Socks5Socket<TcpStream>) -> std::io::Result<()> {
+    use fast_socks5::consts;
+    const REPLY: &[u8; 10] = &[
+        consts::SOCKS5_VERSION,
+        consts::SOCKS5_REPLY_SUCCEEDED,
+        0x0, // Reserved
+        consts::SOCKS5_ADDR_TYPE_IPV4,
+        127, 0, 0, 1, // Ip address
+        0, 0 // Port
+    ];
+    socket.write_all(REPLY).await?;
+    socket.flush().await
+}
+
+async fn tunnel(mut a: Socks5Socket<TcpStream>, mut b: Socks5Socket<TcpStream>) -> std::io::Result<()> {
+    send_reply_successfull_connection(&mut a).await?;
+    send_reply_successfull_connection(&mut b).await?;
+    tokio::spawn(async move {
+        let result = tokio::io::copy_bidirectional(&mut a, &mut b).await;
+        if let Err(e) = result {
+            warn!("Error relaying socket connect: {e}");
+        }
+        // when we are done we remove the token from the set of allowed tokens
+        let AuthenticationMethod::Password { password, .. } = a.auth() else {
+            unreachable!("This is checked earlier");
+        };
+        ALLOWED_TOKENS.write().await.remove(password);
+    });
     Ok(())
 }
