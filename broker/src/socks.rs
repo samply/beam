@@ -16,9 +16,22 @@ pub static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| Arc
 struct Authenticator;
 
 impl Authentication for Authenticator {
-    fn authenticate(&self, username: &str, password: &str) -> bool {
-        info!("{username} is authenticating a socket connection");
-        ALLOWED_TOKENS.blocking_read().contains(password)
+    fn authenticate(&self, _username: &str, _password: &str) -> bool {
+        // We need to do auth asyncronously so we cant use this, but we still need to supply a dummy auth provider so that we have access to the auth data.
+        true
+    }
+}
+
+async fn authenticate(auth: &AuthenticationMethod) -> Option<(&String, &String)> {
+    let AuthenticationMethod::Password { username, password } = auth else {
+        warn!("Someone is trying to connect without pw");
+        return None;
+    };
+    info!("{username} is authenticating a socket connection");
+    if ALLOWED_TOKENS.read().await.contains(password) {
+        Some((username, password))
+    } else {
+        None
     }
 }
 
@@ -37,8 +50,9 @@ pub async fn serve() -> anyhow::Result<()> {
         match socket_res {
             Ok(socket) => {
                 let socket = socket.upgrade_to_socks5().await?;
-                let AuthenticationMethod::Password { username, password } = socket.auth() else {
-                    warn!("Someone is trying to connect without pw");
+                let auth = socket.auth();
+                let Some((username, password)) = authenticate(auth).await else {
+                    warn!("Failed to authenticate socket connection");
                     continue;
                 };
                 info!("{username} has connected to broker socket");
