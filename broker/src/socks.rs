@@ -11,6 +11,14 @@ use tokio_stream::StreamExt;
 /// Maps the connection secret to the assosiated socket
 static WAITING_CONNECTIONS: Lazy<Arc<RwLock<HashMap<String, Socks5Socket<TcpStream>>>>> = Lazy::new(|| Arc::default());
 /// Allowed tokens that are permited to create sockets
+// pub static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| Arc::default());
+#[cfg(debug_assertions)]
+pub static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| Arc::new(RwLock::new({
+    let mut h = HashSet::new();
+    h.insert("test".to_string());
+    h
+})));
+#[cfg(not(debug_assertions))]
 pub static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| Arc::default());
 
 struct Authenticator;
@@ -42,6 +50,7 @@ pub async fn serve() -> anyhow::Result<()> {
     let mut server = Socks5Server::bind(addr).await?;
     let mut config = Config::default();
     config.set_execute_command(false);
+    config.set_dns_resolve(false);
     config.set_authentication(Authenticator);
     server.set_config(config);
 
@@ -98,7 +107,11 @@ async fn tunnel(mut a: Socks5Socket<TcpStream>, mut b: Socks5Socket<TcpStream>) 
         let AuthenticationMethod::Password { password, .. } = a.auth() else {
             unreachable!("This is checked earlier");
         };
-        ALLOWED_TOKENS.write().await.remove(password);
+        if cfg!(debug_assertions) {
+            info!("Would have removed token from set in prod.");
+        } else {
+            ALLOWED_TOKENS.write().await.remove(password);
+        }
     });
     Ok(())
 }

@@ -1,0 +1,13 @@
+[package]
+name = "tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dev-dependencies]
+fast-socks5 = "0.8.2"
+tokio = "1.28.0"
+
+[[test]]
+name = "test_sockets"
+path = "socket_test.rs"
