@@ -530,7 +530,6 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
                     warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
                 }
             } else {
-                // Did the cache update
                 update = CERT_GETTER.get().unwrap().on_timer(&mut locked_cache).await;
             }
             if let CertificateCacheUpdate::Updated(count) = update {
