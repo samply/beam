@@ -13,13 +13,13 @@ static WAITING_CONNECTIONS: Lazy<Arc<RwLock<HashMap<String, Socks5Socket<TcpStre
 /// Allowed tokens that are permited to create sockets
 // pub static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| Arc::default());
 #[cfg(debug_assertions)]
-pub static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| Arc::new(RwLock::new({
+pub(crate) static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| Arc::new(RwLock::new({
     let mut h = HashSet::new();
     h.insert("test".to_string());
     h
 })));
 #[cfg(not(debug_assertions))]
-pub static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| Arc::default());
+pub(crate) static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| Arc::default());
 
 struct Authenticator;
 
