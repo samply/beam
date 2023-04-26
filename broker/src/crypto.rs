@@ -14,7 +14,7 @@ use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use shared::{
     config,
-    crypto::{GetCerts, CertificateCache},
+    crypto::{GetCerts, CertificateCache, CertificateCacheUpdate},
     errors::SamplyBeamError,
     http_client::{self, SamplyHttpClient},
 };
@@ -275,22 +275,14 @@ impl GetCerts for GetCertsFromPki {
         return Ok(body);
     }
 
-    async fn on_timer(&self, cache: &mut CertificateCache) -> bool {
+    async fn on_timer(&self, cache: &mut CertificateCache) -> CertificateCacheUpdate {
         let result = cache.update_certificates_mut().await;
-        match &result {
+        match result {
             Err(e) => {
                 warn!("Unable to update CertificateCache. Maybe it stopped? Reason: {e}.");
-                false
+                CertificateCacheUpdate::UnChanged
             }
-            Ok(count) => {
-                if *count > 0 {
-                    info!("Added {count} new certificates.");
-                    true
-                } else {
-                    debug!("No new certificates have been found.");
-                    false
-                }
-            }
+            Ok(update) => update
         }
     }
 }

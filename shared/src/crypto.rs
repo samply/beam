@@ -90,10 +90,35 @@ pub enum CertificateCacheEntry {
     Invalid(CertificateInvalidReason),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum CertificateCacheUpdate {
+    Updated(u32),
+    UnChanged,
+}
+
+impl From<usize> for CertificateCacheUpdate {
+    fn from(value: usize) -> Self {
+        if value > 0 {
+            Self::Updated(value as u32)
+        } else {
+            Self::UnChanged
+        }
+    }
+}
+
+impl AsRef<u32> for CertificateCacheUpdate {
+    fn as_ref(&self) -> &u32 {
+        match self {
+            CertificateCacheUpdate::Updated(i) => i,
+            CertificateCacheUpdate::UnChanged => &0,
+        }
+    }
+}
+
 pub struct CertificateCache {
     serial_to_x509: HashMap<Serial, CertificateCacheEntry>,
     cn_to_serial: HashMap<ProxyId, Vec<Serial>>,
-    update_trigger: mpsc::Sender<oneshot::Sender<Result<usize, SamplyBeamError>>>,
+    update_trigger: mpsc::Sender<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>,
     root_cert: Option<X509>, // Might not be available at initialization time
     im_cert: Option<X509>,   // Might not be available at initialization time
 }
@@ -104,13 +129,13 @@ pub trait GetCerts: Sync + Send {
     async fn certificate_by_serial_as_pem(&self, serial: &str) -> Result<String, SamplyBeamError>;
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError>;
     /// A callback that runs on a timer and returns if the cache changed
-    async fn on_timer(&self, _cache: &mut CertificateCache) -> bool { false }
+    async fn on_timer(&self, _cache: &mut CertificateCache) -> CertificateCacheUpdate { CertificateCacheUpdate::UnChanged }
     async fn on_cert_expired(&self, _expired_cert: X509) {}
 }
 
 impl CertificateCache {
     pub fn new(
-        update_trigger: mpsc::Sender<oneshot::Sender<Result<usize, SamplyBeamError>>>,
+        update_trigger: mpsc::Sender<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>,
     ) -> Result<CertificateCache, SamplyBeamError> {
         Ok(Self {
             serial_to_x509: HashMap::new(),
@@ -194,7 +219,7 @@ impl CertificateCache {
             // requires write lock.
             Self::update_certificates().await.unwrap_or_else(|e| {
                 warn!("Updating certificates failed: {}", e);
-                0
+                CertificateCacheUpdate::UnChanged
             });
             result = get_all_certs_from_cache_by_cname(cname).await;
             if result.is_empty() {
@@ -224,7 +249,7 @@ impl CertificateCache {
         Self::update_certificates().await.unwrap_or_else(|e| {
             // requires write lock.
             warn!("Updating certificates failed: {}", e);
-            0
+            CertificateCacheUpdate::UnChanged
         });
         let cache = CERT_CACHE.read().await;
         let cert = cache.serial_to_x509.get(serial);
@@ -233,9 +258,9 @@ impl CertificateCache {
     }
 
     /// Manually update cache from fetching all certs from the central vault
-    async fn update_certificates() -> Result<usize, SamplyBeamError> {
+    async fn update_certificates() -> Result<CertificateCacheUpdate, SamplyBeamError> {
         debug!("Triggering certificate update ...");
-        let (tx, rx) = oneshot::channel::<Result<usize, SamplyBeamError>>();
+        let (tx, rx) = oneshot::channel();
         CERT_CACHE
             .read()
             .await
@@ -246,7 +271,7 @@ impl CertificateCache {
         debug!("Certificate update triggered -- waiting for results...");
         match rx.await {
             Ok(Ok(result)) => {
-                debug!("Certificate update successfully completed: Got {result} new certificates.");
+                debug!("Certificate update successfully completed: Got {} new certificates.", result.as_ref());
                 Ok(result)
             }
             Ok(Err(e)) => {
@@ -260,7 +285,7 @@ impl CertificateCache {
         }
     }
 
-    pub async fn update_certificates_mut(&mut self) -> Result<usize, SamplyBeamError> {
+    pub async fn update_certificates_mut(&mut self) -> Result<CertificateCacheUpdate, SamplyBeamError> {
         debug!("Updating certificates via network ...");
         let certificate_list = CERT_GETTER.get().unwrap().certificate_list_via_network().await?;
         let new_certificate_serials: Vec<&String> = {
@@ -359,7 +384,7 @@ impl CertificateCache {
                 new_count += 1;
             }
         }
-        Ok(new_count)
+        Ok(CertificateCacheUpdate::from(new_count))
     }
 
     /*
@@ -478,7 +503,7 @@ pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
 
 #[dynamic(lazy)]
 pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
-    let (tx_refresh, mut rx_refresh) = mpsc::channel::<oneshot::Sender<Result<usize, SamplyBeamError>>>(1);
+    let (tx_refresh, mut rx_refresh) = mpsc::channel::<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>(1);
     let (tx_newcerts, mut rx_newcerts) = mpsc::channel::<()>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx_refresh).unwrap()));
     let cc2 = cc.clone();
@@ -497,22 +522,19 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
             };
             let started = Instant::now();
             let mut locked_cache = cc2.write().await;
-            let mut has_updated = false;
+            let update;
             if let Some(sender) = sender {
                 let result = locked_cache.update_certificates_mut().await;
-                has_updated = match &result {
-                    Ok(updated) if *updated > 0 =>  true,
-                    _ => false
-                };
+                update = *result.as_ref().unwrap_or(&CertificateCacheUpdate::UnChanged);
                 if let Err(_err) = sender.send(result) {
                     warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
                 }
             } else {
                 // Did the cache update
-                has_updated = CERT_GETTER.get().unwrap().on_timer(&mut locked_cache).await; {
-                }
+                update = CERT_GETTER.get().unwrap().on_timer(&mut locked_cache).await;
             }
-            if has_updated {
+            if let CertificateCacheUpdate::Updated(count) = update {
+                info!("Added {count} new certificates.");
                 if let Err(e) = tx_newcerts.send(()).await {
                     warn!("Unable to inform cert expirer about a newly arrived certificate. Err: {e}. Continuing.");
                 }
