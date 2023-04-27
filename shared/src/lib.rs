@@ -187,13 +187,31 @@ impl Msg for MsgEmpty {
 // An alternative would be to find some mitm save way to share a secret between both clients and the broker 
 #[derive(Debug, Deserialize, Serialize)]
 // This should maybe also be strictly serialized
-pub struct MsgSocketRequest<State> {
+pub struct MsgSocketRequest<State>
+where State: MsgState {
     from: AppOrProxyId,
     to: AppOrProxyId,
     #[serde(with="serialize_time", rename="ttl")]
     expire: SystemTime,
     secret: State,
     metadata: Value,
+}
+
+impl<State: MsgState> Msg for MsgSocketRequest<State> {
+    fn get_from(&self) -> &AppOrProxyId {
+        &self.from
+    }
+
+    fn get_to(&self) -> &Vec<AppOrProxyId> {
+        let mut result = Vec::with_capacity(1);
+        result.push(self.to.clone());
+        // TODO: Not leak memory maybe change the api to return a Cow
+        Box::leak(Box::new(result))
+    }
+
+    fn get_metadata(&self) -> &Value {
+        &self.metadata
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]

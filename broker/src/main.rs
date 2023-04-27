@@ -9,6 +9,7 @@ mod serve_health;
 mod serve_pki;
 mod serve_tasks;
 mod socks;
+mod serve_sockets;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
