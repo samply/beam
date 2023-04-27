@@ -20,7 +20,7 @@ use tracing::debug;
 use std::{
     fmt::{Debug, Display},
     ops::Deref,
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant, SystemTime}, net::SocketAddr,
 };
 
 use rand::Rng;
@@ -181,12 +181,28 @@ impl Msg for MsgEmpty {
 // Shortest connection would be from beam-app to broker to beam-app without hops to the proxies
 // For beam connect this would enable things like websockets maybe
 // Beam connect could work in the future something like https://github.com/qwj/python-proxy supporting all kinds of protocols but using sockets under the hood
-// Broker would just need to forward socks connections like https://github.com/EAimTY/socks5-server/blob/master/socks5-server/examples/simple_socks5.rs
+// Idea:
+// Client generates a secret hashes it puts the hash in one filed the unhashed token is send to the client and encrypted by beams normal encryption.
+// Both clients now share a secret key and can connect to the relay with the hash of that secret and encrypt their traffic
+// An alternative would be to find some mitm save way to share a secret between both clients and the broker 
 #[derive(Debug, Deserialize, Serialize)]
 // This should maybe also be strictly serialized
-pub struct MsgSocketRequest {
+pub struct MsgSocketRequest<State> {
     from: AppOrProxyId,
     to: AppOrProxyId,
+    #[serde(with="serialize_time", rename="ttl")]
+    expire: SystemTime,
+    secret: State,
+    metadata: Value,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MsgSocketResult {
+    from: AppOrProxyId,
+    to: AppOrProxyId,
+    connect: SocketAddr,
+    token: String,
+    metadata: Value,
 }
 
 #[derive(Serialize, Deserialize)]

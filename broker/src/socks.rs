@@ -9,7 +9,7 @@ use tokio_stream::StreamExt;
 
 /// Connections where one side already connected
 /// Maps the connection secret to the assosiated socket
-static WAITING_CONNECTIONS: Lazy<Arc<RwLock<HashMap<String, Socks5Socket<TcpStream>>>>> = Lazy::new(|| Arc::default());
+static WAITING_CONNECTIONS: Lazy<Arc<RwLock<HashMap<String, Socks5Socket<TcpStream>>>>> = Lazy::new(|| Arc::default()); // TODO: expire entrys after some ttl
 /// Allowed tokens that are permited to create sockets
 // pub static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| Arc::default());
 #[cfg(debug_assertions)]
@@ -19,7 +19,7 @@ pub(crate) static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new
     h
 })));
 #[cfg(not(debug_assertions))]
-pub(crate) static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| Arc::default());
+pub(crate) static ALLOWED_TOKENS: Lazy<Arc<RwLock<HashSet<String>>>> = Lazy::new(|| Arc::default()); // TODO: we may also want to expire tokens
 
 struct Authenticator;
 
@@ -96,21 +96,22 @@ async fn send_reply_successfull_connection(socket: &mut Socks5Socket<TcpStream>)
 }
 
 async fn tunnel(mut a: Socks5Socket<TcpStream>, mut b: Socks5Socket<TcpStream>) -> std::io::Result<()> {
+    // we have connections from both clients so we want to remove the token from the set of allowed tokens
+    let AuthenticationMethod::Password { password, .. } = a.auth() else {
+        unreachable!("This is checked earlier");
+    };
+    if cfg!(debug_assertions) {
+        info!("Would have removed token from set in prod.");
+    } else {
+        ALLOWED_TOKENS.write().await.remove(password);
+    }
+    // Tell both sockets that we connected
     send_reply_successfull_connection(&mut a).await?;
     send_reply_successfull_connection(&mut b).await?;
     tokio::spawn(async move {
         let result = tokio::io::copy_bidirectional(&mut a, &mut b).await;
         if let Err(e) = result {
             warn!("Error relaying socket connect: {e}");
-        }
-        // when we are done we remove the token from the set of allowed tokens
-        let AuthenticationMethod::Password { password, .. } = a.auth() else {
-            unreachable!("This is checked earlier");
-        };
-        if cfg!(debug_assertions) {
-            info!("Would have removed token from set in prod.");
-        } else {
-            ALLOWED_TOKENS.write().await.remove(password);
         }
     });
     Ok(())
