@@ -184,16 +184,17 @@ impl Msg for MsgEmpty {
 // Client generates a secret hashes it puts the hash in one filed the unhashed token is send to the client and encrypted by beams normal encryption.
 // Both clients now share a secret key and can connect to the relay with the hash of that secret and encrypt their traffic
 // An alternative would be to find some mitm save way to share a secret between both clients and the broker 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 // This should maybe also be strictly serialized
 pub struct MsgSocketRequest<State>
 where State: MsgState {
-    from: AppOrProxyId,
-    to: AppOrProxyId,
+    pub from: AppOrProxyId,
+    pub to: AppOrProxyId,
     #[serde(with="serialize_time", rename="ttl")]
-    expire: SystemTime,
-    secret: State,
-    metadata: Value,
+    pub expire: SystemTime,
+    pub id: MsgId,
+    pub secret: State,
+    pub metadata: Value,
 }
 
 impl<State: MsgState> Msg for MsgSocketRequest<State> {
@@ -219,8 +220,8 @@ impl DecryptableMsg for MsgSocketRequest<Encrypted> {
     }
 
     fn convert_self(self, body: String) -> Self::Output {
-        let Self { from, to, expire, metadata, .. } = self;
-        Self::Output { from, to, expire, secret: body.into(), metadata }
+        let Self { from, to, expire, metadata, id, .. } = self;
+        Self::Output { from, to, expire, secret: body.into(), metadata, id }
     }
 }
 
@@ -228,8 +229,8 @@ impl EncryptableMsg for MsgSocketRequest<Plain> {
     type Output = MsgSocketRequest<Encrypted>;
 
     fn convert_self(self, body: Encrypted) -> Self::Output {
-        let Self { from, to, expire, metadata, .. } = self;
-        Self::Output { from, to, expire, metadata, secret: body }
+        let Self { from, to, expire, metadata, id, .. } = self;
+        Self::Output { from, to, expire, metadata, secret: body, id }
     }
 
     fn get_plain(&self) -> &Plain {
@@ -237,17 +238,17 @@ impl EncryptableMsg for MsgSocketRequest<Plain> {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct MsgSocketResult {
-    from: AppOrProxyId,
-    to: AppOrProxyId,
-    connect: SocketAddr,
+    pub from: AppOrProxyId,
+    pub to: AppOrProxyId,
+    pub connect: SocketAddr,
     /// This is the hash of the secret
     /// TODO: is it fine that this is not encryted?
     /// The reason it is currently not is because I dont know how else I would share a token securly that the broker can read
     /// A mitm could steal this token and connect to the socket but if the client used his secret to encrypt his stream the attacker wont be able to decrypt the traffic with just the hash
-    token: String,
-    metadata: Value,
+    pub token: String,
+    pub metadata: Value,
 }
 
 impl Msg for MsgSocketResult {
