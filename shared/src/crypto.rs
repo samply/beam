@@ -523,13 +523,16 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
             let started = Instant::now();
             let mut locked_cache = cc2.write().await;
             let update;
+            // Cache update from by a function
             if let Some(sender) = sender {
                 let result = locked_cache.update_certificates_mut().await;
                 update = *result.as_ref().unwrap_or(&CertificateCacheUpdate::UnChanged);
                 if let Err(_err) = sender.send(result) {
                     warn!("Unable to inform requesting thread that CertificateCache has been updated. Maybe it stopped?");
                 }
+            // Cache update on a timer
             } else {
+                // Note: This currently only updates the Cache on the broker as the default implementation of `GetCerts` does no update the cache 
                 update = CERT_GETTER.get().unwrap().on_timer(&mut locked_cache).await;
             }
             if let CertificateCacheUpdate::Updated(count) = update {
