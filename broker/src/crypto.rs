@@ -14,13 +14,13 @@ use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use shared::{
     config,
-    crypto::GetCerts,
+    crypto::{GetCerts, CertificateCache, CertificateCacheUpdate},
     errors::SamplyBeamError,
     http_client::{self, SamplyHttpClient},
 };
 use std::time::Duration;
 use tokio::time::timeout;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, warn, info};
 
 use crate::health::{self, VaultStatus};
 
@@ -273,6 +273,17 @@ impl GetCerts for GetCertsFromPki {
             SamplyBeamError::VaultOtherError(format!("Cannot parse im-ca certificate: {}", e))
         })?;
         return Ok(body);
+    }
+
+    async fn on_timer(&self, cache: &mut CertificateCache) -> CertificateCacheUpdate {
+        let result = cache.update_certificates_mut().await;
+        match result {
+            Err(e) => {
+                warn!("Unable to update CertificateCache. Maybe it stopped? Reason: {e}.");
+                CertificateCacheUpdate::UnChanged
+            }
+            Ok(update) => update
+        }
     }
 }
 
