@@ -211,13 +211,57 @@ impl<State: MsgState> Msg for MsgSocketRequest<State> {
     }
 }
 
+impl DecryptableMsg for MsgSocketRequest<Encrypted> {
+    type Output = MsgSocketRequest<Plain>;
+
+    fn get_encryption(&self) -> &Encrypted {
+        &self.secret
+    }
+
+    fn convert_self(self, body: String) -> Self::Output {
+        let Self { from, to, expire, metadata, .. } = self;
+        Self::Output { from, to, expire, secret: body.into(), metadata }
+    }
+}
+
+impl EncryptableMsg for MsgSocketRequest<Plain> {
+    type Output = MsgSocketRequest<Encrypted>;
+
+    fn convert_self(self, body: Encrypted) -> Self::Output {
+        let Self { from, to, expire, metadata, .. } = self;
+        Self::Output { from, to, expire, metadata, secret: body }
+    }
+
+    fn get_plain(&self) -> &Plain {
+        &self.secret
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct MsgSocketResult {
     from: AppOrProxyId,
     to: AppOrProxyId,
     connect: SocketAddr,
+    /// This is the hash of the secret
+    /// TODO: is it fine that this is not encryted?
+    /// The reason it is currently not is because I dont know how else I would share a token securly that the broker can read
+    /// A mitm could steal this token and connect to the socket but if the client used his secret to encrypt his stream the attacker wont be able to decrypt the traffic with just the hash
     token: String,
     metadata: Value,
+}
+
+impl Msg for MsgSocketResult {
+    fn get_from(&self) -> &AppOrProxyId {
+        &self.from
+    }
+
+    fn get_to(&self) -> Cow<'_, Vec<AppOrProxyId>> {
+        Cow::Owned(vec![self.to.clone()])
+    }
+
+    fn get_metadata(&self) -> &Value {
+        todo!()
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -228,7 +272,8 @@ where
 {
     MsgTaskRequest(MsgTaskRequest<State>),
     MsgTaskResult(MsgTaskResult<State>),
-    // MsgSocketRequest(MsgSocketRequest),
+    MsgSocketRequest(MsgSocketRequest<State>),
+    MsgSocketResult(MsgSocketResult),
     MsgEmpty(MsgEmpty),
 }
 
@@ -243,6 +288,8 @@ impl EncryptableMsg for PlainMessage {
             Self::MsgTaskRequest(m) => Self::Output::MsgTaskRequest(m.convert_self(body)),
             Self::MsgTaskResult(m) => Self::Output::MsgTaskResult(m.convert_self(body)),
             Self::MsgEmpty(m) => Self::Output::MsgEmpty(m),
+            Self::MsgSocketResult(m) => Self::Output::MsgSocketResult(m),
+            Self::MsgSocketRequest(m) => Self::Output::MsgSocketRequest(m.convert_self(body))
         }
     }
 
@@ -251,6 +298,8 @@ impl EncryptableMsg for PlainMessage {
             Self::MsgTaskRequest(m) => m.get_plain(),
             Self::MsgTaskResult(m) => m.get_plain(),
             Self::MsgEmpty(_) => &Plain { body: None },
+            Self::MsgSocketResult(_) => &Plain { body: None },
+            Self::MsgSocketRequest(m) => m.get_plain(),
         }
     }
 }
@@ -268,6 +317,8 @@ impl DecryptableMsg for EncryptedMessage {
             Self::MsgTaskRequest(m) => Self::Output::MsgTaskRequest(m.convert_self(body)),
             Self::MsgTaskResult(m) => Self::Output::MsgTaskResult(m.convert_self(body)),
             Self::MsgEmpty(m) => Self::Output::MsgEmpty(m),
+            Self::MsgSocketResult(m) => Self::Output::MsgSocketResult(m),
+            Self::MsgSocketRequest(m) => Self::Output::MsgSocketRequest(m.convert_self(body))
         }
     }
 
@@ -276,6 +327,8 @@ impl DecryptableMsg for EncryptedMessage {
             Self::MsgTaskRequest(m) => m.get_encryption(),
             Self::MsgTaskResult(m) => m.get_encryption(),
             Self::MsgEmpty(_) => MESSAGE_EMPTY_ENCRYPTION,
+            Self::MsgSocketResult(_) => MESSAGE_EMPTY_ENCRYPTION,
+            Self::MsgSocketRequest(m) => m.get_encryption(),
         }
     }
 }
@@ -286,6 +339,8 @@ impl<T: MsgState> Msg for MessageType<T> {
         match self {
             MsgTaskRequest(m) => m.get_from(),
             MsgTaskResult(m) => m.get_from(),
+            MsgSocketRequest(m) => m.get_from(),
+            MsgSocketResult(m) => m.get_from(),
             MsgEmpty(m) => m.get_from(),
         }
     }
@@ -294,6 +349,8 @@ impl<T: MsgState> Msg for MessageType<T> {
         use MessageType::*;
         match self {
             MsgTaskRequest(m) => m.get_to(),
+            MsgSocketRequest(m) => m.get_to(),
+            MsgSocketResult(m) => m.get_to(),
             MsgTaskResult(m) => m.get_to(),
             MsgEmpty(m) => m.get_to(),
         }
@@ -304,6 +361,8 @@ impl<T: MsgState> Msg for MessageType<T> {
         match self {
             MsgTaskRequest(m) => m.get_metadata(),
             MsgTaskResult(m) => m.get_metadata(),
+            MsgSocketRequest(m) => m.get_metadata(),
+            MsgSocketResult(m) => m.get_metadata(),
             MsgEmpty(m) => m.get_metadata(),
         }
     }
