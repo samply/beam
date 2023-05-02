@@ -19,6 +19,7 @@ function test() {
     echo "=> $(basename $test) ..."
     source $test
   done
+  cargo test
   echo -e "  ${COL_GREEN}All tests have completed successfully.${COL_NONE}"
 }
 
