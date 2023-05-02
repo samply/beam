@@ -392,11 +392,11 @@ async fn wait_for_results_for_task<'a, M: Msg, I: PartialEq>(
     }
 }
 
-async fn wait_for_elements_task<M: HasWaitId<MsgId> + Clone>(
+pub(crate) async fn wait_for_elements_task<M: HasWaitId<MsgId> + Clone>(
     vec: &mut Vec<M>,
     block: &HowLongToBlock,
     mut new_element_rx: Receiver<M>,
-    mut filter: impl FnMut(&M) -> bool,
+    filter: impl Fn(&M) -> bool,
     mut deleted_task_rx: Receiver<MsgId>,
 ) {
     let wait_until = time::Instant::now()
