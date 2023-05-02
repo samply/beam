@@ -392,12 +392,11 @@ async fn wait_for_results_for_task<'a, M: Msg, I: PartialEq>(
     }
 }
 
-// TODO: Is there a way to write this function in a generic way? (2/2)
-async fn wait_for_elements_task<'a>(
-    vec: &mut Vec<MsgSigned<EncryptedMsgTaskRequest>>,
+async fn wait_for_elements_task<M: HasWaitId<MsgId> + Clone>(
+    vec: &mut Vec<M>,
     block: &HowLongToBlock,
-    mut new_element_rx: Receiver<MsgSigned<EncryptedMsgTaskRequest>>,
-    filter: &MsgFilterForTask<'a>,
+    mut new_element_rx: Receiver<M>,
+    mut filter: impl FnMut(&M) -> bool,
     mut deleted_task_rx: Receiver<MsgId>,
 ) {
     let wait_until = time::Instant::now()
@@ -424,7 +423,7 @@ async fn wait_for_elements_task<'a>(
             result = new_element_rx.recv() => {
                 match result {
                     Ok(req) => {
-                        if filter.matches(&req) {
+                        if filter(&req) {
                             vec.retain(|el| el.wait_id() != req.wait_id());
                             vec.push(req);
                         }
@@ -525,7 +524,7 @@ async fn get_tasks(
         &mut vec,
         &block,
         new_task_rx,
-        &filter,
+        move |m| filter.matches(m),
         state.removed_task_rx.subscribe(),
     )
     .await;
