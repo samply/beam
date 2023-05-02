@@ -8,17 +8,19 @@ use shared::{
 };
 use tracing::{debug, error, info, warn};
 
-use crate::{banner, serve_health, serve_tasks};
+use crate::{banner, serve_health, serve_tasks, serve_sockets};
 
 pub(crate) async fn serve(
     config: config_proxy::Config,
     client: SamplyHttpClient,
 ) -> anyhow::Result<()> {
     let router_tasks = serve_tasks::router(&client);
+    let router_socket = serve_sockets::router(client);
 
     let router_health = serve_health::router();
 
     let app = router_tasks
+        .merge(router_socket)
         .merge(router_health)
         .layer(axum::middleware::from_fn(shared::middleware::log))
         .layer(axum::middleware::map_response(banner::set_server_header));

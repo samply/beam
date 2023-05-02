@@ -18,6 +18,7 @@ mod crypto;
 mod serve;
 mod serve_health;
 mod serve_tasks;
+mod serve_sockets;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {

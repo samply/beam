@@ -50,9 +50,9 @@ use tracing::{debug, error, info, trace, warn};
 use crate::auth::AuthenticatedApp;
 
 #[derive(Clone, FromRef)]
-struct TasksState {
-    client: SamplyHttpClient,
-    config: config_proxy::Config,
+pub(crate) struct TasksState {
+    pub(crate) client: SamplyHttpClient,
+    pub(crate) config: config_proxy::Config,
 }
 
 pub(crate) fn router(client: &SamplyHttpClient) -> Router {
@@ -117,7 +117,7 @@ async fn forward_request(
     Ok(resp)
 }
 
-async fn handler_task(
+pub(crate) async fn handler_task(
     State(client): State<SamplyHttpClient>,
     State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
