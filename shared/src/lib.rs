@@ -195,6 +195,8 @@ where State: MsgState {
     pub id: MsgId,
     pub secret: State,
     pub metadata: Value,
+    #[serde(skip)]
+    pub result: Option<MsgSocketResult>
 }
 
 impl<State: MsgState> Msg for MsgSocketRequest<State> {
@@ -220,8 +222,8 @@ impl DecryptableMsg for MsgSocketRequest<Encrypted> {
     }
 
     fn convert_self(self, body: String) -> Self::Output {
-        let Self { from, to, expire, metadata, id, .. } = self;
-        Self::Output { from, to, expire, secret: body.into(), metadata, id }
+        let Self { from, to, expire, metadata, id, result, .. } = self;
+        Self::Output { from, to, expire, secret: body.into(), metadata, id, result }
     }
 }
 
@@ -229,8 +231,8 @@ impl EncryptableMsg for MsgSocketRequest<Plain> {
     type Output = MsgSocketRequest<Encrypted>;
 
     fn convert_self(self, body: Encrypted) -> Self::Output {
-        let Self { from, to, expire, metadata, id, .. } = self;
-        Self::Output { from, to, expire, metadata, secret: body, id }
+        let Self { from, to, expire, metadata, id, result, .. } = self;
+        Self::Output { from, to, expire, metadata, secret: body, id, result }
     }
 
     fn get_plain(&self) -> &Plain {
@@ -242,6 +244,7 @@ impl EncryptableMsg for MsgSocketRequest<Plain> {
 pub struct MsgSocketResult {
     pub from: AppOrProxyId,
     pub to: AppOrProxyId,
+    pub task: MsgId,
     pub connect: SocketAddr,
     /// This is the hash of the secret
     /// TODO: is it fine that this is not encryted?

@@ -241,7 +241,7 @@ fn would_wait_for_elements(existing_elements: usize, block: &HowLongToBlock) -> 
     usize::from(block.wait_count.unwrap_or(0)) > existing_elements
 }
 
-fn wait_get_statuscode<S>(vec: &Vec<S>, block: &HowLongToBlock) -> StatusCode {
+pub(crate) fn wait_get_statuscode<S>(vec: &Vec<S>, block: &HowLongToBlock) -> StatusCode {
     if usize::from(block.wait_count.unwrap_or(0)) > vec.len() {
         StatusCode::PARTIAL_CONTENT
     } else {
