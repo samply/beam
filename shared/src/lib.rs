@@ -763,6 +763,12 @@ impl HasWaitId<MsgId> for MsgTaskRequest {
     }
 }
 
+impl<State: MsgState> HasWaitId<MsgId> for MsgSocketRequest<State> {
+    fn wait_id(&self) -> MsgId {
+        self.id
+    }
+}
+
 impl HasWaitId<String> for MsgTaskResult {
     fn wait_id(&self) -> String {
         format!("{},{}", self.task, self.from)
