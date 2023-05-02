@@ -21,10 +21,11 @@ use tokio::{
 };
 use tracing::{debug, info, trace, warn};
 
-use crate::{banner, crypto, health::Health, serve_health, serve_pki, serve_tasks};
+use crate::{banner, crypto, health::Health, serve_health, serve_pki, serve_tasks, serve_sockets};
 
 pub(crate) async fn serve(health: Arc<RwLock<Health>>) -> anyhow::Result<()> {
     let app = serve_tasks::router()
+        .merge(serve_sockets::router())
         .merge(serve_pki::router())
         .merge(serve_health::router(health))
         .layer(axum::middleware::from_fn(shared::middleware::log))

@@ -153,7 +153,7 @@ async fn get_results_for_task_nostream(
             &mut results,
             &block,
             rx,
-            &filter_for_me,
+            move |m| filter_for_me.matches(m),
             rx_deleted_task,
             &task_id,
         )
@@ -335,11 +335,11 @@ where
 }
 
 // TODO: Is there a way to write this function in a generic way? (1/2)
-async fn wait_for_results_for_task<'a, M: Msg, I: PartialEq>(
+pub(crate) async fn wait_for_results_for_task<'a, M: Msg, I: PartialEq>(
     vec: &mut Vec<M>,
     block: &HowLongToBlock,
     mut new_result_rx: Receiver<M>,
-    filter: &MsgFilterNoTask<'a>,
+    filter: impl Fn(&M) -> bool,
     mut deleted_task_rx: Receiver<MsgId>,
     task_id: &MsgId,
 ) where
@@ -369,7 +369,7 @@ async fn wait_for_results_for_task<'a, M: Msg, I: PartialEq>(
             result = new_result_rx.recv() => {
                 match result {
                     Ok(req) => {
-                        if filter.matches(&req) {
+                        if filter(&req) {
                             vec.retain(|el| el.wait_id() != req.wait_id());
                             vec.push(req);
                         }

@@ -196,7 +196,7 @@ where State: MsgState {
     pub secret: State,
     pub metadata: Value,
     #[serde(skip)]
-    pub result: Option<MsgSocketResult>
+    pub result: Option<MsgSigned<MsgSocketResult>>
 }
 
 impl<State: MsgState> Msg for MsgSocketRequest<State> {
@@ -769,6 +769,12 @@ impl HasWaitId<MsgId> for MsgTaskRequest {
 impl<State: MsgState> HasWaitId<MsgId> for MsgSocketRequest<State> {
     fn wait_id(&self) -> MsgId {
         self.id
+    }
+}
+
+impl HasWaitId<String> for MsgSocketResult {
+    fn wait_id(&self) -> String {
+        format!("{},{}", self.task, self.from)
     }
 }
 

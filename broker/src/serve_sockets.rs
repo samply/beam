@@ -6,7 +6,7 @@ use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt:
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
 use tracing::{debug, log::error};
 
-use crate::serve_tasks::{wait_for_elements_task, wait_get_statuscode};
+use crate::{serve_tasks::{wait_for_elements_task, wait_get_statuscode, wait_for_results_for_task}, socks::ALLOWED_TOKENS};
 
 
 #[derive(Clone)]
@@ -92,7 +92,7 @@ async fn post_socket_request(
 
 async fn put_socket_result(
     state: State<SocketState>,
-    Path(task_id): Path<MsgId>,
+    task_id: MsgId,
     msg: MsgSigned<MsgSocketResult>
 ) -> (StatusCode, String) {
     if task_id != msg.msg.task {
@@ -109,7 +109,8 @@ async fn put_socket_result(
         if msg.get_from() != &task.msg.to {
             return (StatusCode::UNAUTHORIZED, "Your result is not requested for this task.".to_string());
         }
-        task.msg.result = Some(msg.msg.clone());
+        task.msg.result = Some(msg.clone());
+        ALLOWED_TOKENS.write().await.insert(msg.msg.token.clone());
     }
     {
         let result_sender_map = &state.new_result_tx.read().await;
@@ -126,7 +127,42 @@ async fn put_socket_result(
 
 async fn get_socket_result(
     state: State<SocketState>,
+    mut block: HowLongToBlock,
+    task_id: MsgId,
     msg: MsgSigned<MsgEmpty>
-) {
+) -> Result<Json<MsgSigned<MsgSocketResult>>, (StatusCode, &'static str)> {
+    let result = {
+        let task_map = state.socket_requests.read().await;
+        let Some(task) = task_map.get(&task_id) else {
+            return Err((StatusCode::NOT_FOUND, "Task not found"));
+        };
+        if task.get_from() != msg.get_from() {
+            return Err((StatusCode::UNAUTHORIZED, "Not your task."));
+        }
+        task.msg.result.clone()
+    };
 
+    if let Some(result) = result {
+        Ok(Json(result))
+    } else {
+        block.wait_count = Some(1);
+        let mut result = Vec::with_capacity(1);
+        let Some(new_result_rx) = state.new_result_tx.read().await.get(&task_id).map(Sender::subscribe) else {
+            error!("Failed to find result reciever for existing task");
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "Internal server error"));
+        };
+        wait_for_results_for_task(
+            &mut result,
+            &block, 
+            new_result_rx,
+            |m| &m.msg.to == msg.get_from(),
+            state.deleted_socket_request.subscribe(), 
+            &task_id
+        ).await;
+        if let Some(result) = result.pop() {
+            Ok(Json(result))
+        } else {
+            Err((StatusCode::NO_CONTENT, "Task has no result yet"))
+        }
+    }
 }
