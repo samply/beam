@@ -11,6 +11,7 @@ use crate::{serve_tasks::{wait_for_elements_task, wait_get_statuscode, wait_for_
 
 #[derive(Clone)]
 struct SocketState {
+    /// TODO: Expire watcher
     socket_requests: Arc<RwLock<HashMap<MsgId, MsgSigned<MsgSocketRequest<Encrypted>>>>>,
     /// TODO: Figure out a better way to do this at some point
     new_socket_request: Arc<Sender<MsgSigned<MsgSocketRequest<Encrypted>>>>,
