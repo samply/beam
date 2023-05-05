@@ -20,7 +20,7 @@ use tracing::debug;
 use std::{
     fmt::{Debug, Display},
     ops::Deref,
-    time::{Duration, Instant, SystemTime}, net::SocketAddr, borrow::Cow,
+    time::{Duration, Instant, SystemTime}, net::SocketAddr, borrow::Cow, option::Option,
 };
 
 use rand::Rng;
@@ -217,8 +217,8 @@ impl<State: MsgState> Msg for MsgSocketRequest<State> {
 impl DecryptableMsg for MsgSocketRequest<Encrypted> {
     type Output = MsgSocketRequest<Plain>;
 
-    fn get_encryption(&self) -> &Encrypted {
-        &self.secret
+    fn get_encryption(&self) -> Option<&Encrypted> {
+        Some(&self.secret)
     }
 
     fn convert_self(self, body: String) -> Self::Output {
@@ -264,7 +264,7 @@ impl Msg for MsgSocketResult {
     }
 
     fn get_metadata(&self) -> &Value {
-        todo!()
+        &self.metadata
     }
 }
 
@@ -308,10 +308,6 @@ impl EncryptableMsg for PlainMessage {
     }
 }
 
-const MESSAGE_EMPTY_ENCRYPTION: &Encrypted = &Encrypted {
-    encrypted: Vec::new(),
-    encryption_keys: Vec::new(),
-};
 
 impl DecryptableMsg for EncryptedMessage {
     type Output = PlainMessage;
@@ -326,12 +322,12 @@ impl DecryptableMsg for EncryptedMessage {
         }
     }
 
-    fn get_encryption(&self) -> &Encrypted {
+    fn get_encryption(&self) -> Option<&Encrypted> {
         match self {
             Self::MsgTaskRequest(m) => m.get_encryption(),
             Self::MsgTaskResult(m) => m.get_encryption(),
-            Self::MsgEmpty(_) => MESSAGE_EMPTY_ENCRYPTION,
-            Self::MsgSocketResult(_) => MESSAGE_EMPTY_ENCRYPTION,
+            Self::MsgEmpty(_) => None,
+            Self::MsgSocketResult(_) => None,
             Self::MsgSocketRequest(m) => m.get_encryption(),
         }
     }
@@ -375,7 +371,7 @@ impl<T: MsgState> Msg for MessageType<T> {
 pub trait DecryptableMsg: Msg + Serialize + Sized {
     type Output: Msg + DeserializeOwned;
 
-    fn get_encryption(&self) -> &Encrypted;
+    fn get_encryption(&self) -> Option<&Encrypted>;
     fn convert_self(self, body: String) -> Self::Output;
 
     /// Decrypts an encrypted message. Caution: can panic.
@@ -385,10 +381,14 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
         my_id: &AppOrProxyId,
         my_priv_key: &RsaPrivateKey,
     ) -> Result<Self::Output, SamplyBeamError> {
-        let Encrypted {
+        let Some(Encrypted {
             encrypted,
             encryption_keys,
-        } = self.get_encryption();
+        }) = self.get_encryption() else {
+            // We have something that is not encryptable
+            return Ok(self.convert_self(String::new()));
+        };
+
         let to_array_index: usize = self
             .get_to()
             .iter()
@@ -679,8 +679,8 @@ impl DecryptableMsg for MsgTaskRequest<Encrypted> {
         }
     }
 
-    fn get_encryption(&self) -> &Encrypted {
-        &self.body
+    fn get_encryption(&self) -> Option<&Encrypted> {
+        Some(&self.body)
     }
 }
 
@@ -724,8 +724,8 @@ impl DecryptableMsg for MsgTaskResult<Encrypted> {
         }
     }
 
-    fn get_encryption(&self) -> &Encrypted {
-        &self.body
+    fn get_encryption(&self) -> Option<&Encrypted> {
+        Some(&self.body)
     }
 }
 
