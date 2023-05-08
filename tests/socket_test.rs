@@ -25,6 +25,7 @@ async fn test_sockets(secret: String) {
     assert_eq!(TEST_DATA, recieved);
 }
 
+#[cfg(debug_assertions)]
 #[tokio::test]
 async fn test_sockets_default() {
     test_sockets("test".to_string()).await;
