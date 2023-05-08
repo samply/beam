@@ -22,6 +22,10 @@ struct CliArgs {
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8080").unwrap())]
     bind_addr: SocketAddr,
 
+    /// Port over which socket connection are handeld. Defaults to `bind_addr`s port + 10. NOTE: This port should *not* be redirected via docker as the clients will connect to the location in the header of a socket request which depends on this value.
+    #[clap(long, env, value_parser)]
+    socket_port: Option<u16>,
+
     /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
     #[clap(long, env, value_parser)]
     pub tls_ca_certificates_dir: Option<PathBuf>,
@@ -57,6 +61,7 @@ struct CliArgs {
 
 pub struct Config {
     pub bind_addr: SocketAddr,
+    pub socket_port: u16,
     pub pki_address: Uri,
     pub pki_realm: String,
     pub pki_token: String,
@@ -85,6 +90,7 @@ impl crate::config::Config for Config {
             pki_realm: cli_args.pki_realm,
             pki_token,
             tls_ca_certificates_dir: cli_args.tls_ca_certificates_dir,
+            socket_port: cli_args.socket_port.unwrap_or(cli_args.bind_addr.port() + 10),
         };
         Ok(config)
     }

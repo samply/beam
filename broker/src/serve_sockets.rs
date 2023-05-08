@@ -1,8 +1,8 @@
 use std::{sync::Arc, collections::HashMap};
 
-use axum::{Router, Json, extract::{State, Path}, routing::get, response::IntoResponse};
-use hyper::{StatusCode, header};
-use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, MsgSocketResult, HasWaitId};
+use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response}};
+use hyper::{StatusCode, header, HeaderMap, http::HeaderValue};
+use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, MsgSocketResult, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}};
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
 use tracing::{debug, log::error};
 
@@ -87,7 +87,7 @@ async fn post_socket_request(
 
     Ok((
         StatusCode::CREATED,
-        [(header::LOCATION, format!("/v1/sockets/{}", msg_id))]
+        [(header::LOCATION, format!("/v1/sockets/{}/results", msg_id))]
     ))
 }
 
@@ -95,20 +95,20 @@ async fn put_socket_result(
     state: State<SocketState>,
     task_id: MsgId,
     msg: MsgSigned<MsgSocketResult>
-) -> (StatusCode, String) {
+) -> Result<(StatusCode, impl IntoResponse), (StatusCode, &'static str)> {
     if task_id != msg.msg.task {
-        return (
+        return Err((
             StatusCode::BAD_REQUEST,
-            "Task IDs supplied in path and payload do not match.".to_string(),
-        );
+            "Task IDs supplied in path and payload do not match.",
+        ));
     };
     {
         let socket_req_map = &mut state.socket_requests.write().await;
         let Some(task) = socket_req_map.get_mut(&msg.msg.task) else {
-            return (StatusCode::NOT_FOUND, "Socket task not found".to_string());
+            return Err((StatusCode::NOT_FOUND, "Socket task not found"));
         };
         if msg.get_from() != &task.msg.to {
-            return (StatusCode::UNAUTHORIZED, "Your result is not requested for this task.".to_string());
+            return Err((StatusCode::UNAUTHORIZED, "Your result is not requested for this task."));
         }
         task.msg.result = Some(msg.clone());
         ALLOWED_TOKENS.write().await.insert(msg.msg.token.clone());
@@ -117,13 +117,13 @@ async fn put_socket_result(
         let result_sender_map = &state.new_result_tx.read().await;
         let Some(tx) = result_sender_map.get(&msg.msg.task) else {
             error!("Found coresponding task but no sender was registerd for task {}.", msg.msg.task);
-            return (StatusCode::INTERNAL_SERVER_ERROR, String::new());
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, "See broker logs"));
         };
         if let Err(e) = tx.send(msg) {
             debug!("Unable to send notification: {}. Ignoring since probably noone is currently waiting for tasks.", e);
         };
     }
-    (StatusCode::CREATED, "Successfully created result.".to_string())
+    Ok((StatusCode::CREATED, [(header::LOCATION, format!("socks5://{}:{}", CONFIG_SHARED.broker_domain, CONFIG_CENTRAL.socket_port))]))
 }
 
 async fn get_socket_result(
@@ -131,7 +131,7 @@ async fn get_socket_result(
     mut block: HowLongToBlock,
     task_id: MsgId,
     msg: MsgSigned<MsgEmpty>
-) -> Result<Json<MsgSigned<MsgSocketResult>>, (StatusCode, &'static str)> {
+) -> Result<Response, (StatusCode, &'static str)> {
     let result = {
         let task_map = state.socket_requests.read().await;
         let Some(task) = task_map.get(&task_id) else {
@@ -143,8 +143,8 @@ async fn get_socket_result(
         task.msg.result.clone()
     };
 
-    if let Some(result) = result {
-        Ok(Json(result))
+    let result = if let Some(result) = result {
+        result
     } else {
         block.wait_count = Some(1);
         let mut result = Vec::with_capacity(1);
@@ -160,10 +160,13 @@ async fn get_socket_result(
             state.deleted_socket_request.subscribe(), 
             &task_id
         ).await;
-        if let Some(result) = result.pop() {
-            Ok(Json(result))
-        } else {
-            Err((StatusCode::NO_CONTENT, "Task has no result yet"))
-        }
-    }
+        let Some(result) = result.pop() else {
+            return Err((StatusCode::NO_CONTENT, "Task has no result yet"))
+        };
+        result
+    };
+    let mut res = Json(result).into_response();
+    let location = HeaderValue::from_str(&format!("socks5://{}:{}", CONFIG_SHARED.broker_domain, CONFIG_CENTRAL.socket_port)).expect("Broker domain cotains invalid chars");
+    res.headers_mut().append(header::LOCATION, location);
+    Ok(res)
 }

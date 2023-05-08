@@ -43,9 +43,11 @@ async fn test_full() -> Result<()> {
 
     let res = put_socket_result(client.clone(), task_id).await?;
     assert_eq!(res.status(), StatusCode::CREATED);
+    println!("{:?}", res.headers().get(header::LOCATION));
 
     let res = get_task_result(client.clone(), task_id).await?;
     assert_eq!(res.status(), StatusCode::OK);
+    println!("{:?}", res.headers().get(header::LOCATION));
 
     test_sockets("hashofsecret".to_string()).await;
     Ok(())
@@ -76,7 +78,6 @@ async fn put_socket_result(client: SamplyHttpClient, task_id: &MsgId) -> Result<
         to: APP1.clone(),
         task: *task_id,
         metadata: Value::Null,
-        connect: "127.0.0.1:8090".parse().unwrap(), // Figure out how we communicate this. IDEA: On a successfull MsgSocketRequest return address of broker and on a successfull PUT of MsgSocketResult
         token: "hashofsecret".to_string(),
     };
     let req = Request::builder()

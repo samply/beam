@@ -45,7 +45,7 @@ async fn authenticate(auth: &AuthenticationMethod) -> Option<(&String, &String)>
 
 pub async fn serve() -> anyhow::Result<()> {
     let mut addr = CONFIG_CENTRAL.bind_addr.clone();
-    addr.set_port(addr.port() + 10);
+    addr.set_port(CONFIG_CENTRAL.socket_port);
     info!("Socks server running on {addr}");
     let mut server = Socks5Server::bind(addr).await?;
     let mut config = Config::default();

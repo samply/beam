@@ -245,7 +245,6 @@ pub struct MsgSocketResult {
     pub from: AppOrProxyId,
     pub to: AppOrProxyId,
     pub task: MsgId,
-    pub connect: SocketAddr,
     /// This is the hash of the secret
     /// TODO: is it fine that this is not encryted?
     /// The reason it is currently not is because I dont know how else I would share a token securly that the broker can read
