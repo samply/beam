@@ -10,8 +10,7 @@ use openssl::{
     x509::X509,
 };
 use rsa::{
-    pkcs1::DecodeRsaPublicKey, pkcs8::DecodePublicKey, PaddingScheme, PublicKey, PublicKeyParts,
-    RsaPrivateKey, RsaPublicKey,
+    pkcs1::DecodeRsaPublicKey, pkcs8::DecodePublicKey, RsaPrivateKey, RsaPublicKey, traits::PublicKeyParts,
 };
 use sha2::{Digest, Sha256};
 use static_init::dynamic;

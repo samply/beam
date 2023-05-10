@@ -11,7 +11,7 @@ use errors::SamplyBeamError;
 use itertools::Itertools;
 use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
 use openssl::base64;
-use rsa::{PaddingScheme, PublicKey, RsaPrivateKey, RsaPublicKey};
+use rsa::{RsaPrivateKey, RsaPublicKey, Oaep};
 use serde_json::{json, Value};
 use sha2::Sha256;
 use static_init::dynamic;
@@ -308,7 +308,7 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
 
         // Cryptographic Operations
         let cipher_engine = XChaCha20Poly1305::new_from_slice(&my_priv_key.decrypt(
-            rsa::PaddingScheme::new_oaep::<sha2::Sha256>(),
+            Oaep::new::<sha2::Sha256>(),
             &encrypted_decryption_key,
         )?)
         .map_err(|e| {
@@ -363,7 +363,7 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
             .map(|key| {
                 key.encrypt(
                     &mut rng,
-                    PaddingScheme::new_oaep::<Sha256>(),
+                    Oaep::new::<sha2::Sha256>(),
                     symmetric_key.as_slice(),
                 )
             })
