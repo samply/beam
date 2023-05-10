@@ -19,6 +19,8 @@ mod serve;
 mod serve_health;
 mod serve_tasks;
 
+pub(crate) const PROXY_TIMEOUT: u64 = 120;
+
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
     shared::config::prepare_env();
@@ -28,7 +30,7 @@ pub async fn main() -> anyhow::Result<()> {
     let config = config::CONFIG_PROXY.clone();
     let client = http_client::build(
         &config::CONFIG_SHARED.tls_ca_certificates,
-        Some(Duration::from_secs(120)),
+        Some(Duration::from_secs(PROXY_TIMEOUT)),
         Some(Duration::from_secs(20)),
     )
     .map_err(SamplyBeamError::HttpProxyProblem)?;
