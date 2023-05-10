@@ -4,6 +4,12 @@
 
 Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. It provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation on top of an easy to use REST API.
 
+## Latest version: Samply.Beam 0.6.1 &ndash; 2023-04-11
+
+This minor easter update is just a maintainance release. We updated our time-parsing dependency [fundu](https://crates.io/crates/fundu) to the next major version and fixed a bug in our CI/CD pipeline. With this fix, the project description is now correctly sent to Docker Hub. Internally, we improved the formatting of the source code.
+
+Find info on all previous versions in the [Changelog](CHANGELOG.md).
+
 ## Table of Content
 <!-- - [Features](#features) -->
 - [System Architecture](#system-architecture)
@@ -473,15 +479,11 @@ The data is symmetrically encrypted using the Autheticated Encryption with Authe
 - [X] Broker-side filtering using pre-defined criteria
 - [ ] Broker-side filtering of the unencrypted metadata fields with JSON queries
 - [ ] Integration of OAuth2 (in discussion)
-- [ ] In addition to messages and tasks, also facilitate direct socket connections
+- [ ] In addition to messages and tasks, also facilitate direct socket connections (https://github.com/samply/beam/pull/131)
 - [ ] Deliver usage metrics
 - [x] Helpful dev environment
 - [x] Expiration of tasks and results
 - [x] Support TLS-terminating proxies
-
-## Latest version: Samply.Beam 0.6.1 -- 2023-04-11
-
-This minor easter update is just a maintainance release. We updated our time-parsing dependency [fundu](https://crates.io/crates/fundu) to the next major version and fixed a bug in our CI/CD pipeline. With this fix, the project description is now correctly sent to Docker Hub. Internally, we improved the formatting of the source code.
 
 ## Cryptography Notice
 
