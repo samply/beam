@@ -10,6 +10,7 @@ mod serve_pki;
 mod serve_tasks;
 mod socks;
 mod serve_sockets;
+mod task_manager;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
