@@ -196,8 +196,12 @@ where State: MsgState {
     pub id: MsgId,
     pub secret: State,
     pub metadata: Value,
-    #[serde(skip)]
-    pub result: Option<MsgSigned<MsgSocketResult>>
+    #[serde(skip, default="capaity_1_vec")]
+    pub result: Vec<MsgSigned<MsgSocketResult>>
+}
+
+fn capaity_1_vec<T>() -> Vec<T> {
+    Vec::with_capacity(1)
 }
 
 impl<State: MsgState> Msg for MsgSocketRequest<State> {
@@ -246,7 +250,7 @@ impl EncryptableMsg for MsgSocketRequest<Plain> {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct MsgSocketResult {
     pub from: AppOrProxyId,
-    pub to: AppOrProxyId,
+    pub to: Vec<AppOrProxyId>,
     pub task: MsgId,
     /// This is the hash of the secret
     /// TODO: is it fine that this is not encryted?
@@ -261,8 +265,8 @@ impl Msg for MsgSocketResult {
         &self.from
     }
 
-    fn get_to(&self) -> Cow<'_, Vec<AppOrProxyId>> {
-        Cow::Owned(vec![self.to.clone()])
+    fn get_to(&self) -> &Vec<AppOrProxyId> {
+        &self.to
     }
 
     fn get_metadata(&self) -> &Value {

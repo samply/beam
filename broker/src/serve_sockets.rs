@@ -156,7 +156,7 @@ async fn get_socket_result(
             &mut result,
             &block, 
             new_result_rx,
-            |m| &m.msg.to == msg.get_from(),
+            |m| m.msg.to.contains(msg.get_from()),
             state.deleted_socket_request.subscribe(), 
             &task_id
         ).await;

@@ -76,7 +76,7 @@ async fn post_socket_req(client: SamplyHttpClient, task_id: &MsgId) -> Result<Re
 async fn put_socket_result(client: SamplyHttpClient, task_id: &MsgId) -> Result<Response<Body>> {
     let task = MsgSocketResult {
         from: APP2.clone(),
-        to: APP1.clone(),
+        to: vec![APP1.clone()],
         task: *task_id,
         metadata: Value::Null,
         token: "hashofsecret".to_string(),
