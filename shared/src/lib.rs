@@ -20,7 +20,7 @@ use tracing::debug;
 use std::{
     fmt::{Debug, Display},
     ops::Deref,
-    time::{Duration, Instant, SystemTime}, net::SocketAddr, borrow::Cow, option::Option,
+    time::{Duration, Instant, SystemTime}, net::SocketAddr,
 };
 
 use rand::Rng;
@@ -154,7 +154,8 @@ impl<M: Msg + DeserializeOwned> MsgSigned<M> {
     }
 }
 
-pub const EMPTY_VEC_APPORPROXYID: Vec<AppOrProxyId> = Vec::new();
+#[dynamic]
+pub static EMPTY_VEC_APPORPROXYID: Vec<AppOrProxyId> = Vec::new();
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
@@ -167,8 +168,8 @@ impl Msg for MsgEmpty {
         &self.from
     }
 
-    fn get_to(&self) -> Cow<'_, Vec<AppOrProxyId>> {
-        Cow::Owned(EMPTY_VEC_APPORPROXYID)
+    fn get_to(&self) -> &Vec<AppOrProxyId> {
+        &EMPTY_VEC_APPORPROXYID
     }
 
     fn get_metadata(&self) -> &Value {
@@ -204,9 +205,11 @@ impl<State: MsgState> Msg for MsgSocketRequest<State> {
         &self.from
     }
 
-    fn get_to(&self) -> Cow<'_, Vec<AppOrProxyId>> {
+    fn get_to(&self) -> &Vec<AppOrProxyId> {
+        let mut result = Vec::with_capacity(1);
+        result.push(self.to.clone());
         // TODO: Not leak memory maybe change the api to return a Cow
-        Cow::Owned(vec![self.to.clone()])
+        Box::leak(Box::new(result))
     }
 
     fn get_metadata(&self) -> &Value {
@@ -344,7 +347,7 @@ impl<T: MsgState> Msg for MessageType<T> {
         }
     }
 
-    fn get_to(&self) -> Cow<'_, Vec<AppOrProxyId>> {
+    fn get_to(&self) -> &Vec<AppOrProxyId> {
         use MessageType::*;
         match self {
             MsgTaskRequest(m) => m.get_to(),
@@ -499,7 +502,7 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
 
 pub trait Msg: Serialize {
     fn get_from(&self) -> &AppOrProxyId;
-    fn get_to(&self) -> Cow<'_, Vec<AppOrProxyId>>;
+    fn get_to(&self) -> &Vec<AppOrProxyId>;
     fn get_metadata(&self) -> &Value;
 }
 
@@ -508,7 +511,7 @@ impl<M: Msg> Msg for MsgSigned<M> {
         self.msg.get_from()
     }
 
-    fn get_to(&self) -> Cow<'_, Vec<AppOrProxyId>> {
+    fn get_to(&self) -> &Vec<AppOrProxyId> {
         self.msg.get_to()
     }
 
@@ -522,8 +525,8 @@ impl<T: MsgState> Msg for MsgTaskRequest<T> {
         &self.from
     }
 
-    fn get_to(&self) -> Cow<'_, Vec<AppOrProxyId>> {
-        Cow::Borrowed(&self.to)
+    fn get_to(&self) -> &Vec<AppOrProxyId> {
+        &self.to
     }
 
     fn get_metadata(&self) -> &Value {
@@ -536,8 +539,8 @@ impl<T: MsgState> Msg for MsgTaskResult<T> {
         &self.from
     }
 
-    fn get_to(&self) -> Cow<'_, Vec<AppOrProxyId>> {
-        Cow::Borrowed(&self.to)
+    fn get_to(&self) -> &Vec<AppOrProxyId> {
+        &self.to
     }
 
     fn get_metadata(&self) -> &Value {
@@ -875,8 +878,8 @@ impl Msg for MsgPing {
         &self.from
     }
 
-    fn get_to(&self) -> Cow<'_, Vec<AppOrProxyId>> {
-        Cow::Borrowed(&self.to)
+    fn get_to(&self) -> &Vec<AppOrProxyId> {
+        &self.to
     }
 
     fn get_metadata(&self) -> &Value {

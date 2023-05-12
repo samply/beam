@@ -489,6 +489,6 @@ async fn encrypt_request(
 }
 
 async fn encrypt_msg<M: EncryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> {
-    let receivers_keys = crypto::get_proxy_public_keys(msg.get_to().as_ref()).await?;
+    let receivers_keys = crypto::get_proxy_public_keys(msg.get_to()).await?;
     msg.encrypt(&receivers_keys)
 }
