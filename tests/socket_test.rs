@@ -62,7 +62,7 @@ async fn post_socket_req(client: SamplyHttpClient, task_id: &MsgId) -> Result<Re
         id: *task_id,
         secret: Plain::from("test"),
         metadata: Value::Null,
-        result: None,
+        result: vec![],
     };
     let req = Request::builder()
         .uri(format!("{PROXY1}/v1/sockets"))
