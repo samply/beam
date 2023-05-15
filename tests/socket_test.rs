@@ -57,7 +57,7 @@ async fn test_full() -> Result<()> {
 async fn post_socket_req(client: SamplyHttpClient, task_id: &MsgId) -> Result<Response<Body>> {
     let task = MsgSocketRequest {
         from: APP1.clone(),
-        to: APP2.clone(),
+        to: vec![APP2.clone()],
         expire: SystemTime::now() + Duration::from_secs(60),
         id: *task_id,
         secret: Plain::from("test"),
@@ -95,7 +95,7 @@ async fn get_task(client: SamplyHttpClient) -> Result<Response<Body>> {
         from: APP2.clone(),
     };
     let req = Request::builder()
-        .uri(format!("{PROXY2}/v1/sockets"))
+        .uri(format!("{PROXY2}/v1/sockets?wait_count=1"))
         .header(header::AUTHORIZATION, format!("ApiKey {} {APP_KEY}", APP2.clone()))
         .method(Method::GET)
         .body(hyper::Body::from(serde_json::to_vec(&msg)?))?;

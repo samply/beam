@@ -36,8 +36,11 @@ async fn get_socket_requests(
     state: State<SocketState>,
     msg: MsgSigned<MsgEmpty>,
 ) -> Result<Response, StatusCode> {
+    if block.wait_count.is_none() && block.wait_time.is_none() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let requester = msg.get_from();
-    let filter = |req: &MsgSocketRequest<Encrypted>| &req.to == requester;
+    let filter = |req: &MsgSocketRequest<Encrypted>| req.to.contains(requester);
 
     let socket_reqs = state.task_manager.wait_for_tasks(&block, filter).await?;
 

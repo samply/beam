@@ -190,7 +190,7 @@ impl Msg for MsgEmpty {
 pub struct MsgSocketRequest<State>
 where State: MsgState {
     pub from: AppOrProxyId,
-    pub to: AppOrProxyId,
+    pub to: Vec<AppOrProxyId>,
     #[serde(with="serialize_time", rename="ttl")]
     pub expire: SystemTime,
     pub id: MsgId,
@@ -210,10 +210,7 @@ impl<State: MsgState> Msg for MsgSocketRequest<State> {
     }
 
     fn get_to(&self) -> &Vec<AppOrProxyId> {
-        let mut result = Vec::with_capacity(1);
-        result.push(self.to.clone());
-        // TODO: Not leak memory maybe change the api to return a Cow
-        Box::leak(Box::new(result))
+        &self.to
     }
 
     fn get_metadata(&self) -> &Value {

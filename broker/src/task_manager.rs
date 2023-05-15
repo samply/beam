@@ -35,7 +35,11 @@ impl<State: MsgState> Task for MsgSocketRequest<State> {
     }
 
     fn push_result(&mut self, result: Self::Result) {
-        self.result[0] = result;
+        if self.result.len() == 0 {
+            self.result.push(result);
+        } else {
+            self.result[0] = result;
+        }
     }
 
     fn is_expired(&self) -> bool {
@@ -68,7 +72,7 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         self.tasks
             .iter()
             .filter(move |entry| filter(&entry.msg))
-            .filter(|entry| entry.msg.is_expired())
+            .filter(|entry| !entry.msg.is_expired())
     }
 
     // Once async iterators are stabelized this should be one
@@ -76,7 +80,7 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
         let wait_until = Instant::now() + block
             .wait_time
-            .unwrap_or(Duration::MAX);
+            .unwrap_or(Duration::from_secs(600));
         let mut new_tasks = self.new_tasks.subscribe();
         let mut deleted_tasks = self.deleted_tasks.subscribe();
         
@@ -127,7 +131,7 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
         let wait_until = Instant::now() + block
             .wait_time
-            .unwrap_or(Duration::MAX);
+            .unwrap_or(Duration::from_secs(600));
 
         let mut num_of_results = self.get(task_id)?.msg
             .get_results()
