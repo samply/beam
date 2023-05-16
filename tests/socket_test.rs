@@ -1,7 +1,6 @@
 
 use std::time::{SystemTime, Duration};
 
-use fast_socks5::client::{Config, Socks5Stream};
 use http::{Request, header, Method, Response, StatusCode};
 use hyper::Body;
 use shared::{http_client::SamplyHttpClient, MsgSocketRequest, Plain, MyUuid, MsgSocketResult, MsgId, MsgEmpty};
@@ -10,13 +9,15 @@ use serde_json::Value;
 use anyhow::Result;
 use tests::*;
 
-async fn test_sockets(secret: String) {
-    let (a, b) = tokio::join!(
-        Socks5Stream::connect_with_password("localhost:8090", "We dont care".to_string(), 1337, "test1".to_string(), secret.clone(), Config::default()),
-        Socks5Stream::connect_with_password("localhost:8090", "We dont care".to_string(), 1337, "test2".to_string(), secret, Config::default())
+async fn test_sockets(secret: String, client: SamplyHttpClient) {
+    let make_socket = || async {
+        let res = client.request(Request::connect("http://localhost:8080/sockets/asdf").body(Body::empty()).unwrap()).await.unwrap();
+        hyper::upgrade::on(res).await.unwrap()
+    };
+    let (mut a, mut b) = tokio::join!(
+        make_socket(),
+        make_socket()
     );
-    let mut a = a.unwrap();
-    let mut b = b.unwrap();
     const TEST_DATA: &[u8; 11] = b"hello world";
     a.write_all(TEST_DATA).await.unwrap();
     a.flush().await.unwrap();
@@ -27,8 +28,9 @@ async fn test_sockets(secret: String) {
 
 #[cfg(debug_assertions)]
 #[tokio::test]
-async fn test_sockets_default() {
-    test_sockets("test".to_string()).await;
+async fn test_sockets_broker() {
+    let client = shared::http_client::build(&Vec::new(), None, None).unwrap();
+    test_sockets("test".to_string(), client).await;
 }
 
 #[tokio::test]
@@ -50,7 +52,7 @@ async fn test_full() -> Result<()> {
     assert_eq!(res.status(), StatusCode::OK);
     println!("{:?}", res.headers().get(header::LOCATION));
 
-    test_sockets("hashofsecret".to_string()).await;
+    // test_sockets("hashofsecret".to_string()).await;
     Ok(())
 }
 

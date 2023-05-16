@@ -8,7 +8,6 @@ mod serve;
 mod serve_health;
 mod serve_pki;
 mod serve_tasks;
-mod socks;
 mod serve_sockets;
 mod task_manager;
 
@@ -54,10 +53,7 @@ pub async fn main() -> anyhow::Result<()> {
 
     let _ = config::CONFIG_CENTRAL.bind_addr; // Initialize config
 
-    tokio::try_join!(
-        serve::serve(health),
-        socks::serve()
-    )?;
+    serve::serve(health).await?;
 
 
     Ok(())

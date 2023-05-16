@@ -1,24 +1,28 @@
-use std::{sync::Arc, collections::HashMap, ops::Deref};
+use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref};
 
 use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response}};
 use bytes::BufMut;
-use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body};
+use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body, Request, Method};
 use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, MsgSocketResult, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}};
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
 use tracing::{debug, log::error, warn};
 
-use crate::{serve_tasks::wait_get_statuscode, socks::ALLOWED_TOKENS, task_manager::{TaskManager, Task}};
+use crate::{serve_tasks::wait_get_statuscode, task_manager::{TaskManager, Task}};
 
 
 #[derive(Clone)]
 struct SocketState {
-    task_manager: Arc<TaskManager<MsgSocketRequest<Encrypted>>>
+    task_manager: Arc<TaskManager<MsgSocketRequest<Encrypted>>>,
+    allowed_tokens: Arc<RwLock<HashSet<String>>>,
+    waiting_connections: Arc<RwLock<HashMap<MsgId, oneshot::Sender<Request<Body>>>>>
 }
 
 impl Default for SocketState {
     fn default() -> Self {
         Self {
-            task_manager: Arc::new(TaskManager::new())
+            task_manager: Arc::new(TaskManager::new()),
+            allowed_tokens: Default::default(),
+            waiting_connections: Default::default()
         }
     }
 }
@@ -26,6 +30,7 @@ impl Default for SocketState {
 pub(crate) fn router() -> Router {
     Router::new()
         .route("/v1/sockets", get(get_socket_requests).post(post_socket_request))
+        .route("/v1/sockets/:id", axum::routing::any(connect_socket))
         .route("/v1/sockets/:id/results", get(get_socket_result).put(put_socket_result))
         .with_state(SocketState::default())
 }
@@ -85,7 +90,7 @@ async fn put_socket_result(
     
     let token = result.msg.token.clone();
     state.task_manager.put_result(&task_id, result)?;
-    ALLOWED_TOKENS.write().await.insert(token);
+    state.allowed_tokens.write().await.insert(token);
     
     Ok((StatusCode::CREATED, [(header::LOCATION, format!("socks5://{}:{}", CONFIG_SHARED.broker_domain, CONFIG_CENTRAL.socket_port))]))
 }
@@ -131,4 +136,35 @@ async fn get_socket_result(
         .expect("This should be a valid body")
         .into_response()
     )
+}
+
+// How to auth here?
+async fn connect_socket(
+    state: State<SocketState>,
+    task_id: MsgId,
+    req: Request<Body>
+) -> Response {
+    if req.method() == Method::CONNECT {
+        let mut waiting_cons = state.waiting_connections.write().await;
+        if let Some(req_sender) = waiting_cons.remove(&task_id) {
+            req_sender.send(req).unwrap();
+        } else {
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            waiting_cons.insert(task_id, tx);
+            drop(waiting_cons);
+            let other_req = rx.await.unwrap();
+            tokio::spawn(async move {
+                let mut c1 = hyper::upgrade::on(req).await.unwrap();
+                let mut c2 = hyper::upgrade::on(other_req).await.unwrap();
+
+                let result = tokio::io::copy_bidirectional(&mut c1, &mut c2).await;
+                if let Err(e) = result {
+                    warn!("Error relaying socket connect: {e}");
+                }
+            });
+        }
+        StatusCode::OK.into_response()
+    } else {
+        StatusCode::METHOD_NOT_ALLOWED.into_response()
+    }
 }
