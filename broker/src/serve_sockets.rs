@@ -30,7 +30,7 @@ impl Default for SocketState {
 pub(crate) fn router() -> Router {
     Router::new()
         .route("/v1/sockets", get(get_socket_requests).post(post_socket_request))
-        .route("/v1/sockets/:id", axum::routing::any(connect_socket))
+        .route("/v1/sockets/:id", get(connect_socket))
         .route("/v1/sockets/:id/results", get(get_socket_result).put(put_socket_result))
         .with_state(SocketState::default())
 }
@@ -144,27 +144,23 @@ async fn connect_socket(
     task_id: MsgId,
     req: Request<Body>
 ) -> Response {
-    if req.method() == Method::CONNECT {
-        let mut waiting_cons = state.waiting_connections.write().await;
-        if let Some(req_sender) = waiting_cons.remove(&task_id) {
-            req_sender.send(req).unwrap();
-        } else {
-            let (tx, rx) = tokio::sync::oneshot::channel();
-            waiting_cons.insert(task_id, tx);
-            drop(waiting_cons);
-            let other_req = rx.await.unwrap();
-            tokio::spawn(async move {
-                let mut c1 = hyper::upgrade::on(req).await.unwrap();
-                let mut c2 = hyper::upgrade::on(other_req).await.unwrap();
-
-                let result = tokio::io::copy_bidirectional(&mut c1, &mut c2).await;
-                if let Err(e) = result {
-                    warn!("Error relaying socket connect: {e}");
-                }
-            });
-        }
-        StatusCode::OK.into_response()
+    let mut waiting_cons = state.waiting_connections.write().await;
+    if let Some(req_sender) = waiting_cons.remove(&task_id) {
+        req_sender.send(req).unwrap();
     } else {
-        StatusCode::METHOD_NOT_ALLOWED.into_response()
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        waiting_cons.insert(task_id, tx);
+        drop(waiting_cons);
+        let other_req = rx.await.unwrap();
+        tokio::spawn(async move {
+            let mut c1 = hyper::upgrade::on(req).await.unwrap();
+            let mut c2 = hyper::upgrade::on(other_req).await.unwrap();
+
+            let result = tokio::io::copy_bidirectional(&mut c1, &mut c2).await;
+            if let Err(e) = result {
+                warn!("Error relaying socket connect: {e}");
+            }
+        });
     }
+    StatusCode::SWITCHING_PROTOCOLS.into_response()
 }

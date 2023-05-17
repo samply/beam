@@ -9,10 +9,11 @@ use serde_json::Value;
 use anyhow::Result;
 use tests::*;
 
-async fn test_sockets(secret: String, client: SamplyHttpClient) {
+
+async fn test_sockets(task_id: &MsgId, client: SamplyHttpClient) {
     let make_socket = || async {
-        let res = client.request(Request::connect("http://localhost:8080/sockets/asdf").body(Body::empty()).unwrap()).await.unwrap();
-        hyper::upgrade::on(res).await.unwrap()
+        let res = client.request(Request::get(format!("http://localhost:8080/v1/sockets/{task_id}")).header(header::UPGRADE, "tcp").body(Body::empty()).unwrap()).await.expect("Asdf");
+        hyper::upgrade::on(res).await.expect("asdf")
     };
     let (mut a, mut b) = tokio::join!(
         make_socket(),
@@ -30,7 +31,7 @@ async fn test_sockets(secret: String, client: SamplyHttpClient) {
 #[tokio::test]
 async fn test_sockets_broker() {
     let client = shared::http_client::build(&Vec::new(), None, None).unwrap();
-    test_sockets("test".to_string(), client).await;
+    test_sockets(&MyUuid::new(), client).await;
 }
 
 #[tokio::test]
