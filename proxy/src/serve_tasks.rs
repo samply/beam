@@ -85,7 +85,7 @@ const ERR_FAKED_FROM: (StatusCode, &str) = (
     "You are not authorized to send on behalf of this app.",
 );
 
-async fn forward_request(
+pub(crate) async fn forward_request(
     mut req: Request<Body>,
     config: &config_proxy::Config,
     sender: &AppId,

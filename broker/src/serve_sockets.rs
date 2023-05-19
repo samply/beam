@@ -2,7 +2,7 @@ use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref};
 
 use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response}};
 use bytes::BufMut;
-use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body, Request, Method};
+use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body, Request, Method, upgrade::OnUpgrade};
 use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, MsgSocketResult, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}};
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
 use tracing::{debug, log::error, warn};
@@ -83,7 +83,7 @@ async fn put_socket_result(
     state: State<SocketState>,
     task_id: MsgId,
     result: MsgSigned<MsgSocketResult>
-) -> Result<(StatusCode, impl IntoResponse), StatusCode> {
+) -> Result<StatusCode, StatusCode> {
     if task_id != result.msg.task {
         return Err(StatusCode::BAD_REQUEST);
     };
@@ -92,7 +92,7 @@ async fn put_socket_result(
     state.task_manager.put_result(&task_id, result)?;
     state.allowed_tokens.write().await.insert(token);
     
-    Ok((StatusCode::CREATED, [(header::LOCATION, format!("socks5://{}:{}", CONFIG_SHARED.broker_domain, CONFIG_CENTRAL.socket_port))]))
+    Ok(StatusCode::CREATED)
 }
 
 async fn get_socket_result(
@@ -128,9 +128,7 @@ async fn get_socket_result(
         };
         serde_json::to_vec(result).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
-    let location = HeaderValue::from_str(&format!("socks5://{}:{}", CONFIG_SHARED.broker_domain, CONFIG_CENTRAL.socket_port)).expect("Broker domain cotains invalid chars");
     Ok(Response::builder()
-        .header(header::LOCATION, location)
         .header(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))
         .body(Body::from(body))
         .expect("This should be a valid body")
@@ -138,12 +136,25 @@ async fn get_socket_result(
     )
 }
 
-// How to auth here?
 async fn connect_socket(
     state: State<SocketState>,
     task_id: MsgId,
-    req: Request<Body>
+    mut req: Request<Body>
 ) -> Response {
+    // We have to do this reconstruction of the request as calling extract on the req to get the body will take ownership of the request
+    let (mut parts, body) = req.into_parts();
+    let body = String::from_utf8(hyper::body::to_bytes(body).await.unwrap().to_vec()).unwrap();
+    let result = shared::crypto_jwt::verify_with_extended_header::<MsgEmpty>(&mut parts, &body).await;
+    // TODO: Maybe check from
+    let msg = match result {
+        Ok(msg) => msg.msg,
+        Err(e) => return e.into_response(),
+    };
+    req = Request::from_parts(parts, Body::empty());
+    if req.extensions().get::<OnUpgrade>().is_none() {
+        return StatusCode::UPGRADE_REQUIRED.into_response();
+    }
+
     let mut waiting_cons = state.waiting_connections.write().await;
     if let Some(req_sender) = waiting_cons.remove(&task_id) {
         req_sender.send(req).unwrap();
