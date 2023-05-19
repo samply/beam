@@ -99,7 +99,8 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
                                 if filter(&task.msg) {
                                     num_of_tasks += 1;
                                 }
-                            }                       },
+                            }
+                        },
                         Err(e) => {
                             warn!("new_tasks channel lagged: {e}");
                             return Err(TaskManagerError::BroadcastBufferOverflow);

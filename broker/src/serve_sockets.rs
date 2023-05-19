@@ -3,6 +3,7 @@ use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref};
 use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response}};
 use bytes::BufMut;
 use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body, Request, Method, upgrade::OnUpgrade};
+use serde::{Serialize, Serializer, ser::SerializeSeq};
 use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, MsgSocketResult, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}};
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
 use tracing::{debug, log::error, warn};
@@ -50,17 +51,20 @@ async fn get_socket_requests(
     let socket_reqs = state.task_manager.wait_for_tasks(&block, filter).await?;
 
     // Make a PR to DashMap that enables the Locks to be Serialize with the serde feature
-    let mut writer = bytes::BytesMut::new().writer(); 
+    let writer = bytes::BytesMut::new().writer(); 
+    let mut serializer = serde_json::Serializer::new(writer);
+    let mut seq_ser = serializer.serialize_seq(socket_reqs.size_hint().1).unwrap();
     for task in socket_reqs {
-        serde_json::to_writer(&mut writer, task.deref()).map_err(|e| {
+        seq_ser.serialize_element(task.deref()).map_err(|e| {
             warn!("Error serializing task: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     }
+    seq_ser.end().unwrap();
 
     Ok(Response::builder()
         .header(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))
-        .body(Body::from(writer.into_inner().freeze()))
+        .body(Body::from(serializer.into_inner().into_inner().freeze()))
         .expect("This is a proper Response")
         .into_response()
     )

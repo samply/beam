@@ -6,7 +6,10 @@ pub const APP1: Lazy<AppOrProxyId> = Lazy::new(|| {
     AppId::set_broker_id("broker".to_string());
     AppOrProxyId::new(option_env!("APP1_P1").unwrap_or("app1.proxy1.broker")).unwrap()
 }); 
-pub const APP2: Lazy<AppOrProxyId> = Lazy::new(|| AppOrProxyId::new(option_env!("APP2_P2").unwrap_or("app2.proxy2.broker")).unwrap()); 
+pub const APP2: Lazy<AppOrProxyId> = Lazy::new(|| {
+    AppId::set_broker_id("broker".to_string());
+    AppOrProxyId::new(option_env!("APP2_P2").unwrap_or("app2.proxy2.broker")).unwrap()
+}); 
 
 // unwrap_or is not const yet
 pub const PROXY1: &str = match option_env!("P1") {
