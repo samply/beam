@@ -36,6 +36,14 @@ pub(crate) fn router() -> Router {
         .with_state(SocketState::default())
 }
 
+// Look into making a PR for Dashmap that makes its smartpointers serialize with the serde feature
+fn serialize_deref_iter<S: Serializer>(serializer: S, iter: impl Iterator<Item = impl Deref<Target = impl Serialize>>) -> Result<S::Ok, S::Error> {
+    let mut seq_ser = serializer.serialize_seq(iter.size_hint().1).unwrap();
+    for item in iter {
+        seq_ser.serialize_element(item.deref())?;
+    }
+    seq_ser.end()
+}
 
 async fn get_socket_requests(
     block: HowLongToBlock,
@@ -50,17 +58,12 @@ async fn get_socket_requests(
 
     let socket_reqs = state.task_manager.wait_for_tasks(&block, filter).await?;
 
-    // Make a PR to DashMap that enables the Locks to be Serialize with the serde feature
     let writer = bytes::BytesMut::new().writer(); 
     let mut serializer = serde_json::Serializer::new(writer);
-    let mut seq_ser = serializer.serialize_seq(socket_reqs.size_hint().1).unwrap();
-    for task in socket_reqs {
-        seq_ser.serialize_element(task.deref()).map_err(|e| {
-            warn!("Error serializing task: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    if let Err(e) = serialize_deref_iter(&mut serializer, socket_reqs) {
+        warn!("Failed to serialize socket tasks: {e}");
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
-    seq_ser.end().unwrap();
 
     Ok(Response::builder()
         .header(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))
