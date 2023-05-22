@@ -4,7 +4,7 @@ use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoRe
 use bytes::BufMut;
 use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body, Request, Method, upgrade::OnUpgrade};
 use serde::{Serialize, Serializer, ser::SerializeSeq};
-use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, MsgSocketResult, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}};
+use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}};
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
 use tracing::{debug, log::error, warn};
 
@@ -14,7 +14,6 @@ use crate::{serve_tasks::wait_get_statuscode, task_manager::{TaskManager, Task}}
 #[derive(Clone)]
 struct SocketState {
     task_manager: Arc<TaskManager<MsgSocketRequest<Encrypted>>>,
-    allowed_tokens: Arc<RwLock<HashSet<String>>>,
     waiting_connections: Arc<RwLock<HashMap<MsgId, oneshot::Sender<Request<Body>>>>>
 }
 
@@ -22,7 +21,6 @@ impl Default for SocketState {
     fn default() -> Self {
         Self {
             task_manager: Arc::new(TaskManager::new()),
-            allowed_tokens: Default::default(),
             waiting_connections: Default::default()
         }
     }
@@ -32,7 +30,6 @@ pub(crate) fn router() -> Router {
     Router::new()
         .route("/v1/sockets", get(get_socket_requests).post(post_socket_request))
         .route("/v1/sockets/:id", get(connect_socket))
-        .route("/v1/sockets/:id/results", get(get_socket_result).put(put_socket_result))
         .with_state(SocketState::default())
 }
 
@@ -84,63 +81,6 @@ async fn post_socket_request(
         StatusCode::CREATED,
         [(header::LOCATION, format!("/v1/sockets/{}/results", msg_id))]
     ))
-}
-
-async fn put_socket_result(
-    state: State<SocketState>,
-    task_id: MsgId,
-    result: MsgSigned<MsgSocketResult>
-) -> Result<StatusCode, StatusCode> {
-    if task_id != result.msg.task {
-        return Err(StatusCode::BAD_REQUEST);
-    };
-    
-    let token = result.msg.token.clone();
-    state.task_manager.put_result(&task_id, result)?;
-    state.allowed_tokens.write().await.insert(token);
-    
-    Ok(StatusCode::CREATED)
-}
-
-async fn get_socket_result(
-    state: State<SocketState>,
-    mut block: HowLongToBlock,
-    task_id: MsgId,
-    msg: MsgSigned<MsgEmpty>
-) -> Result<Response, StatusCode> {
-    let body = {
-        let task = state.task_manager.get(&task_id)?;
-        if task.get_from() != msg.get_from() {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-        // If we already have a result return it
-        if let Some(result) = task.msg.result.first() {
-            Some(serde_json::to_vec(result).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
-        } else {
-            None
-        }
-    };
-
-    let body = if let Some(result) = body {
-        result
-    } else {
-        block.wait_count = Some(1);
-        let task = state.task_manager.wait_for_results(
-            &task_id,
-            &block,
-            |m| m.msg.to.contains(msg.get_from()),
-        ).await?;
-        let Some(result) = task.msg.get_results().first() else {
-            return Err(StatusCode::NO_CONTENT)
-        };
-        serde_json::to_vec(result).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    };
-    Ok(Response::builder()
-        .header(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))
-        .body(Body::from(body))
-        .expect("This should be a valid body")
-        .into_response()
-    )
 }
 
 async fn connect_socket(

@@ -37,7 +37,6 @@ async fn create_socket_con(
         id: task_id,
         secret: Plain::from(secret),
         metadata: serde_json::Value::Null,
-        result: Vec::with_capacity(0),
     };
 
     let Ok(body) = serde_json::to_vec(&socket_req) else {

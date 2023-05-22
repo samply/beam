@@ -3,7 +3,7 @@ use std::{time::{SystemTime, Duration}, future::Future};
 
 use http::{Request, header, Method, Response, StatusCode};
 use hyper::{Body, upgrade::Upgraded};
-use shared::{http_client::SamplyHttpClient, MsgSocketRequest, Plain, MyUuid, MsgSocketResult, MsgId, MsgEmpty, beam_id::AppOrProxyId};
+use shared::{http_client::SamplyHttpClient, MsgSocketRequest, Plain, MsgId, MsgEmpty, beam_id::AppOrProxyId};
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use serde_json::Value;
 use anyhow::Result;
@@ -87,7 +87,6 @@ async fn post_socket_req(client: SamplyHttpClient, task_id: &MsgId) -> Result<Re
         id: *task_id,
         secret: Plain::from("test"),
         metadata: Value::Null,
-        result: vec![],
     };
     let req = Request::builder()
         .uri(format!("{PROXY1}/v1/sockets"))
@@ -98,22 +97,6 @@ async fn post_socket_req(client: SamplyHttpClient, task_id: &MsgId) -> Result<Re
     Ok(resp)
 }
 
-async fn put_socket_result(client: SamplyHttpClient, task_id: &MsgId) -> Result<Response<Body>> {
-    let task = MsgSocketResult {
-        from: APP2.clone(),
-        to: vec![APP1.clone()],
-        task: *task_id,
-        metadata: Value::Null,
-        token: "hashofsecret".to_string(),
-    };
-    let req = Request::builder()
-        .uri(format!("{PROXY2}/v1/sockets/{task_id}/results"))
-        .header(header::AUTHORIZATION, format!("ApiKey {} {APP_KEY}", APP2.clone()))
-        .method(Method::PUT)
-        .body(hyper::Body::from(serde_json::to_vec(&task)?))?;
-    let resp = client.request(req).await?;
-    Ok(resp)
-}
 
 async fn get_task(client: SamplyHttpClient) -> Result<Response<Body>> {
     let msg = MsgEmpty {
@@ -122,19 +105,6 @@ async fn get_task(client: SamplyHttpClient) -> Result<Response<Body>> {
     let req = Request::builder()
         .uri(format!("{PROXY2}/v1/sockets?wait_count=1"))
         .header(header::AUTHORIZATION, format!("ApiKey {} {APP_KEY}", APP2.clone()))
-        .method(Method::GET)
-        .body(hyper::Body::from(serde_json::to_vec(&msg)?))?;
-    let resp = client.request(req).await?;
-    Ok(resp)
-}
-
-async fn get_task_result(client: SamplyHttpClient, task_id: &MsgId) -> Result<Response<Body>> {
-    let msg = MsgEmpty {
-        from: APP1.clone(),
-    };
-    let req = Request::builder()
-        .uri(format!("{PROXY1}/v1/sockets/{task_id}/results"))
-        .header(header::AUTHORIZATION, format!("ApiKey {} {APP_KEY}", APP1.clone()))
         .method(Method::GET)
         .body(hyper::Body::from(serde_json::to_vec(&msg)?))?;
     let resp = client.request(req).await?;

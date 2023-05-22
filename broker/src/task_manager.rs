@@ -1,14 +1,24 @@
-use std::{ops::Deref, borrow::Cow, time::{SystemTime, Duration}};
+use std::{
+    borrow::Cow,
+    ops::Deref,
+    time::{Duration, SystemTime},
+};
 
 use axum::{response::IntoResponse, Json};
-use dashmap::{DashMap, mapref::{multiple::RefMulti, one::Ref}};
+use dashmap::{
+    mapref::{multiple::RefMulti, one::Ref},
+    DashMap,
+};
 use hyper::StatusCode;
-use shared::{HasWaitId, MsgId, Msg, MsgSigned, MsgTaskRequest, MsgState, MsgTaskResult, MsgEmpty, MsgSocketRequest, MsgSocketResult, HowLongToBlock, beam_id::AppOrProxyId};
+use shared::{
+    beam_id::AppOrProxyId, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned,
+    MsgSocketRequest, MsgState, MsgTaskRequest, MsgTaskResult,
+};
 use tokio::{sync::broadcast, time::Instant};
 use tracing::warn;
 
 pub trait Task {
-    type Result: Msg + Clone;
+    type Result;
 
     fn get_results(&self) -> &Vec<Self::Result>;
     fn push_result(&mut self, result: Self::Result);
@@ -28,19 +38,14 @@ pub trait Task {
 // }
 
 impl<State: MsgState> Task for MsgSocketRequest<State> {
-    type Result = MsgSigned<MsgSocketResult>;
+    type Result = ();
 
     fn get_results(&self) -> &Vec<Self::Result> {
-        &self.result
+        const EMPTY_VEC: &Vec<()> = &Vec::new();
+        EMPTY_VEC
     }
 
-    fn push_result(&mut self, result: Self::Result) {
-        if self.result.len() == 0 {
-            self.result.push(result);
-        } else {
-            self.result[0] = result;
-        }
-    }
+    fn push_result(&mut self, result: Self::Result) {}
 
     fn is_expired(&self) -> bool {
         self.expire < SystemTime::now()
@@ -52,7 +57,7 @@ pub struct TaskManager<T: HasWaitId<MsgId> + Task + Msg> {
     new_tasks: broadcast::Sender<MsgId>,
     deleted_tasks: broadcast::Sender<MsgId>,
     /// Send the index at which the new result for the given Task was inserted
-    new_results: DashMap<MsgId, broadcast::Sender<usize>>
+    new_results: DashMap<MsgId, broadcast::Sender<usize>>,
 }
 
 impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
@@ -64,8 +69,12 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
             tasks: Default::default(),
             new_tasks,
             deleted_tasks,
-            new_results: Default::default()
+            new_results: Default::default(),
         }
+    }
+
+    pub fn get(&self, task_id: &MsgId) -> Result<impl Deref<Target = MsgSigned<T>> + '_, TaskManagerError> {
+        self.tasks.get(task_id).ok_or(TaskManagerError::NotFound)
     }
 
     pub fn get_tasks_by(&self, filter: impl Fn(&T) -> bool) -> impl Iterator<Item = impl Deref<Target = MsgSigned<T>> + '_> {
@@ -76,17 +85,18 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
     }
 
     // Once async iterators are stabelized this should be one
-    pub async fn wait_for_tasks(&self, block: &HowLongToBlock, filter: impl Fn(&T) -> bool) -> Result<impl Iterator<Item = impl Deref<Target = MsgSigned<T>> + '_>, TaskManagerError> {
+    pub async fn wait_for_tasks(
+        &self,
+        block: &HowLongToBlock,
+        filter: impl Fn(&T) -> bool,
+    ) -> Result<impl Iterator<Item = impl Deref<Target = MsgSigned<T>> + '_>, TaskManagerError>
+    {
         let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
-        let wait_until = Instant::now() + block
-            .wait_time
-            .unwrap_or(Duration::from_secs(600));
+        let wait_until = Instant::now() + block.wait_time.unwrap_or(Duration::from_secs(600));
         let mut new_tasks = self.new_tasks.subscribe();
         let mut deleted_tasks = self.deleted_tasks.subscribe();
-        
-        let mut num_of_tasks = self
-            .get_tasks_by(&filter)
-            .count();
+
+        let mut num_of_tasks = self.get_tasks_by(&filter).count();
         while num_of_tasks < max_elements && Instant::now() < wait_until {
             tokio::select! {
                 _ = tokio::time::sleep_until(wait_until) => {
@@ -127,19 +137,47 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         Ok(self.get_tasks_by(filter))
     }
 
-    /// This does not check if the requester was the creator of the Task
-    pub async fn wait_for_results(&self, task_id: &MsgId, block: &HowLongToBlock, filter: impl Fn(&T::Result) -> bool) -> Result<impl Deref<Target = MsgSigned<T>> + '_, TaskManagerError> {
-        let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
-        let wait_until = Instant::now() + block
-            .wait_time
-            .unwrap_or(Duration::from_secs(600));
+    pub fn post_task(&self, task: MsgSigned<T>) -> Result<(), TaskManagerError> {
+        let id = task.wait_id();
+        if self.tasks.contains_key(&id) {
+            return Err(TaskManagerError::Conflict);
+        }
+        let max_recievers = task.get_to().len();
+        self.tasks.insert(id.clone(), task);
+        let (results_sender, _) = broadcast::channel(max_recievers);
+        self.new_results.insert(id.clone(), results_sender);
+        // We dont care if noone is listening
+        _ = self.new_tasks.send(id);
+        Ok(())
+    }
+}
 
-        let mut num_of_results = self.get(task_id)?.msg
+impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T>
+where
+    T::Result: Msg,
+{
+    /// This does not check if the requester was the creator of the Task
+    pub async fn wait_for_results(
+        &self,
+        task_id: &MsgId,
+        block: &HowLongToBlock,
+        filter: impl Fn(&T::Result) -> bool,
+    ) -> Result<impl Deref<Target = MsgSigned<T>> + '_, TaskManagerError> {
+        let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
+        let wait_until = Instant::now() + block.wait_time.unwrap_or(Duration::from_secs(600));
+
+        let mut num_of_results = self
+            .get(task_id)?
+            .msg
             .get_results()
             .iter()
             .filter(|result| filter(result))
             .count();
-        let mut new_results = self.new_results.get(task_id).ok_or(TaskManagerError::NotFound)?.subscribe();
+        let mut new_results = self
+            .new_results
+            .get(task_id)
+            .ok_or(TaskManagerError::NotFound)?
+            .subscribe();
         while num_of_results < max_elements && Instant::now() < wait_until {
             tokio::select! {
                 _ = tokio::time::sleep_until(wait_until) => {
@@ -168,10 +206,6 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         Ok(self.get(task_id).map_err(|_| TaskManagerError::Gone)?)
     }
 
-    pub fn get(&self, task_id: &MsgId) -> Result<impl Deref<Target = MsgSigned<T>> + '_, TaskManagerError> {
-        self.tasks.get(task_id).ok_or(TaskManagerError::NotFound)
-    }
-
     /// This will push the result to the given task by its id
     /// Returns true if the given task exists flase otherwise
     pub fn put_result(&self, task_id: &MsgId, result: T::Result) -> Result<(), TaskManagerError> {
@@ -179,29 +213,18 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
             return Err(TaskManagerError::NotFound);
         };
         if !entry.get_to().contains(result.get_from()) {
-            return Err(TaskManagerError::Unauthorized)
+            return Err(TaskManagerError::Unauthorized);
         }
         let n = entry.msg.get_results().len();
         entry.msg.push_result(result);
         // We dont care if noone is listening
-        _ = self.new_results
+        _ = self
+            .new_results
             .get(task_id)
-            .expect("This task id must be present because it is present at the start of the function")
+            .expect(
+                "This task id must be present because it is present at the start of the function",
+            )
             .send(n);
-        Ok(())
-    }
-
-    pub fn post_task(&self, task: MsgSigned<T>) -> Result<(), TaskManagerError> {
-        let id = task.wait_id();
-        if self.tasks.contains_key(&id) {
-            return Err(TaskManagerError::Conflict);
-        }
-        let max_recievers = task.get_to().len();
-        self.tasks.insert(id.clone(), task);
-        let (results_sender, _) = broadcast::channel(max_recievers);
-        self.new_results.insert(id.clone(), results_sender);
-        // We dont care if noone is listening
-        _ = self.new_tasks.send(id);
         Ok(())
     }
 }
@@ -211,7 +234,7 @@ pub enum TaskManagerError {
     Conflict,
     Unauthorized,
     Gone,
-    BroadcastBufferOverflow
+    BroadcastBufferOverflow,
 }
 
 impl From<TaskManagerError> for StatusCode {
