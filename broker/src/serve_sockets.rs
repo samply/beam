@@ -79,7 +79,7 @@ async fn post_socket_request(
 
     Ok((
         StatusCode::CREATED,
-        [(header::LOCATION, format!("/v1/sockets/{}/results", msg_id))]
+        [(header::LOCATION, format!("/v1/sockets/{}", msg_id))]
     ))
 }
 
@@ -87,19 +87,27 @@ async fn connect_socket(
     state: State<SocketState>,
     task_id: MsgId,
     mut req: Request<Body>
-) -> Response {
+    // This Result is just an Eiter type. An error value does not mean something went wrong
+) -> Result<Response, StatusCode> {
     // We have to do this reconstruction of the request as calling extract on the req to get the body will take ownership of the request
     let (mut parts, body) = req.into_parts();
+    // TODO: Unwraps
     let body = String::from_utf8(hyper::body::to_bytes(body).await.unwrap().to_vec()).unwrap();
     let result = shared::crypto_jwt::verify_with_extended_header::<MsgEmpty>(&mut parts, &body).await;
-    // TODO: Maybe check from
     let msg = match result {
         Ok(msg) => msg.msg,
-        Err(e) => return e.into_response(),
+        Err(e) => return Ok(e.into_response()),
     };
+    {
+        let task = state.task_manager.get(&task_id)?;
+        // Allowed to connect are the issuer of the task and the recipients
+        if !(task.get_from() == &msg.from || task.get_to().contains(&msg.from)) {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    }
     req = Request::from_parts(parts, Body::empty());
     if req.extensions().get::<OnUpgrade>().is_none() {
-        return StatusCode::UPGRADE_REQUIRED.into_response();
+        return Err(StatusCode::UPGRADE_REQUIRED);
     }
 
     let mut waiting_cons = state.waiting_connections.write().await;
@@ -116,9 +124,9 @@ async fn connect_socket(
 
             let result = tokio::io::copy_bidirectional(&mut c1, &mut c2).await;
             if let Err(e) = result {
-                warn!("Error relaying socket connect: {e}");
+                debug!("Relaying socket connection ended: {e}");
             }
         });
     }
-    StatusCode::SWITCHING_PROTOCOLS.into_response()
+    Err(StatusCode::SWITCHING_PROTOCOLS)
 }
