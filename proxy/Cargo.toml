@@ -42,5 +42,11 @@ futures = "0.3.26"
 async-sse = "5.1.0"
 async-stream = "0.3.4"
 
+# TODO put behind feature flag
+chacha20poly1305 = { version = "0.10.1", features = ["stream"] }
+
 [build-dependencies]
 build-data = "0"
+
+[dev-dependencies]
+tokio-test = "0.4.2"

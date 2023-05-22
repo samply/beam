@@ -190,6 +190,7 @@ impl Msg for MsgEmpty {
 pub struct MsgSocketRequest<State>
 where State: MsgState {
     pub from: AppOrProxyId,
+    // TODO: Tell serde to serialize only one
     pub to: Vec<AppOrProxyId>,
     #[serde(with="serialize_time", rename="ttl")]
     pub expire: SystemTime,
