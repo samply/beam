@@ -1,11 +1,11 @@
 use std::{time::{SystemTime, Duration}, pin::Pin, task::Poll, io::Write};
 
 use axum::{Router, routing::{get, post}, response::{Response, IntoResponse}, extract::{State, Path}};
-use chacha20poly1305::{AeadCore, KeyInit, ChaCha20Poly1305, aead::{OsRng, stream::{StreamLE31, NewStream, StreamPrimitive}, Nonce, generic_array::GenericArray}, XChaCha20Poly1305, consts::{U20, U32}};
+use chacha20poly1305::{AeadCore, KeyInit, ChaCha20Poly1305, aead::{self, OsRng, stream::{StreamLE31, NewStream, StreamPrimitive}, Nonce, generic_array::GenericArray}, XChaCha20Poly1305, consts::{U20, U32}};
 use hyper::{Request, Body, StatusCode, upgrade::OnUpgrade};
 use rsa::rand_core::RngCore;
 use shared::{http_client::SamplyHttpClient, config, MsgSocketRequest, beam_id::AppOrProxyId, MsgId, Plain, MsgEmpty};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, AsyncReadExt, ReadBuf};
 use tracing::warn;
 
 use crate::{serve_tasks::{handler_task, TasksState, forward_request}, auth::AuthenticatedApp};
@@ -126,6 +126,31 @@ async fn connect_socket(
     StatusCode::SWITCHING_PROTOCOLS.into_response()
 }
 
+struct ReadBufWrapper<'a, 'b>(&'b mut tokio::io::ReadBuf<'a>);
+
+impl<'a, 'b> aead::Buffer for ReadBufWrapper<'a, 'b> {
+    fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
+        self.0.put_slice(other);
+        Ok(())
+    }
+
+    fn truncate(&mut self, len: usize) {
+        self.0.set_filled(len)
+    }
+}
+
+impl<'a, 'b> AsRef<[u8]> for ReadBufWrapper<'a, 'b> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.filled()
+    }
+}
+
+impl<'a, 'b> AsMut<[u8]> for ReadBufWrapper<'a, 'b> {
+    fn as_mut(&mut self) -> &mut [u8] {
+        self.0.filled_mut()
+    }
+}
+
 struct EncryptedSocket<S> {
     inner: S,
     cipher: StreamLE31<XChaCha20Poly1305>,
@@ -151,21 +176,21 @@ impl<S: AsyncRead + Unpin> AsyncRead for EncryptedSocket<S> {
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<std::io::Result<()>> {
         let initial_buf_len = buf.filled().len();
+        dbg!(buf.filled().len(), buf.capacity(), buf.remaining());
         let stream = Pin::new(&mut self.inner);
-        let res = stream.poll_read(cx, buf);
+        let mut read_buf = vec![0; buf.capacity() + 16];
+        let mut tokio_reader = ReadBuf::new(&mut read_buf);
+        // let read_buf = tokio::io::ReadBuf::new(read_buf);
+        let res = stream.poll_read(cx, &mut tokio_reader);
+        dbg!(buf.filled().len());
         if let Poll::Ready(Ok(())) = res {
             // We got some data to decrypt
             // Maybe make a PR to aead to impl aead::Buffer for tokio::io::ReadBuf to enable in place encryption or write a wrapper type
             // let result = self.cipher.decrypt_in_place(self.counter, false, b"", buf.filled_mut());
-            match self.cipher.decrypt(self.read_counter, initial_buf_len == buf.filled().len(), buf.filled()) {
-                Ok(plain) => {
-                    self.read_counter += 1;
-                    let len = buf.filled().len();
-                    buf.set_filled(len);
-                    buf.filled_mut().write_all(&plain).expect("Should work maybe");
-                },
-                Err(_) => todo!(),
-            }
+            let res = self.cipher.decrypt_in_place(self.read_counter, initial_buf_len == read_buf.len() + 16, b"", &mut read_buf);
+            // dbg!(buf.filled().len(), buf.capacity(), buf.remaining());
+            buf.put_slice(&read_buf);
+            res.unwrap()
         }
         res
     }
@@ -180,7 +205,13 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for EncryptedSocket<S> {
         let ciphertext = self.cipher.encrypt(self.write_counter, false, buf).unwrap();
         self.write_counter += 1;
         let stream = Pin::new(&mut self.inner);
-        stream.poll_write(cx, &ciphertext)
+        let res = stream.poll_write(cx, &ciphertext);
+        // Is fooling the caller into saying we wrote n bytes when we might have wrote more fine?
+        res.map_ok(|n| if n > buf.len() {
+            buf.len()
+        } else {
+            n
+        })
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), std::io::Error>> {
@@ -194,15 +225,44 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for EncryptedSocket<S> {
     }
 }
 
-#[tokio::test]
-async fn test_encryption() {
-    let mut key = GenericArray::default();
-    OsRng.fill_bytes(&mut key);
-    let socket_mock = tokio_test::io::Builder::new()
-        .write(b"Hello world")
-        .read(b"Hello world")
-        .build();
+#[cfg(test)]
+mod tests {
+    use tokio::net::{TcpListener, TcpStream};
 
-    let encrypted_socket = EncryptedSocket::new(socket_mock, &key);
-    // TODO: Finish
+    use super::*;
+
+    #[tokio::test]
+    async fn test_encryption() {
+        let mut key = GenericArray::default();
+        OsRng.fill_bytes(&mut key);
+        const TEST_DATA: &[u8; 12] = b"AAAABBBBCCCC";
+        let mut read_buf = [0; TEST_DATA.len()];
+
+        let (client, server) = tokio::join!(server(), client());
+        let mut client = EncryptedSocket::new(client, &key);
+        let mut server = EncryptedSocket::new(server, &key);
+
+        println!("A");
+        let result = client.write_all(TEST_DATA).await;
+        println!("B");
+        server.read_exact(&mut read_buf).await.unwrap();
+        println!("C");
+        assert_eq!(TEST_DATA, &read_buf);
+        server.write_all(TEST_DATA).await.unwrap();
+        client.read_exact(&mut read_buf).await.unwrap();
+        assert_eq!(TEST_DATA, &read_buf);
+    }
+    
+    async fn server() -> impl AsyncRead + AsyncWrite {
+        let server = TcpListener::bind("127.0.0.1:1337").await.unwrap();
+        let (socket, _) = server.accept().await.unwrap();
+        socket
+    }
+
+    async fn client() -> impl AsyncRead + AsyncWrite {
+        // Wait for server to start
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        TcpStream::connect("127.0.0.1:1337").await.unwrap()
+    }
+
 }

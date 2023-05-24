@@ -47,6 +47,3 @@ chacha20poly1305 = { version = "0.10.1", features = ["stream"] }
 
 [build-dependencies]
 build-data = "0"
-
-[dev-dependencies]
-tokio-test = "0.4.2"
