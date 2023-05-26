@@ -3,6 +3,7 @@ use std::{time::{SystemTime, Duration}, future::Future};
 
 use http::{Request, header, Method, Response, StatusCode};
 use hyper::{Body, upgrade::Upgraded};
+use rand::RngCore;
 use shared::{http_client::SamplyHttpClient, MsgSocketRequest, Plain, MsgId, MsgEmpty, beam_id::AppOrProxyId};
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use serde_json::Value;
@@ -18,12 +19,14 @@ async fn test_connections(r1: impl Future<Output = Response<Body>>, r2: impl Fut
         upgrade(r1),
         upgrade(r2)
     );
-    const TEST_DATA: &[u8; 11] = b"hello world";
-    a.write_all(TEST_DATA).await.unwrap();
+    const N: usize = 2_usize.pow(13);
+    let test_data: &mut [u8; N] = &mut [0; N];
+    rand::thread_rng().fill_bytes(test_data);
+    let mut read_buf = [0; N];
+    a.write_all(test_data).await.unwrap();
     a.flush().await.unwrap();
-    let recieved = &mut [0 as u8; TEST_DATA.len()];
-    b.read_exact(recieved).await.unwrap();
-    assert_eq!(TEST_DATA, recieved);
+    b.read_exact(&mut read_buf).await.unwrap();
+    assert_eq!(test_data, &read_buf);
 }
 
 #[tokio::test]

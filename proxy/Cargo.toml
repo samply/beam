@@ -37,13 +37,15 @@ serde_json = "1"
 rsa = "0.7.2"
 
 # Server-sent Events (SSE) support
-tokio-util = { version = "0.7.7", features = ["io"] }
+tokio-util = { version = "0.7.7", features = ["io", "codec", "compat"] }
 futures = "0.3.26"
 async-sse = "5.1.0"
 async-stream = "0.3.4"
 
-# TODO put behind feature flag
+# TODO put behind feature flag and put tokio-util::{codec, compat} behind it aswell
 chacha20poly1305 = { version = "0.10.1", features = ["stream"] }
+bytes = "1.4.0"
+
 
 [build-dependencies]
 build-data = "0"
