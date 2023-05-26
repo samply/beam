@@ -1,19 +1,50 @@
-use std::{time::{SystemTime, Duration}, pin::Pin, task::Poll, io::{Write, self}};
+use std::{
+    io::{self, Write},
+    ops::{Deref, DerefMut},
+    pin::Pin,
+    task::Poll,
+    time::{Duration, SystemTime},
+};
 
-use axum::{Router, routing::{get, post}, response::{Response, IntoResponse}, extract::{State, Path}};
-use bytes::{BytesMut, BufMut, Buf};
-use chacha20poly1305::{AeadCore, KeyInit, ChaCha20Poly1305, aead::{self, OsRng, stream::{StreamLE31, NewStream, StreamPrimitive, EncryptorLE31, DecryptorLE31}, Nonce, generic_array::{GenericArray, typenum::Unsigned}, Buffer}, XChaCha20Poly1305, consts::{U20, U32}, AeadInPlace};
-use futures::{FutureExt, TryStreamExt, SinkExt, StreamExt, stream::IntoAsyncRead};
-use hyper::{Request, Body, StatusCode, upgrade::OnUpgrade};
+use axum::{
+    extract::{Path, State},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+    RequestPartsExt, Router,
+};
+use bytes::{Buf, BufMut, BytesMut};
+use chacha20poly1305::{
+    aead::{
+        self,
+        generic_array::{typenum::Unsigned, GenericArray},
+        stream::{DecryptorLE31, EncryptorLE31, NewStream, StreamLE31, StreamPrimitive},
+        Buffer, Nonce, OsRng,
+    },
+    consts::{U20, U32},
+    AeadCore, AeadInPlace, ChaCha20Poly1305, KeyInit, XChaCha20Poly1305,
+};
+use futures::{stream::IntoAsyncRead, FutureExt, SinkExt, StreamExt, TryStreamExt};
+use hyper::{upgrade::OnUpgrade, Body, Request, StatusCode};
 use rsa::rand_core::RngCore;
-use serde::__private::de;
-use shared::{http_client::SamplyHttpClient, config, MsgSocketRequest, beam_id::AppOrProxyId, MsgId, Plain, MsgEmpty};
-use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, AsyncReadExt, ReadBuf, ReadHalf, WriteHalf};
-use tokio_util::{codec::{Encoder, Decoder, Framed, FramedRead, FramedWrite}, compat::{FuturesAsyncReadCompatExt, FuturesAsyncWriteCompatExt, Compat}};
+use serde::{Deserialize, Serialize};
+use shared::{
+    beam_id::AppOrProxyId,
+    config,
+    ct_codecs::{Base64UrlSafeNoPadding, Encoder as B64Encoder, Decoder as B64Decoder, self},
+    http_client::SamplyHttpClient,
+    MsgEmpty, MsgId, MsgSocketRequest, Plain,
+};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf, ReadHalf, WriteHalf};
+use tokio_util::{
+    codec::{Decoder, Encoder, Framed, FramedRead, FramedWrite},
+    compat::{Compat, FuturesAsyncReadCompatExt},
+};
 use tracing::warn;
 
-use crate::{serve_tasks::{handler_task, TasksState, forward_request}, auth::AuthenticatedApp};
-
+use crate::{
+    auth::AuthenticatedApp,
+    serve_tasks::{forward_request, handler_task, TasksState},
+};
 
 pub(crate) fn router(client: SamplyHttpClient) -> Router {
     let config = config::CONFIG_PROXY.clone();
@@ -23,7 +54,8 @@ pub(crate) fn router(client: SamplyHttpClient) -> Router {
     };
     Router::new()
         .route("/v1/sockets", get(handler_task).post(handler_task))
-        .route("/v1/sockets/:app_or_id", post(create_socket_con).get(connect_socket))
+        .route("/v1/sockets/:app_or_id", post(create_socket_con))
+        .route("/v1/sockets/:app_or_id/:secret", get(connect_socket))
         .with_state(state)
 }
 
@@ -31,17 +63,20 @@ async fn create_socket_con(
     AuthenticatedApp(sender): AuthenticatedApp,
     Path(to): Path<AppOrProxyId>,
     state: State<TasksState>,
-    req: Request<Body>
+    req: Request<Body>,
 ) -> Response {
     let task_id = MsgId::new();
     // TODO: proper secrets and encryption
-    let secret = "";
+    let secret = SocketEncKey::generate();
+    let Ok(secret_encoded) = secret.to_b64_str() else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
     let socket_req = MsgSocketRequest {
         from: AppOrProxyId::AppId(sender.clone()),
         to: vec![to],
         expire: SystemTime::now() + Duration::from_secs(60),
         id: task_id,
-        secret: Plain::from(secret),
+        secret: Plain::from(secret_encoded),
         metadata: serde_json::Value::Null,
     };
 
@@ -49,36 +84,39 @@ async fn create_socket_con(
         warn!("Failed to serialize MsgSocketRequest");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    let new_req = Request::post("/v1/sockets")
-        .body(Body::from(body));
+    let new_req = Request::post("/v1/sockets").body(Body::from(body));
     let post_socket_task_req = match new_req {
         Ok(req) => req,
         Err(e) => {
             warn!("Failed to construct request: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        },
+        }
     };
 
-    let res = match forward_request(post_socket_task_req, &state.config, &sender, &state.client).await {
-        Ok(res) => res,
-        Err(err) => {
-            warn!("Failed to create post socket request: {err:?}");
-            return err.into_response()
-        },
-    };
+    let res =
+        match forward_request(post_socket_task_req, &state.config, &sender, &state.client).await {
+            Ok(res) => res,
+            Err(err) => {
+                warn!("Failed to create post socket request: {err:?}");
+                return err.into_response();
+            }
+        };
 
     if res.status() != StatusCode::CREATED {
-        warn!("Failed to post MsgSocketRequest to broker. Statuscode: {}", res.status());
+        warn!(
+            "Failed to post MsgSocketRequest to broker. Statuscode: {}",
+            res.status()
+        );
         return (res.status(), "Failed to post MsgSocketRequest to broker").into_response();
     }
-    connect_socket(AuthenticatedApp(sender), state, task_id, req).await
+    connect_socket(AuthenticatedApp(sender), state, Path((task_id, secret)), req).await
 }
 
 async fn connect_socket(
     AuthenticatedApp(sender): AuthenticatedApp,
     state: State<TasksState>,
-    task_id: MsgId,
-    req: Request<Body>
+    Path((task_id, key)): Path<(MsgId, SocketEncKey)>,
+    req: Request<Body>,
 ) -> Response {
     if req.extensions().get::<OnUpgrade>().is_none() {
         return StatusCode::UPGRADE_REQUIRED.into_response();
@@ -98,27 +136,28 @@ async fn connect_socket(
         Err(e) => {
             warn!("Failed to construct request: {e}");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        },
+        }
     };
     *get_socket_con_req.headers_mut() = req.headers().clone();
 
-    let res = match forward_request(get_socket_con_req, &state.config, &sender, &state.client).await {
+    let res = match forward_request(get_socket_con_req, &state.config, &sender, &state.client).await
+    {
         Ok(res) => res,
         Err(err) => {
             warn!("Failed to create socket connect request: {err:?}");
-            return err.into_response()
-        },
+            return err.into_response();
+        }
     };
 
-    if res.extensions().get::<OnUpgrade>().is_none() || res.status() != StatusCode::SWITCHING_PROTOCOLS {
+    if res.extensions().get::<OnUpgrade>().is_none()
+        || res.status() != StatusCode::SWITCHING_PROTOCOLS
+    {
         warn!("Failed to create an upgradable connection to the broker. Response was: {res:?}");
         return res.status().into_response();
     }
 
     // Connect sockets
     tokio::spawn(async move {
-        let mut key = GenericArray::default();
-        key.fill(3_u8);
         let broker_socket = hyper::upgrade::on(res).await.unwrap();
         let mut client_socket = hyper::upgrade::on(req).await.unwrap();
         let Ok(mut enc_broker_socket) = EncryptedSocket::new(broker_socket, &key).await else {
@@ -135,10 +174,61 @@ async fn connect_socket(
     StatusCode::SWITCHING_PROTOCOLS.into_response()
 }
 
+struct SocketEncKey(GenericArray<u8, U32>);
+
+impl SocketEncKey {
+    fn generate() -> Self {
+        let mut arr = GenericArray::default();
+        OsRng.fill_bytes(&mut arr);
+        SocketEncKey(arr)
+    }
+
+    fn to_b64_str(&self) -> Result<String, ct_codecs::Error> {
+        Base64UrlSafeNoPadding::encode_to_string(self.as_slice())
+    }
+}
+
+impl Serialize for SocketEncKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.to_b64_str().map_err(serde::ser::Error::custom)?.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for SocketEncKey {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let bytes = Base64UrlSafeNoPadding::decode_to_vec(String::deserialize(deserializer)?, None).map_err(serde::de::Error::custom)?;
+        if bytes.len() != U32::to_usize() {
+            return Err(serde::de::Error::custom("Key does not match required key length"));
+        } else {
+            Ok(SocketEncKey(GenericArray::clone_from_slice(bytes.as_slice())))
+        }
+    }
+}
+
+impl Deref for SocketEncKey {
+    type Target = GenericArray<u8, U32>;
+
+    fn deref(&self) -> &GenericArray<u8, U32> {
+        &self.0
+    }
+}
+
+impl DerefMut for SocketEncKey {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 struct EncryptedSocket<S: AsyncRead + AsyncWrite> {
     // inner: Framed<S, EncryptorCodec>,
     read: Compat<IntoAsyncRead<FramedRead<ReadHalf<S>, DecryptorCodec>>>,
-    write: FramedWrite<WriteHalf<S>, EncryptorCodec>
+    write: FramedWrite<WriteHalf<S>, EncryptorCodec>,
 }
 
 struct EncryptorCodec {
@@ -165,8 +255,9 @@ impl Encoder<&[u8]> for EncryptorCodec {
 
     fn encode(&mut self, item: &[u8], dst: &mut BytesMut) -> Result<(), Self::Error> {
         let mut enc_buf = EncBuffer::new(dst, item.len() + Self::tag_overhead());
-        enc_buf.extend_from_slice(item);
-        self.encryptor.encrypt_next_in_place(b"", &mut enc_buf)
+        enc_buf.extend_from_slice(item).expect("Infallible");
+        self.encryptor
+            .encrypt_next_in_place(b"", &mut enc_buf)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Encryption failed"))
     }
 }
@@ -188,14 +279,17 @@ impl Decoder for DecryptorCodec {
             return Ok(None);
         }
 
-        let plain = self.decryptor.decrypt_next(&src[Self::SIZE_OVERHEAD..]).map_err(|_| io::Error::new(io::ErrorKind::InvalidData,"Decryption failed"))?;
+        let plain = self
+            .decryptor
+            .decrypt_next(&src[Self::SIZE_OVERHEAD..])
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Decryption failed"))?;
         src.advance(total_frame_size);
         Ok(Some(plain))
     }
 }
 
 struct EncBuffer<'a> {
-    buf: &'a mut BytesMut
+    buf: &'a mut BytesMut,
 }
 
 impl<'a> EncBuffer<'a> {
@@ -256,10 +350,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> EncryptedSocket<S> {
         let read = read.into_async_read().compat();
         let write = FramedWrite::new(w, EncryptorCodec { encryptor });
 
-        Ok(Self {
-            read,
-            write,
-        })
+        Ok(Self { read, write })
     }
 }
 
@@ -290,18 +381,24 @@ impl<S: AsyncWrite + AsyncRead + Unpin> AsyncWrite for EncryptedSocket<S> {
         self.write.send(buf).poll_unpin(cx).map_ok(|_| buf.len())
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), io::Error>> {
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), io::Error>> {
         self.write.poll_flush_unpin(cx)
     }
 
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), io::Error>> {
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), io::Error>> {
         self.write.poll_close_unpin(cx)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use chacha20poly1305::aead::stream::{EncryptorLE31, Encryptor, Decryptor};
+    use chacha20poly1305::aead::stream::{Decryptor, Encryptor, EncryptorLE31};
     use tokio::net::{TcpListener, TcpStream};
 
     use super::*;
@@ -325,7 +422,7 @@ mod tests {
         client1.read_exact(&mut read_buf).await.unwrap();
         assert_eq!(test_data, &read_buf);
     }
-    
+
     async fn start_test_broker() {
         let server = TcpListener::bind("127.0.0.1:1337").await.unwrap();
         tokio::spawn(async move {

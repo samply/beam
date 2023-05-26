@@ -31,7 +31,8 @@ use serde::{
 use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
 
-use crate::crypto_jwt::JWT_VERIFICATION_OPTIONS;
+// Reexport b64 implementation
+pub use jwt_simple::reexports::ct_codecs;
 
 pub type MsgId = MyUuid;
 pub type MsgType = String;
