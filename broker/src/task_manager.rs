@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     ops::Deref,
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime}, collections::HashMap,
 };
 
 use axum::{response::IntoResponse, Json};
@@ -10,6 +10,7 @@ use dashmap::{
     DashMap,
 };
 use hyper::StatusCode;
+use once_cell::sync::Lazy;
 use shared::{
     beam_id::AppOrProxyId, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned,
     MsgSocketRequest, MsgState, MsgTaskRequest, MsgTaskResult,
@@ -20,32 +21,40 @@ use tracing::warn;
 pub trait Task {
     type Result;
 
-    fn get_results(&self) -> &Vec<Self::Result>;
-    fn push_result(&mut self, result: Self::Result);
+    fn get_results(&self) -> &HashMap<AppOrProxyId, Self::Result>;
+    /// Returns true if the value as been updated and false if it was a result from a new app
+    fn insert_result(&mut self, result: Self::Result) -> bool;
     fn is_expired(&self) -> bool;
 }
 
-// impl<State: MsgState> Task for MsgTaskRequest<State> {
-//     type Result = MsgSigned<MsgTaskResult<State>>;
+impl<State: MsgState> Task for MsgTaskRequest<State> {
+    type Result = MsgSigned<MsgTaskResult<State>>;
 
-//     fn get_results(&self) -> &Vec<Self::Result> {
-//         &self.results
-//     }
+    fn insert_result(&mut self, result: Self::Result) -> bool {
+        self.results.insert(result.get_from().clone(), result).is_some()
+    }
 
-//     fn push_result(&mut self, result: Self::Result) {
-//         self.results.push(result)
-//     }
-// }
+    fn get_results(&self) -> &HashMap<AppOrProxyId, Self::Result> {
+        &self.results
+    }
+
+    fn is_expired(&self) -> bool {
+        self.expire < SystemTime::now()
+    }
+}
+
+static EMPTY_MAP: Lazy<HashMap<AppOrProxyId, ()>> = Lazy::new(|| {
+    HashMap::with_capacity(0)
+});
 
 impl<State: MsgState> Task for MsgSocketRequest<State> {
     type Result = ();
 
-    fn get_results(&self) -> &Vec<Self::Result> {
-        const EMPTY_VEC: &Vec<()> = &Vec::new();
-        EMPTY_VEC
+    fn get_results(&self) -> &HashMap<AppOrProxyId, Self::Result> {
+        &EMPTY_MAP
     }
 
-    fn push_result(&mut self, result: Self::Result) {}
+    fn insert_result(&mut self, _result: Self::Result) -> bool { false }
 
     fn is_expired(&self) -> bool {
         self.expire < SystemTime::now()
@@ -57,7 +66,7 @@ pub struct TaskManager<T: HasWaitId<MsgId> + Task + Msg> {
     new_tasks: broadcast::Sender<MsgId>,
     deleted_tasks: broadcast::Sender<MsgId>,
     /// Send the index at which the new result for the given Task was inserted
-    new_results: DashMap<MsgId, broadcast::Sender<usize>>,
+    new_results: DashMap<MsgId, broadcast::Sender<AppOrProxyId>>,
 }
 
 impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
@@ -170,7 +179,7 @@ where
             .get(task_id)?
             .msg
             .get_results()
-            .iter()
+            .values()
             .filter(|result| filter(result))
             .count();
         let mut new_results = self
@@ -185,9 +194,9 @@ where
                 },
                 result = new_results.recv() => {
                     match result {
-                        Ok(idx) => {
+                        Ok(key) => {
                             if let Ok(task) = self.get(task_id) {
-                                if filter(&task.msg.get_results()[idx]) {
+                                if filter(&task.msg.get_results()[&key]) {
                                     num_of_results += 1;
                                 }
                             } else {
@@ -215,8 +224,8 @@ where
         if !entry.get_to().contains(result.get_from()) {
             return Err(TaskManagerError::Unauthorized);
         }
-        let n = entry.msg.get_results().len();
-        entry.msg.push_result(result);
+        let sender = result.get_from().clone();
+        entry.msg.insert_result(result);
         // We dont care if noone is listening
         _ = self
             .new_results
@@ -224,7 +233,7 @@ where
             .expect(
                 "This task id must be present because it is present at the start of the function",
             )
-            .send(n);
+            .send(sender);
         Ok(())
     }
 }
