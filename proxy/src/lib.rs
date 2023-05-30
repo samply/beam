@@ -1,0 +1,9 @@
+mod auth;
+mod banner;
+mod crypto;
+mod serve;
+mod serve_health;
+mod serve_tasks;
+mod start;
+
+pub use start::main;

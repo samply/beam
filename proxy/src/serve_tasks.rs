@@ -47,7 +47,7 @@ use shared::{
 use tokio::io::BufReader;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::{auth::AuthenticatedApp, PROXY_TIMEOUT};
+use crate::{auth::AuthenticatedApp, start::PROXY_TIMEOUT};
 
 #[derive(Clone, FromRef)]
 struct TasksState {
