@@ -4,19 +4,18 @@ use std::{
     time::{Duration, SystemTime}, collections::HashMap,
 };
 
-use axum::{response::IntoResponse, Json};
-use dashmap::{
-    mapref::{multiple::RefMulti, one::Ref},
-    DashMap,
-};
+use axum::{response::{IntoResponse, sse::Event, Sse}, Json};
+use dashmap::DashMap;
+use futures_core::Stream;
 use hyper::StatusCode;
 use once_cell::sync::Lazy;
+use serde::Serialize;
 use shared::{
     beam_id::AppOrProxyId, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned,
-    MsgSocketRequest, MsgState, MsgTaskRequest, MsgTaskResult,
+    MsgSocketRequest, MsgState, MsgTaskRequest, MsgTaskResult, sse_event::SseEventType,
 };
 use tokio::{sync::broadcast, time::Instant};
-use tracing::warn;
+use tracing::{warn, error};
 
 pub trait Task {
     type Result;
@@ -215,6 +214,64 @@ where
         Ok(self.get(task_id).map_err(|_| TaskManagerError::Gone)?)
     }
 
+    pub fn stream_results<'a>(
+        &'a self,
+        task_id: &'a MsgId,
+        block: &'a HowLongToBlock,
+        filter: impl Fn(&T::Result) -> bool + 'a
+    ) -> Result<impl Stream<Item = Result<Event, TaskManagerError>> + 'a, TaskManagerError>
+        where T::Result: Serialize
+    {
+        let task = self.get(task_id)?;
+        Ok(async_stream::stream! {
+            let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
+            let wait_until = Instant::now() + block.wait_time.unwrap_or(Duration::from_secs(600));
+            let ready_results = task.msg
+                .get_results()
+                .values()
+                .filter(|result| filter(result));
+            let mut num_of_results = 0;
+            for res in ready_results {
+                yield Ok(to_event(res, SseEventType::NewResult));
+                num_of_results += 1;
+                if num_of_results >= max_elements {
+                    break;
+                }
+            }
+            let mut new_results = self
+                .new_results
+                .get(task_id)
+                .ok_or(TaskManagerError::NotFound)?
+                .subscribe();
+            while num_of_results < max_elements && Instant::now() < wait_until {
+                tokio::select! {
+                    _ = tokio::time::sleep_until(wait_until) => {
+                        break;
+                    },
+                    result = new_results.recv() => {
+                        match result {
+                            Ok(key) => {
+                                if let Ok(task) = self.get(task_id) {
+                                    let new_result = &task.msg.get_results()[&key];
+                                    if filter(new_result) {
+                                        num_of_results += 1;
+                                        yield Ok(to_event(new_result, SseEventType::NewResult));
+                                    };
+                                } else {
+                                    yield Err(TaskManagerError::Gone);
+                                }
+                            },
+                            Err(e) => {
+                                warn!("new_results channel lagged: {e}");
+                                yield Err(TaskManagerError::BroadcastBufferOverflow);
+                            }
+                        }
+                    },
+                }
+            }
+        })
+    }
+
     /// This will push the result to the given task by its id
     /// Returns true if the given task exists flase otherwise
     pub fn put_result(&self, task_id: &MsgId, result: T::Result) -> Result<(), TaskManagerError> {
@@ -256,4 +313,13 @@ impl From<TaskManagerError> for StatusCode {
             TaskManagerError::Gone => StatusCode::GONE,
         }
     }
+}
+
+fn to_event(json: impl Serialize, event_type: impl AsRef<str>) -> Event {
+    Event::default().event(event_type).json_data(json).unwrap_or_else(|e| {
+        error!("Unable to serialize message: {e}");
+        Event::default()
+            .event(SseEventType::Error)
+            .data("Internal error: Unable to serialize message.")
+    })
 }
