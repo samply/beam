@@ -3,14 +3,14 @@ use std::{
     ops::{Deref, DerefMut},
     pin::Pin,
     task::Poll,
-    time::{Duration, SystemTime},
+    time::{Duration, SystemTime}, sync::Arc,
 };
 
 use axum::{
     extract::{Path, State},
     response::{IntoResponse, Response},
     routing::{get, post},
-    RequestPartsExt, Router,
+    RequestPartsExt, Router, Json, Extension,
 };
 use bytes::{Buf, BufMut, BytesMut};
 use chacha20poly1305::{
@@ -23,16 +23,18 @@ use chacha20poly1305::{
     consts::{U20, U32},
     AeadCore, AeadInPlace, ChaCha20Poly1305, KeyInit, XChaCha20Poly1305,
 };
+use dashmap::DashMap;
 use futures::{stream::IntoAsyncRead, FutureExt, SinkExt, StreamExt, TryStreamExt};
 use hyper::{upgrade::OnUpgrade, Body, Request, StatusCode};
 use rsa::rand_core::RngCore;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use shared::{
     beam_id::AppOrProxyId,
     config,
     ct_codecs::{Base64UrlSafeNoPadding, Encoder as B64Encoder, Decoder as B64Decoder, self},
     http_client::SamplyHttpClient,
-    MsgEmpty, MsgId, MsgSocketRequest, Plain,
+    MsgEmpty, MsgId, MsgSocketRequest, Plain, MessageType,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf, ReadHalf, WriteHalf};
 use tokio_util::{
@@ -43,8 +45,10 @@ use tracing::warn;
 
 use crate::{
     auth::AuthenticatedApp,
-    serve_tasks::{forward_request, handler_task, TasksState},
+    serve_tasks::{forward_request, handler_task, TasksState, validate_and_decrypt, to_server_error},
 };
+
+type MsgSecretMap = Arc<DashMap<MsgId, SocketEncKey>>;
 
 pub(crate) fn router(client: SamplyHttpClient) -> Router {
     let config = config::CONFIG_PROXY.clone();
@@ -52,25 +56,57 @@ pub(crate) fn router(client: SamplyHttpClient) -> Router {
         client: client.clone(),
         config,
     };
+    let task_secret_map: MsgSecretMap = Arc::new(DashMap::new());
+
     Router::new()
-        .route("/v1/sockets", get(handler_task).post(handler_task))
-        .route("/v1/sockets/:app_or_id", post(create_socket_con))
-        .route("/v1/sockets/:app_or_id/:secret", get(connect_socket))
+        .route("/v1/sockets", get(get_tasks).post(handler_task))
+        .route("/v1/sockets/:app_or_id", post(create_socket_con).get(connect_socket))
         .with_state(state)
+        .layer(Extension(task_secret_map))
+}
+
+async fn get_tasks(
+    AuthenticatedApp(sender): AuthenticatedApp,
+    state: State<TasksState>,
+    Extension(task_secret_map): Extension<MsgSecretMap>,
+    req: Request<Body>
+) -> Result<Json<Vec<MsgSocketRequest<Plain>>>, StatusCode> {
+    let mut res = forward_request(req, &state.config, &sender, &state.client).await.map_err(|e| e.0)?;
+    if res.status() != StatusCode::OK {
+        return Err(res.status());
+    }
+    let body = hyper::body::to_bytes(res.body_mut()).await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+    let enc_json = serde_json::from_slice(&body).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let plain_json = to_server_error(validate_and_decrypt(enc_json).await).map_err(|e| e.0)?;
+    let tasks: Vec<MessageType<Plain>> = serde_json::from_value(plain_json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut out = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        if let MessageType::MsgSocketRequest(mut socket_task) = task {
+            let key = serde_json::from_value(Value::String(socket_task.secret.body.as_ref().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?.to_string())).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            task_secret_map.insert(socket_task.id, key);
+            socket_task.secret.body = None;
+            out.push(socket_task);
+        } else {
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    Ok(Json(out))
 }
 
 async fn create_socket_con(
     AuthenticatedApp(sender): AuthenticatedApp,
     Path(to): Path<AppOrProxyId>,
+    Extension(task_secret_map): Extension<MsgSecretMap>,
     state: State<TasksState>,
     req: Request<Body>,
 ) -> Response {
     let task_id = MsgId::new();
-    // TODO: proper secrets and encryption
     let secret = SocketEncKey::generate();
     let Ok(secret_encoded) = secret.to_b64_str() else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
+    task_secret_map.insert(task_id.clone(), secret);
     let socket_req = MsgSocketRequest {
         from: AppOrProxyId::AppId(sender.clone()),
         to: vec![to],
@@ -109,18 +145,23 @@ async fn create_socket_con(
         );
         return (res.status(), "Failed to post MsgSocketRequest to broker").into_response();
     }
-    connect_socket(AuthenticatedApp(sender), state, Path((task_id, secret)), req).await
+    connect_socket(AuthenticatedApp(sender), state, Extension(task_secret_map), task_id, req).await
 }
 
 async fn connect_socket(
     AuthenticatedApp(sender): AuthenticatedApp,
     state: State<TasksState>,
-    Path((task_id, key)): Path<(MsgId, SocketEncKey)>,
+    Extension(task_secret_map): Extension<MsgSecretMap>,
+    task_id: MsgId,
     req: Request<Body>,
 ) -> Response {
     if req.extensions().get::<OnUpgrade>().is_none() {
         return StatusCode::UPGRADE_REQUIRED.into_response();
     }
+
+    let Some(key) = task_secret_map.get(&task_id).map(|v| v.value().clone()) else {
+        return StatusCode::UNAUTHORIZED.into_response();
+    };
 
     let msg_empty = MsgEmpty {
         from: AppOrProxyId::AppId(sender.clone()),
@@ -174,6 +215,7 @@ async fn connect_socket(
     StatusCode::SWITCHING_PROTOCOLS.into_response()
 }
 
+#[derive(Debug, Clone, Copy)]
 struct SocketEncKey(GenericArray<u8, U32>);
 
 impl SocketEncKey {

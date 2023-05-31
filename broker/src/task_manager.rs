@@ -86,6 +86,10 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         self.tasks.get(task_id).ok_or(TaskManagerError::NotFound)
     }
 
+    pub fn remove(&self, task_id: &MsgId) -> Result<MsgSigned<T>, TaskManagerError> {
+        self.tasks.remove(task_id).ok_or(TaskManagerError::NotFound).map(|v| v.1)
+    }
+
     pub fn get_tasks_by(&self, filter: impl Fn(&T) -> bool) -> impl Iterator<Item = impl Deref<Target = MsgSigned<T>> + '_> {
         self.tasks
             .iter()

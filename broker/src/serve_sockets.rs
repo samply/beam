@@ -118,6 +118,8 @@ async fn connect_socket(
         waiting_cons.insert(task_id, tx);
         drop(waiting_cons);
         let other_req = rx.await.unwrap();
+        // We don't care if the task expired by now
+        _ = state.task_manager.remove(&task_id);
         tokio::spawn(async move {
             let mut c1 = hyper::upgrade::on(req).await.unwrap();
             let mut c2 = hyper::upgrade::on(other_req).await.unwrap();

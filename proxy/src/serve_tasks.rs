@@ -320,7 +320,7 @@ async fn handler_tasks_stream(
     Ok(sse)
 }
 
-fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, (StatusCode, &'static str)> {
+pub(crate) fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, (StatusCode, &'static str)> {
     res.map_err(|e| match e {
         SamplyBeamError::JsonParseError(e) => {
             warn!("{e}");
@@ -408,7 +408,7 @@ pub async fn sign_request(
 }
 
 #[async_recursion::async_recursion]
-async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
+pub(crate) async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
     // It might be possible to use MsgSigned directly instead but there are issues impl Deserialize for MsgSigned<EncryptedMessage>
     #[derive(Deserialize)]
     struct MsgSignedHelper {

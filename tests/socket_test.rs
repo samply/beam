@@ -47,7 +47,7 @@ async fn test_full() -> Result<()> {
         let body = hyper::body::to_bytes(res.body_mut()).await.expect("Failed to read body");
         let tasks: Vec<MsgSocketRequest<Plain>> = serde_json::from_slice(&body).expect("Failed to deserialize body to socket reqs");
         assert_eq!(tasks.len(), 1);
-        let res = connect_socket(client2, &tasks[0].id, &tasks[0].secret.body.as_ref().unwrap()).await.expect("Failed to create socket connection");
+        let res = connect_socket(client2, &tasks[0].id).await.expect("Failed to create socket connection");
         assert_eq!(res.status(), StatusCode::SWITCHING_PROTOCOLS);
         res
     };
@@ -72,10 +72,10 @@ async fn create_connect_socket(client: SamplyHttpClient, app: &AppOrProxyId) -> 
     Ok(client.request(req).await?)
 }
 
-async fn connect_socket(client: SamplyHttpClient, task_id: &MsgId, secret: &str) -> Result<Response<Body>> {
+async fn connect_socket(client: SamplyHttpClient, task_id: &MsgId) -> Result<Response<Body>> {
     let req = Request::builder()
         .method(Method::GET)
-        .uri(format!("{PROXY2}/v1/sockets/{task_id}/{secret}"))
+        .uri(format!("{PROXY2}/v1/sockets/{task_id}"))
         .header(header::AUTHORIZATION, format!("ApiKey {} {APP_KEY}", APP2.clone()))
         .header(header::UPGRADE, "tcp")
         .body(Body::empty())?;
