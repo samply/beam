@@ -8,6 +8,7 @@ mod serve;
 mod serve_health;
 mod serve_pki;
 mod serve_tasks;
+#[cfg(feature = "sockets")]
 mod serve_sockets;
 mod task_manager;
 
