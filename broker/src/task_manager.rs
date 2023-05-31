@@ -12,7 +12,7 @@ use once_cell::sync::Lazy;
 use serde::Serialize;
 use shared::{
     beam_id::AppOrProxyId, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned,
-    MsgSocketRequest, MsgState, MsgTaskRequest, MsgTaskResult, sse_event::SseEventType,
+    MsgState, MsgTaskRequest, MsgTaskResult, sse_event::SseEventType,
 };
 use tokio::{sync::broadcast, time::Instant};
 use tracing::{warn, error};
@@ -46,7 +46,8 @@ static EMPTY_MAP: Lazy<HashMap<AppOrProxyId, ()>> = Lazy::new(|| {
     HashMap::with_capacity(0)
 });
 
-impl<State: MsgState> Task for MsgSocketRequest<State> {
+#[cfg(feature = "sockets")]
+impl<State: MsgState> Task for shared::MsgSocketRequest<State> {
     type Result = ();
 
     fn get_results(&self) -> &HashMap<AppOrProxyId, Self::Result> {

@@ -50,7 +50,10 @@ pub mod config_shared;
 pub mod config_broker;
 // #[cfg(feature = "config-for-proxy")]
 pub mod config_proxy;
-
+#[cfg(feature = "sockets")]
+mod sockets;
+#[cfg(feature = "sockets")]
+pub use sockets::*;
 pub mod beam_id;
 pub mod graceful_shutdown;
 pub mod http_client;
@@ -178,67 +181,6 @@ impl Msg for MsgEmpty {
     }
 }
 
-// Notes:
-// Shortest connection would be from beam-app to broker to beam-app without hops to the proxies
-// For beam connect this would enable things like websockets maybe
-// Beam connect could work in the future something like https://github.com/qwj/python-proxy supporting all kinds of protocols but using sockets under the hood
-// Idea:
-// Client generates a secret hashes it puts the hash in one filed the unhashed token is send to the client and encrypted by beams normal encryption.
-// Both clients now share a secret key and can connect to the relay with the hash of that secret and encrypt their traffic
-// An alternative would be to find some mitm save way to share a secret between both clients and the broker 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-// This should maybe also be strictly serialized
-pub struct MsgSocketRequest<State>
-where State: MsgState {
-    pub from: AppOrProxyId,
-    // TODO: Tell serde to serialize only one
-    pub to: Vec<AppOrProxyId>,
-    #[serde(with="serialize_time", rename="ttl")]
-    pub expire: SystemTime,
-    pub id: MsgId,
-    pub secret: State,
-    pub metadata: Value,
-}
-
-impl<State: MsgState> Msg for MsgSocketRequest<State> {
-    fn get_from(&self) -> &AppOrProxyId {
-        &self.from
-    }
-
-    fn get_to(&self) -> &Vec<AppOrProxyId> {
-        &self.to
-    }
-
-    fn get_metadata(&self) -> &Value {
-        &self.metadata
-    }
-}
-
-impl DecryptableMsg for MsgSocketRequest<Encrypted> {
-    type Output = MsgSocketRequest<Plain>;
-
-    fn get_encryption(&self) -> Option<&Encrypted> {
-        Some(&self.secret)
-    }
-
-    fn convert_self(self, body: String) -> Self::Output {
-        let Self { from, to, expire, metadata, id, .. } = self;
-        Self::Output { from, to, expire, secret: body.into(), metadata, id }
-    }
-}
-
-impl EncryptableMsg for MsgSocketRequest<Plain> {
-    type Output = MsgSocketRequest<Encrypted>;
-
-    fn convert_self(self, body: Encrypted) -> Self::Output {
-        let Self { from, to, expire, metadata, id, .. } = self;
-        Self::Output { from, to, expire, metadata, secret: body, id }
-    }
-
-    fn get_plain(&self) -> &Plain {
-        &self.secret
-    }
-}
 
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
@@ -248,7 +190,8 @@ where
 {
     MsgTaskRequest(MsgTaskRequest<State>),
     MsgTaskResult(MsgTaskResult<State>),
-    MsgSocketRequest(MsgSocketRequest<State>),
+    #[cfg(feature = "sockets")]
+    MsgSocketRequest(sockets::MsgSocketRequest<State>),
     MsgEmpty(MsgEmpty),
 }
 
@@ -263,6 +206,7 @@ impl EncryptableMsg for PlainMessage {
             Self::MsgTaskRequest(m) => Self::Output::MsgTaskRequest(m.convert_self(body)),
             Self::MsgTaskResult(m) => Self::Output::MsgTaskResult(m.convert_self(body)),
             Self::MsgEmpty(m) => Self::Output::MsgEmpty(m),
+            #[cfg(feature = "sockets")]
             Self::MsgSocketRequest(m) => Self::Output::MsgSocketRequest(m.convert_self(body))
         }
     }
@@ -272,6 +216,7 @@ impl EncryptableMsg for PlainMessage {
             Self::MsgTaskRequest(m) => m.get_plain(),
             Self::MsgTaskResult(m) => m.get_plain(),
             Self::MsgEmpty(_) => &Plain { body: None },
+            #[cfg(feature = "sockets")]
             Self::MsgSocketRequest(m) => m.get_plain(),
         }
     }
@@ -286,6 +231,7 @@ impl DecryptableMsg for EncryptedMessage {
             Self::MsgTaskRequest(m) => Self::Output::MsgTaskRequest(m.convert_self(body)),
             Self::MsgTaskResult(m) => Self::Output::MsgTaskResult(m.convert_self(body)),
             Self::MsgEmpty(m) => Self::Output::MsgEmpty(m),
+            #[cfg(feature = "sockets")]
             Self::MsgSocketRequest(m) => Self::Output::MsgSocketRequest(m.convert_self(body))
         }
     }
@@ -295,6 +241,7 @@ impl DecryptableMsg for EncryptedMessage {
             Self::MsgTaskRequest(m) => m.get_encryption(),
             Self::MsgTaskResult(m) => m.get_encryption(),
             Self::MsgEmpty(_) => None,
+            #[cfg(feature = "sockets")]
             Self::MsgSocketRequest(m) => m.get_encryption(),
         }
     }
@@ -306,6 +253,7 @@ impl<T: MsgState> Msg for MessageType<T> {
         match self {
             MsgTaskRequest(m) => m.get_from(),
             MsgTaskResult(m) => m.get_from(),
+            #[cfg(feature = "sockets")]
             MsgSocketRequest(m) => m.get_from(),
             MsgEmpty(m) => m.get_from(),
         }
@@ -315,6 +263,7 @@ impl<T: MsgState> Msg for MessageType<T> {
         use MessageType::*;
         match self {
             MsgTaskRequest(m) => m.get_to(),
+            #[cfg(feature = "sockets")]
             MsgSocketRequest(m) => m.get_to(),
             MsgTaskResult(m) => m.get_to(),
             MsgEmpty(m) => m.get_to(),
@@ -326,6 +275,7 @@ impl<T: MsgState> Msg for MessageType<T> {
         match self {
             MsgTaskRequest(m) => m.get_metadata(),
             MsgTaskResult(m) => m.get_metadata(),
+            #[cfg(feature = "sockets")]
             MsgSocketRequest(m) => m.get_metadata(),
             MsgEmpty(m) => m.get_metadata(),
         }
@@ -725,12 +675,6 @@ pub trait HasWaitId<I: PartialEq> {
 }
 
 impl HasWaitId<MsgId> for MsgTaskRequest {
-    fn wait_id(&self) -> MsgId {
-        self.id
-    }
-}
-
-impl<State: MsgState> HasWaitId<MsgId> for MsgSocketRequest<State> {
     fn wait_id(&self) -> MsgId {
         self.id
     }
