@@ -331,7 +331,6 @@ impl<'a> AsMut<[u8]> for EncBuffer<'a> {
 impl<S: AsyncRead + AsyncWrite + Unpin> EncryptedSocket<S> {
     /// Creates a new cipher stream with a 32 byte key and a 16 + 4 byte Nonce
     async fn new(mut inner: S, key: &GenericArray<u8, U32>) -> io::Result<Self> {
-        println!("{:?}", key);
         let aead = XChaCha20Poly1305::new(key);
 
         // Encryption
