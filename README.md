@@ -392,6 +392,43 @@ HTTP/1.1 503
 }
 ```
 
+### Socket connections
+> Note: Only avalibale on builds with the feature `sockets` enabled. Both proxy and broker need to be build with this flag. There are also prebuild docker images avalible with this feature.
+
+All api request require the normal authenticated header see the [getting started section](#getting-started).
+
+To create initialize a socket connection to an app with a given beam id i.e `app2.proxy2.broker`:
+
+Method: `POST`  
+URL: `/v1/sockets/<BEAM_ID>`  
+Header: `Upgrade` is required
+
+After this you will be automatically connected to the other app if they answer your request.
+
+To recieve connections from other apps the server needs to poll for incoming connections.
+This endpoint also supports the [long polling](#long-polling-api-access) query string semantics.
+
+Method: `GET`  
+URL: `/v1/sockets`
+
+This will return a json object like the following
+```
+[
+    {
+        "from": "app1.proxy1.broker",
+        "to": ["app2.proxy2.broker"]
+        "id": "Some uuid v4",
+        "ttl": "60s",
+    }
+]
+```
+
+The client can then proceed to connect to the socket with:
+
+Method: GET  
+URL: `/v1/sockets/<id>`
+
+
 ## Development Environment
 
 A dev environment is provided consisting of one broker and two proxies.
