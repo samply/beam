@@ -59,7 +59,7 @@ pub(crate) fn router(client: SamplyHttpClient) -> Router {
     let task_secret_map: MsgSecretMap = Arc::new(DashMap::new());
 
     Router::new()
-        .route("/v1/sockets", get(get_tasks).post(handler_task))
+        .route("/v1/sockets", get(get_tasks))
         .route("/v1/sockets/:app_or_id", post(create_socket_con).get(connect_socket))
         .with_state(state)
         .layer(Extension(task_secret_map))
@@ -113,7 +113,6 @@ async fn create_socket_con(
         expire: SystemTime::now() + Duration::from_secs(60),
         id: task_id,
         secret: Plain::from(secret_encoded),
-        metadata: serde_json::Value::Null,
     };
 
     let Ok(body) = serde_json::to_vec(&socket_req) else {
