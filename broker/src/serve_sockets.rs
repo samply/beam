@@ -56,12 +56,12 @@ fn serialize_deref_iter<S: Serializer>(serializer: S, iter: impl Iterator<Item =
 }
 
 async fn get_socket_requests(
-    block: HowLongToBlock,
+    mut block: HowLongToBlock,
     state: State<SocketState>,
     msg: MsgSigned<MsgEmpty>,
 ) -> Result<Response, StatusCode> {
     if block.wait_count.is_none() && block.wait_time.is_none() {
-        return Err(StatusCode::BAD_REQUEST);
+        block.wait_count = Some(1);
     }
     let requester = msg.get_from();
     let filter = |req: &MsgSocketRequest<Encrypted>| req.to.contains(requester);
