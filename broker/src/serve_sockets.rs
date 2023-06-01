@@ -20,7 +20,7 @@ struct SocketState {
 impl Default for SocketState {
     fn default() -> Self {
         Self {
-            task_manager: Arc::new(TaskManager::new()),
+            task_manager: TaskManager::new(),
             waiting_connections: Default::default()
         }
     }

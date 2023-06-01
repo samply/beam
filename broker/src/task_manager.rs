@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     ops::Deref,
-    time::{Duration, SystemTime}, collections::HashMap,
+    time::{Duration, SystemTime}, collections::HashMap, sync::Arc,
 };
 
 use axum::{response::{IntoResponse, sse::Event, Sse}, Json};
@@ -64,23 +64,36 @@ impl<State: MsgState> Task for shared::MsgSocketRequest<State> {
 pub struct TaskManager<T: HasWaitId<MsgId> + Task + Msg> {
     tasks: DashMap<MsgId, MsgSigned<T>>,
     new_tasks: broadcast::Sender<MsgId>,
-    deleted_tasks: broadcast::Sender<MsgId>,
     /// Send the index at which the new result for the given Task was inserted
     new_results: DashMap<MsgId, broadcast::Sender<AppOrProxyId>>,
 }
 
-impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
-    pub fn new() -> Self {
-        // TODO: spawn expire
+impl<T: HasWaitId<MsgId> + Task + Msg + Send + Sync + 'static> TaskManager<T> {
+    const EXPIRE_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+    pub fn new() -> Arc<Self> {
         let (new_tasks, _) = broadcast::channel(256);
-        let (deleted_tasks, _) = broadcast::channel(256);
-        Self {
+        let task_manager = Arc::new(Self {
             tasks: Default::default(),
             new_tasks,
-            deleted_tasks,
             new_results: Default::default(),
-        }
+        });
+        let tm = Arc::clone(&task_manager);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Self::EXPIRE_CHECK_INTERVAL).await;
+                tm.tasks.retain(|_, task| !task.msg.is_expired());
+                // TODO: Maybe do a DashMap::shrink_to_fit here if capacity is way larger than number of elements
+                // This will need to be tested as shrinking locks the whole map making it inaccessible until
+                // everything is reallocated
+            }
+        });
+
+        task_manager
     }
+}
+
+impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
 
     pub fn get(&self, task_id: &MsgId) -> Result<impl Deref<Target = MsgSigned<T>> + '_, TaskManagerError> {
         self.tasks.get(task_id).ok_or(TaskManagerError::NotFound)
@@ -98,6 +111,8 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
     }
 
     // Once async iterators are stabelized this should be one
+    /// ## Note:
+    /// This function may yield less tasks than `block.wait_count` if tasks expired while waiting on new ones
     pub async fn wait_for_tasks(
         &self,
         block: &HowLongToBlock,
@@ -107,7 +122,6 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
         let wait_until = Instant::now() + block.wait_time.unwrap_or(Duration::from_secs(600));
         let mut new_tasks = self.new_tasks.subscribe();
-        let mut deleted_tasks = self.deleted_tasks.subscribe();
 
         let mut num_of_tasks = self.get_tasks_by(&filter).count();
         while num_of_tasks < max_elements && Instant::now() < wait_until {
@@ -126,21 +140,6 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
                         },
                         Err(e) => {
                             warn!("new_tasks channel lagged: {e}");
-                            return Err(TaskManagerError::BroadcastBufferOverflow);
-                        }
-                    }
-                },
-                result = deleted_tasks.recv() => {
-                    match result {
-                        Ok(id) => {
-                            if let Ok(task) = self.get(&id) {
-                                if filter(&task.msg) {
-                                    num_of_tasks -= 1;
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            warn!("delted_tasks channel lagged: {e}");
                             return Err(TaskManagerError::BroadcastBufferOverflow);
                         }
                     }
