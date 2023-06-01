@@ -50,6 +50,8 @@ pub mod config_shared;
 pub mod config_broker;
 // #[cfg(feature = "config-for-proxy")]
 pub mod config_proxy;
+#[cfg(feature = "expire_map")]
+pub mod expire_map;
 #[cfg(feature = "sockets")]
 mod sockets;
 #[cfg(feature = "sockets")]

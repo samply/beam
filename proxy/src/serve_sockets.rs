@@ -3,7 +3,7 @@ use std::{
     ops::{Deref, DerefMut},
     pin::Pin,
     task::Poll,
-    time::{Duration, SystemTime}, sync::Arc,
+    time::{Duration, SystemTime, Instant}, sync::Arc,
 };
 
 use axum::{
@@ -34,7 +34,7 @@ use shared::{
     config,
     ct_codecs::{Base64UrlSafeNoPadding, Encoder as B64Encoder, Decoder as B64Decoder, self},
     http_client::SamplyHttpClient,
-    MsgEmpty, MsgId, MsgSocketRequest, Plain, MessageType,
+    MsgEmpty, MsgId, MsgSocketRequest, Plain, MessageType, expire_map::LazyExpireMap,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf, ReadHalf, WriteHalf};
 use tokio_util::{
@@ -48,7 +48,8 @@ use crate::{
     serve_tasks::{forward_request, handler_task, TasksState, validate_and_decrypt, to_server_error},
 };
 
-type MsgSecretMap = Arc<DashMap<MsgId, SocketEncKey>>;
+type MsgSecretMap = Arc<LazyExpireMap<MsgId, SocketEncKey>>;
+const TASK_SECRET_CLEANUP_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 pub(crate) fn router(client: SamplyHttpClient) -> Router {
     let config = config::CONFIG_PROXY.clone();
@@ -56,7 +57,14 @@ pub(crate) fn router(client: SamplyHttpClient) -> Router {
         client: client.clone(),
         config,
     };
-    let task_secret_map: MsgSecretMap = Arc::new(DashMap::new());
+    let task_secret_map: MsgSecretMap = Default::default();
+    let map = task_secret_map.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(TASK_SECRET_CLEANUP_INTERVAL).await;
+            map.retain_expired();
+        }
+    });
 
     Router::new()
         .route("/v1/sockets", get(get_tasks))
@@ -83,7 +91,10 @@ async fn get_tasks(
     for task in tasks {
         if let MessageType::MsgSocketRequest(mut socket_task) = task {
             let key = serde_json::from_value(Value::String(socket_task.secret.body.as_ref().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?.to_string())).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            task_secret_map.insert(socket_task.id, key);
+            let Ok(ttl) = socket_task.expire.duration_since(SystemTime::now()) else {
+                continue;
+            };
+            task_secret_map.insert_for(ttl, socket_task.id, key);
             socket_task.secret.body = None;
             out.push(socket_task);
         } else {
@@ -106,11 +117,12 @@ async fn create_socket_con(
     let Ok(secret_encoded) = secret.to_b64_str() else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    task_secret_map.insert(task_id.clone(), secret);
+    const TTL: Duration = Duration::from_secs(60);
+    task_secret_map.insert_for(TTL, task_id.clone(), secret);
     let socket_req = MsgSocketRequest {
         from: AppOrProxyId::AppId(sender.clone()),
         to: vec![to],
-        expire: SystemTime::now() + Duration::from_secs(60),
+        expire: SystemTime::now() + TTL,
         id: task_id,
         secret: Plain::from(secret_encoded),
     };
@@ -158,7 +170,7 @@ async fn connect_socket(
         return StatusCode::UPGRADE_REQUIRED.into_response();
     }
 
-    let Some(key) = task_secret_map.get(&task_id).map(|v| v.value().clone()) else {
+    let Some(key) = task_secret_map.get(&task_id).map(|v| v.clone()) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
 

@@ -1,10 +1,10 @@
-use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref};
+use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref, time::Duration};
 
 use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response}};
 use bytes::BufMut;
 use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body, Request, Method, upgrade::{OnUpgrade, self}};
 use serde::{Serialize, Serializer, ser::SerializeSeq};
-use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}};
+use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}, expire_map::LazyExpireMap};
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
 use tracing::{debug, log::error, warn};
 
@@ -14,14 +14,27 @@ use crate::{serve_tasks::wait_get_statuscode, task_manager::{TaskManager, Task}}
 #[derive(Clone)]
 struct SocketState {
     task_manager: Arc<TaskManager<MsgSocketRequest<Encrypted>>>,
-    waiting_connections: Arc<RwLock<HashMap<MsgId, oneshot::Sender<Request<Body>>>>>
+    waiting_connections: Arc<LazyExpireMap<MsgId, oneshot::Sender<Request<Body>>>>
+}
+
+impl SocketState {
+    const WAITING_CONNECTIONS_TIMEOUT: Duration = Duration::from_secs(60);
+    const WAITING_CONNECTIONS_CLEANUP_INTERVAL: Duration = Duration::from_secs(5 * 60);
 }
 
 impl Default for SocketState {
     fn default() -> Self {
+        let waiting_connections: Arc<LazyExpireMap<_, _>> = Default::default();
+        let cons = waiting_connections.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Self::WAITING_CONNECTIONS_CLEANUP_INTERVAL).await;
+                cons.retain_expired();
+            }
+        });
         Self {
             task_manager: TaskManager::new(),
-            waiting_connections: Default::default()
+            waiting_connections
         }
     }
 }
@@ -113,17 +126,14 @@ async fn connect_socket(
         return Err(StatusCode::UPGRADE_REQUIRED);
     }
 
-    let mut waiting_cons = state.waiting_connections.write().await;
-    if let Some(req_sender) = waiting_cons.remove(&task_id) {
+    if let Some(req_sender) = state.waiting_connections.remove(&task_id) {
         if let Err(_) = req_sender.send(req) {
             warn!("Error sending socket connection to tunnel. Reciever has been dropped");
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     } else {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        waiting_cons.insert(task_id, tx);
-        // Drop write lock as we don't need it anymore
-        drop(waiting_cons);
+        state.waiting_connections.insert_for(SocketState::WAITING_CONNECTIONS_TIMEOUT, task_id, tx);
         let Ok(other_req) = rx.await else {
             debug!("Socket expired because nobody connected");
             return Err(StatusCode::GONE);
