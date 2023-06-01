@@ -25,7 +25,7 @@ use chacha20poly1305::{
 };
 use dashmap::DashMap;
 use futures::{stream::IntoAsyncRead, FutureExt, SinkExt, StreamExt, TryStreamExt};
-use hyper::{upgrade::OnUpgrade, Body, Request, StatusCode};
+use hyper::{upgrade::{OnUpgrade, self}, Body, Request, StatusCode};
 use rsa::rand_core::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -41,7 +41,7 @@ use tokio_util::{
     codec::{Decoder, Encoder, Framed, FramedRead, FramedWrite},
     compat::{Compat, FuturesAsyncReadCompatExt},
 };
-use tracing::warn;
+use tracing::{warn, debug};
 
 use crate::{
     auth::AuthenticatedApp,
@@ -199,16 +199,21 @@ async fn connect_socket(
 
     // Connect sockets
     tokio::spawn(async move {
-        let broker_socket = hyper::upgrade::on(res).await.unwrap();
-        let mut client_socket = hyper::upgrade::on(req).await.unwrap();
+        let (broker_socket, mut client_socket) = match tokio::try_join!(upgrade::on(res), upgrade::on(req)) {
+            Ok(sockets) => sockets,
+            Err(e) => {
+                warn!("Failed to upgrade requests to socket connections: {e}");
+                return;
+            },
+        };
         let Ok(mut enc_broker_socket) = EncryptedSocket::new(broker_socket, &key).await else {
-            warn!("Error establishing connection");
+            warn!("Error encrypting connection to broker");
             return;
         };
 
         let result = tokio::io::copy_bidirectional(&mut client_socket, &mut enc_broker_socket).await;
         if let Err(e) = result {
-            warn!("Error relaying socket connect: {e}");
+            debug!("Relaying socket connection ended: {e}");
         }
     });
 

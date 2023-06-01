@@ -2,7 +2,7 @@ use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref};
 
 use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response}};
 use bytes::BufMut;
-use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body, Request, Method, upgrade::OnUpgrade};
+use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body, Request, Method, upgrade::{OnUpgrade, self}};
 use serde::{Serialize, Serializer, ser::SerializeSeq};
 use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}};
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
@@ -35,7 +35,7 @@ pub(crate) fn router() -> Router {
 
 // Look into making a PR for Dashmap that makes its smartpointers serialize with the serde feature
 fn serialize_deref_iter<S: Serializer>(serializer: S, iter: impl Iterator<Item = impl Deref<Target = impl Serialize>>) -> Result<S::Ok, S::Error> {
-    let mut seq_ser = serializer.serialize_seq(iter.size_hint().1).unwrap();
+    let mut seq_ser = serializer.serialize_seq(iter.size_hint().1).map_err(serde::ser::Error::custom)?;
     for item in iter {
         seq_ser.serialize_element(item.deref())?;
     }
@@ -91,8 +91,11 @@ async fn connect_socket(
 ) -> Result<Response, StatusCode> {
     // We have to do this reconstruction of the request as calling extract on the req to get the body will take ownership of the request
     let (mut parts, body) = req.into_parts();
-    // TODO: Unwraps
-    let body = String::from_utf8(hyper::body::to_bytes(body).await.unwrap().to_vec()).unwrap();
+    let body = hyper::body::to_bytes(body)
+        .await
+        .ok()
+        .and_then(|data| String::from_utf8(data.to_vec()).ok())
+        .ok_or(StatusCode::BAD_REQUEST)?;
     let result = shared::crypto_jwt::verify_with_extended_header::<MsgEmpty>(&mut parts, &body).await;
     let msg = match result {
         Ok(msg) => msg.msg,
@@ -100,7 +103,7 @@ async fn connect_socket(
     };
     {
         let task = state.task_manager.get(&task_id)?;
-        // Allowed to connect are the issuer of the task and the recipients
+        // Allowed to connect are the issuer of the task and the recipient
         if !(task.get_from() == &msg.from || task.get_to().contains(&msg.from)) {
             return Err(StatusCode::UNAUTHORIZED);
         }
@@ -112,19 +115,31 @@ async fn connect_socket(
 
     let mut waiting_cons = state.waiting_connections.write().await;
     if let Some(req_sender) = waiting_cons.remove(&task_id) {
-        req_sender.send(req).unwrap();
+        if let Err(_) = req_sender.send(req) {
+            warn!("Error sending socket connection to tunnel. Reciever has been dropped");
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
     } else {
         let (tx, rx) = tokio::sync::oneshot::channel();
         waiting_cons.insert(task_id, tx);
+        // Drop write lock as we don't need it anymore
         drop(waiting_cons);
-        let other_req = rx.await.unwrap();
+        let Ok(other_req) = rx.await else {
+            debug!("Socket expired because nobody connected");
+            return Err(StatusCode::GONE);
+        };
         // We don't care if the task expired by now
         _ = state.task_manager.remove(&task_id);
         tokio::spawn(async move {
-            let mut c1 = hyper::upgrade::on(req).await.unwrap();
-            let mut c2 = hyper::upgrade::on(other_req).await.unwrap();
+            let (mut socket1, mut socket2) = match tokio::try_join!(upgrade::on(req), upgrade::on(other_req)) {
+                Ok(sockets) => sockets,
+                Err(e) => {
+                    warn!("Failed to upgrade requests to socket connections: {e}");
+                    return;
+                },
+            };
 
-            let result = tokio::io::copy_bidirectional(&mut c1, &mut c2).await;
+            let result = tokio::io::copy_bidirectional(&mut socket1, &mut socket2).await;
             if let Err(e) = result {
                 debug!("Relaying socket connection ended: {e}");
             }
