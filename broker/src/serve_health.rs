@@ -79,15 +79,36 @@ async fn get_control_tasks(
     proxy_auth: Authorized,
 ) -> StatusCode {
     let proxy_id = proxy_auth.get_from().get_proxy_id(); 
-    {
-        state.write().await.proxies.insert(proxy_id.clone(), ProxyStatus::new());
-    }
+    // Once this is freed the connection will be removed from the map of connected proxies again
+    // This ensures that when the connection is dropped and therefore this response future the status of this proxy will be updated
+    let _connection_remover = ConnectedGuard::connect(&proxy_id, &state).await;
 
     // In the future, this will wait for control tasks for the given proxy
     tokio::time::sleep(Duration::from_secs(60 * 60)).await;
 
-    {
-        state.write().await.proxies.remove(&proxy_id);
-    }
     StatusCode::OK
+}
+
+struct ConnectedGuard<'a> {
+    proxy: &'a ProxyId,
+    state: &'a Arc<RwLock<Health>>
+}
+
+impl<'a> ConnectedGuard<'a> {
+    async fn connect(proxy: &'a ProxyId, state: &'a Arc<RwLock<Health>>) -> ConnectedGuard<'a> {
+        {
+            state.write().await.proxies.insert(proxy.clone(), ProxyStatus::new());
+        }
+        Self { proxy, state }
+    }
+}
+
+impl<'a> Drop for ConnectedGuard<'a> {
+    fn drop(&mut self) {
+        let proxy_id = self.proxy.clone();
+        let map = self.state.clone();
+        tokio::spawn(async move {
+            map.write().await.proxies.remove(&proxy_id);
+        });
+    }
 }
