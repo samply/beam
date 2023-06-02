@@ -181,7 +181,7 @@ fn spwan_report_health_to_broker(client: SamplyHttpClient, config: Config) {
                 .expect("To build request successfully")
                 .into_parts();
 
-            let req = sign_request(body, parts, &config, None).await.expect("This should always work");
+            let req = sign_request(body, parts, &config, None).await.expect("Unable to sign request; this should always work");
             match client.request(req).await {
                 Ok(res) => {
                     if res.status() != StatusCode::OK {
