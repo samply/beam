@@ -52,7 +52,7 @@ struct CliArgs {
 
     /// api key for monitoring
     #[clap(long, env, value_parser)]
-    monitoring_api_key: String,
+    monitoring_api_key: Option<String>,
 
     /// (included for technical reasons)
     #[clap(long, hide(true))]
