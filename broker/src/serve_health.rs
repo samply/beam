@@ -83,8 +83,8 @@ async fn get_control_tasks(
         state.write().await.proxies.insert(proxy_id.clone(), ProxyStatus::new());
     }
 
-    // This will in the wait for control tasks for the given proxy
-    tokio::time::sleep(Duration::from_secs(5* 60)).await;
+    // In the future, this will wait for control tasks for the given proxy
+    tokio::time::sleep(Duration::from_secs(60 * 60)).await;
 
     {
         state.write().await.proxies.remove(&proxy_id);
