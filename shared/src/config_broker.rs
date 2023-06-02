@@ -65,7 +65,7 @@ pub struct Config {
     pub pki_realm: String,
     pub pki_token: String,
     pub tls_ca_certificates_dir: Option<PathBuf>,
-    pub monitoring_api_key: String,
+    pub monitoring_api_key: Option<String>,
 }
 
 impl crate::config::Config for Config {
