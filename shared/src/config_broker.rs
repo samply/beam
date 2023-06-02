@@ -50,7 +50,7 @@ struct CliArgs {
     #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
     rootcert_file: PathBuf,
 
-    /// api key for monitoring
+    /// The API key for accessing monitoring endpoints of the broker
     #[clap(long, env, value_parser)]
     monitoring_api_key: Option<String>,
 

@@ -20,8 +20,9 @@ struct HealthOutputVault<'a> {
 
 pub(crate) fn router(health: Arc<RwLock<Health>>) -> Router {
     Router::new()
-        .route("/v1/health", get(handler).post(register_proxy_health))
+        .route("/v1/health", get(handler))
         .route("/v1/health/proxies/:proxy_id", get(proxy_health))
+        .route("/v1/control", get(get_controll_tasks))
         .with_state(health)
 }
 
@@ -58,7 +59,11 @@ async fn proxy_health(
     Path(proxy): Path<ProxyId>,
     auth: TypedHeader<Authorization<Basic>>
 ) -> Result<Json<ProxyStatus>, StatusCode> {
-    if auth.password() != CONFIG_CENTRAL.monitoring_api_key {
+    let Some(ref monitoring_key) = CONFIG_CENTRAL.monitoring_api_key else {
+        return Err(StatusCode::NOT_IMPLEMENTED);
+    };
+
+    if auth.password() != monitoring_key {
         return Err(StatusCode::UNAUTHORIZED)
     }
 
@@ -69,12 +74,20 @@ async fn proxy_health(
     }
 }
 
-async fn register_proxy_health(
+async fn get_controll_tasks(
     State(state): State<Arc<RwLock<Health>>>,
     proxy_auth: Authorized,
 ) -> StatusCode {
     let proxy_id = proxy_auth.get_from().get_proxy_id(); 
-    state.write().await.proxies.insert(proxy_id, ProxyStatus::new());
+    {
+        state.write().await.proxies.insert(proxy_id.clone(), ProxyStatus::new());
+    }
 
+    // This will in the wait for control tasks for the given proxy
+    tokio::time::sleep(Duration::from_secs(5* 60)).await;
+
+    {
+        state.write().await.proxies.remove(&proxy_id);
+    }
     StatusCode::OK
 }

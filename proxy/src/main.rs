@@ -76,7 +76,7 @@ pub async fn main() -> anyhow::Result<()> {
     } else {
         debug!("Certificate chain successfully initialized and validated");
     }
-    spwan_report_health_to_broker(client.clone(), config.clone());
+    spwan_controller_polling(client.clone(), config.clone());
 
     serve::serve(config, client).await?;
     Ok(())
@@ -168,34 +168,40 @@ async fn get_broker_health(
     }
 }
 
-fn spwan_report_health_to_broker(client: SamplyHttpClient, config: Config) {
-    const REPORT_INTERVAL: Duration = Duration::from_secs(5 * 60);
+fn spwan_controller_polling(client: SamplyHttpClient, config: Config) {
     const RETRY_INTERVAL: Duration = Duration::from_secs(60);
     tokio::spawn(async move {
         loop {
             let body = EncryptedMessage::MsgEmpty(MsgEmpty {
                 from: AppOrProxyId::ProxyId(config.proxy_id.clone()),
             });
-            let (parts, body) = Request::post(format!("{}v1/health", config.broker_uri))
+            let (parts, body) = Request::get(format!("{}v1/control", config.broker_uri))
                 .body(body)
                 .expect("To build request successfully")
                 .into_parts();
 
             let req = sign_request(body, parts, &config, None).await.expect("Unable to sign request; this should always work");
+            // In the future this will poll actual control related tasks
             match client.request(req).await {
                 Ok(res) => {
-                    if res.status() != StatusCode::OK {
-                        tokio::time::sleep(REPORT_INTERVAL).await;
-                        warn!("Got unexpected status reporting health to broker: {}", res.status());
-                    } else {
-                        tokio::time::sleep(RETRY_INTERVAL).await;
-                    }
+                    match res.status() {
+                        StatusCode::OK => {
+                            // Process control task
+                        },
+                        other => {
+                            warn!("Got unexpected status getting control tasks from broker: {other}");
+                            tokio::time::sleep(RETRY_INTERVAL).await;
+                        }
+                    };
+                },
+                Err(e) if e.is_timeout() => {
+                    debug!("Connection to broker timed out retrying");
                 },
                 Err(e) => {
-                    warn!("Error reporting health to broker: {e}");
-                    warn!("Retring in {}s", REPORT_INTERVAL.as_secs());
+                    warn!("Error getting control tasks from broker: {e}");
+                    warn!("Retring in {}s", RETRY_INTERVAL.as_secs());
                     tokio::time::sleep(RETRY_INTERVAL).await;
-                },
+                }
             };
         }
     });
