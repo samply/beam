@@ -21,7 +21,7 @@ struct HealthOutputVault<'a> {
 pub(crate) fn router(health: Arc<RwLock<Health>>) -> Router {
     Router::new()
         .route("/v1/health", get(handler).post(register_proxy_health))
-        .route("/v1/health/:proxy_id", get(proxy_health))
+        .route("/v1/health/proxies/:proxy_id", get(proxy_health))
         .with_state(health)
 }
 
