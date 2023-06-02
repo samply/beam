@@ -22,7 +22,7 @@ pub(crate) fn router(health: Arc<RwLock<Health>>) -> Router {
     Router::new()
         .route("/v1/health", get(handler))
         .route("/v1/health/proxies/:proxy_id", get(proxy_health))
-        .route("/v1/control", get(get_controll_tasks))
+        .route("/v1/control", get(get_control_tasks))
         .with_state(health)
 }
 
@@ -74,7 +74,7 @@ async fn proxy_health(
     }
 }
 
-async fn get_controll_tasks(
+async fn get_control_tasks(
     State(state): State<Arc<RwLock<Health>>>,
     proxy_auth: Authorized,
 ) -> StatusCode {
