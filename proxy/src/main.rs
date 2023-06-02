@@ -6,11 +6,15 @@ use backoff::{future::retry_notify, ExponentialBackoff};
 use hyper::{body, client::HttpConnector, Client, Method, Request, StatusCode, Uri};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
+use shared::beam_id::AppOrProxyId;
+use shared::{PlainMessage, MsgEmpty, EncryptedMessage};
 use shared::crypto::CryptoPublicPortion;
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
 use shared::{config, config_proxy::Config};
 use tracing::{debug, error, info, warn};
+
+use crate::serve_tasks::sign_request;
 
 mod auth;
 mod banner;
@@ -72,6 +76,7 @@ pub async fn main() -> anyhow::Result<()> {
     } else {
         debug!("Certificate chain successfully initialized and validated");
     }
+    spwan_report_health_to_broker(client.clone(), config.clone());
 
     serve::serve(config, client).await?;
     Ok(())
@@ -161,4 +166,37 @@ async fn get_broker_health(
             resp.status()
         ))),
     }
+}
+
+fn spwan_report_health_to_broker(client: SamplyHttpClient, config: Config) {
+    const REPORT_INTERVAL: Duration = Duration::from_secs(5 * 60);
+    const RETRY_INTERVAL: Duration = Duration::from_secs(60);
+    tokio::spawn(async move {
+        loop {
+            let body = EncryptedMessage::MsgEmpty(MsgEmpty {
+                from: AppOrProxyId::ProxyId(config.proxy_id.clone()),
+            });
+            let (parts, body) = Request::post(format!("{}v1/health", config.broker_uri))
+                .body(body)
+                .expect("To build request successfully")
+                .into_parts();
+
+            let req = sign_request(body, parts, &config, None).await.expect("This should always work");
+            match client.request(req).await {
+                Ok(res) => {
+                    if res.status() != StatusCode::OK {
+                        tokio::time::sleep(REPORT_INTERVAL).await;
+                        warn!("Got unexpected status reporting health to broker: {}", res.status());
+                    } else {
+                        tokio::time::sleep(RETRY_INTERVAL).await;
+                    }
+                },
+                Err(e) => {
+                    warn!("Error reporting health to broker: {e}");
+                    warn!("Retring in {}s", REPORT_INTERVAL.as_secs());
+                    tokio::time::sleep(RETRY_INTERVAL).await;
+                },
+            };
+        }
+    });
 }
