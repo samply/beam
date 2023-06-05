@@ -47,7 +47,7 @@ use shared::{
 use tokio::io::BufReader;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::auth::AuthenticatedApp;
+use crate::{auth::AuthenticatedApp, PROXY_TIMEOUT};
 
 #[derive(Clone, FromRef)]
 pub(crate) struct TasksState {
@@ -111,8 +111,13 @@ pub(crate) async fn forward_request(
     let req = sign_request(encrypted_msg, parts, &config, None).await?;
     trace!("Requesting: {:?}", req);
     let resp = client.request(req).await.map_err(|e| {
-        warn!("Request to broker failed: {}", e.to_string());
-        (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
+        if e.is_timeout() {
+            debug!("Request to broker timed out after set proxy timeout of {PROXY_TIMEOUT}s");
+            (StatusCode::GATEWAY_TIMEOUT, "Request to broker timed out ")
+        } else {
+            warn!("Request to broker failed: {}", e.to_string());
+            (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
+        }
     })?;
     Ok(resp)
 }
@@ -442,7 +447,7 @@ pub(crate) async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBea
 fn decrypt_msg<M: DecryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> {
     msg.decrypt(
         &AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()),
-        crypto::get_own_privkey(),
+        &crypto::get_own_crypto_material().privkey_rsa,
     )
 }
 

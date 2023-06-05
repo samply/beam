@@ -662,7 +662,7 @@ async fn post_task(
     // let id = MsgId::new();
     // msg.id = id;
     // TODO: Check if ID is taken
-    debug!(
+    trace!(
         "Client {} with IP {addr} is creating task {:?}",
         msg.msg.from, msg
     );
@@ -695,7 +695,7 @@ async fn put_result(
     State(state): State<TasksState>,
     result: MsgSigned<EncryptedMsgTaskResult>,
 ) -> Result<StatusCode, (StatusCode, &'static str)> {
-    debug!("Called: Task {:?}, {:?} by {addr}", task_id, result);
+    trace!("Called: Task {:?}, {:?} by {addr}", task_id, result);
     if task_id != result.msg.task {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -718,7 +718,7 @@ async fn put_result(
         Some(task) => &mut task.msg,
         None => return Err((StatusCode::NOT_FOUND, "Task not found")),
     };
-    debug!(?task, ?worker_id, "Checking if task is in worker ID: ");
+    trace!(?task, ?worker_id, "Checking if task is in worker ID: ");
     if !task.to.contains(&worker_id) {
         return Err((
             StatusCode::UNAUTHORIZED,

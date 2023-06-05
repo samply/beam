@@ -42,11 +42,11 @@ pub(crate) async fn watch(
             Some(soonest) => match soonest.duration_since(SystemTime::now()) {
                 Ok(x) => x,
                 Err(expired_since) => {
-                    warn!(
+                    debug!(
                         "Tried to wait on a task that had in fact expired since {}.",
                         expired_since
                     );
-                    Duration::MAX
+                    Duration::from_secs(0)
                 }
             },
             None => Duration::MAX,

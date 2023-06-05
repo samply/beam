@@ -83,7 +83,7 @@ pub async fn log(
     let ip = get_ip(&req, &info);
 
     let mut info = LoggingInfo::new(method, uri, ip);
-    // This channel may or may not recieve an AppOrProxyId from verify_with_extended_header
+    // This channel may or may not receive an AppOrProxyId from verify_with_extended_header
     let (tx, mut rx) = oneshot::channel();
     req.extensions_mut().insert(tx);
 
@@ -95,7 +95,8 @@ pub async fn log(
     }
 
     let line = info.get_log();
-    if resp.status().is_success() {
+    // If we get a gateway timeout we won't log it with log level warn as this happens regularly with the long polling api
+    if resp.status().is_success() || resp.status() == StatusCode::GATEWAY_TIMEOUT {
         info!(target: "in", "{}", line);
     } else {
         warn!(target: "in", "{}", line);

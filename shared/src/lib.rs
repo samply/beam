@@ -11,7 +11,7 @@ use errors::SamplyBeamError;
 use itertools::Itertools;
 use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
 use openssl::base64;
-use rsa::{PaddingScheme, PublicKey, RsaPrivateKey, RsaPublicKey};
+use rsa::{RsaPrivateKey, RsaPublicKey, Oaep};
 use serde_json::{json, Value};
 use sha2::Sha256;
 use static_init::dynamic;
@@ -31,6 +31,7 @@ use serde::{
 use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
 
+use crate::{crypto_jwt::JWT_VERIFICATION_OPTIONS, serde_helpers::*};
 // Reexport b64 implementation
 pub use jwt_simple::reexports::ct_codecs;
 
@@ -41,6 +42,7 @@ pub type TaskResponse = String;
 pub mod crypto;
 pub mod crypto_jwt;
 pub mod errors;
+pub mod serde_helpers;
 pub mod logger;
 mod traits;
 
@@ -64,6 +66,9 @@ pub mod middleware;
 pub mod examples;
 
 pub mod sse_event;
+
+// Reexports
+pub use openssl;
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MyUuid(Uuid);
@@ -326,7 +331,7 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
 
         // Cryptographic Operations
         let cipher_engine = XChaCha20Poly1305::new_from_slice(&my_priv_key.decrypt(
-            rsa::PaddingScheme::new_oaep::<sha2::Sha256>(),
+            Oaep::new::<sha2::Sha256>(),
             &encrypted_decryption_key,
         )?)
         .map_err(|e| {
@@ -381,7 +386,7 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
             .map(|key| {
                 key.encrypt(
                     &mut rng,
-                    PaddingScheme::new_oaep::<Sha256>(),
+                    Oaep::new::<sha2::Sha256>(),
                     symmetric_key.as_slice(),
                 )
             })
@@ -462,38 +467,6 @@ impl<T: MsgState> Msg for MsgTaskResult<T> {
     }
 }
 
-mod serialize_time {
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-    use fundu::parse_duration;
-    use serde::{self, Deserialize, Deserializer, Serializer};
-    use tracing::{debug, error, warn};
-
-    pub fn serialize<S>(time: &SystemTime, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let ttl = match time.duration_since(SystemTime::now()) {
-            Ok(v) => v,
-            Err(e) => {
-                error!("Internal Error: Tried to serialize a task which should have expired and expunged from memory {} seconds ago. Will return TTL=0. Cause: {}", e.duration().as_secs(), e);
-                Duration::ZERO
-            }
-        };
-        s.serialize_str(&ttl.as_secs().to_string())
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let duration = &String::deserialize(deserializer)?;
-        let ttl = parse_duration(&duration).map_err(serde::de::Error::custom)?;
-        let expire = SystemTime::now() + ttl;
-        debug!("Deserialized {:?} to time {:?}", duration, expire);
-        Ok(expire)
-    }
-}
 
 pub trait MsgState: Serialize + Eq + PartialEq + Default {
     fn is_empty(&self) -> bool {
@@ -501,17 +474,38 @@ pub trait MsgState: Serialize + Eq + PartialEq + Default {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct Encrypted {
+    #[serde(with = "serde_base64" )]
     pub encrypted: Vec<u8>,
+    #[serde(with = "serde_base64::nested" )]
     pub encryption_keys: Vec<Vec<u8>>,
+}
+
+impl Debug for Encrypted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Encrypted")
+            .field("encrypted len", &self.encrypted.len())
+            .field("encryption_key_count", &self.encryption_keys.len())
+            .finish()
+    }
 }
 
 impl MsgState for Encrypted {}
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct Plain {
     pub body: Option<String>,
+}
+
+impl Debug for Plain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut formated = f.debug_struct("Plain");
+        match &self.body {
+            Some(body) if body.len() < 1000 => formated.field("body len", &body.len()),
+            _ => formated.field("body", &self.body),
+        }.finish()
+    }
 }
 
 impl MsgState for Plain {
@@ -529,7 +523,7 @@ impl<T: Into<String>> From<T> for Plain {
 }
 
 // When const generic enums get stableized this could get beautiful
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MsgTaskRequest<State = Plain>
 where
     State: MsgState,
@@ -611,7 +605,7 @@ impl DecryptableMsg for MsgTaskRequest<Encrypted> {
 pub type EncryptedMsgTaskRequest = MsgTaskRequest<Encrypted>;
 pub type EncryptedMsgTaskResult = MsgTaskResult<Encrypted>;
 
-#[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct MsgTaskResult<State = Plain>
 where
     State: MsgState,
@@ -908,32 +902,5 @@ mod tests {
 
         assert_eq!(msg_p1_decr, msg_p2_decr);
         assert_eq!(msg, msg_p1_decr);
-    }
-}
-
-impl<T: MsgState + Debug> Debug for MsgTaskRequest<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EncryptedMsgTaskRequest")
-            .field("id", &self.id)
-            .field("from", &self.from)
-            .field("to", &self.to)
-            .field("body", &self.body)
-            .field("expire", &self.expire)
-            .field("failure_strategy", &self.failure_strategy)
-            .field("metadata", &self.metadata)
-            .finish()
-    }
-}
-
-impl<T: MsgState + Debug> Debug for MsgTaskResult<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EncryptedMsgTaskResult")
-            .field("from", &self.from)
-            .field("to", &self.to)
-            .field("task", &self.task)
-            .field("status", &self.status)
-            .field("body", &self.body)
-            .field("metadata", &self.metadata)
-            .finish()
     }
 }
