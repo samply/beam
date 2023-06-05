@@ -194,7 +194,8 @@ fn spwan_controller_polling(client: SamplyHttpClient, config: Config) {
                         }
                     };
                 },
-                Err(e) if e.is_timeout() => {
+                // For some reason e.is_timout() does not work
+                Err(e) if e.to_string().contains("timed out") => {
                     debug!("Connection to broker timed out retrying");
                 },
                 Err(e) => {
