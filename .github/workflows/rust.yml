@@ -107,7 +107,7 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           name: binaries-amd64-${{ matrix.features }}
-          path: artifacts/binaries-amd64-${{ matrix.features }}/
+          path: artifacts/binaries-amd64/
       - run: ./dev/test ci ${{ matrix.features && format('--features {0}', matrix.features) }}
 
   docker-broker:
