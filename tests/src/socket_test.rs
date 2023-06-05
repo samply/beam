@@ -1,14 +1,13 @@
 
-use std::{time::{SystemTime, Duration}, future::Future};
+use std::future::Future;
 
 use http::{Request, header, Method, Response, StatusCode};
 use hyper::{Body, upgrade::Upgraded};
 use rand::RngCore;
-use shared::{http_client::SamplyHttpClient, MsgSocketRequest, Plain, MsgId, MsgEmpty, beam_id::AppOrProxyId};
+use shared::{http_client::SamplyHttpClient, MsgId, MsgEmpty, beam_id::AppOrProxyId};
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
-use serde_json::Value;
 use anyhow::Result;
-use tests::*;
+use crate::*;
 
 async fn upgrade(res: impl Future<Output = Response<Body>>) -> Upgraded {
     hyper::upgrade::on(res.await).await.expect("Upgrade successfull")

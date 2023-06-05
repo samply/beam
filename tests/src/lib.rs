@@ -3,6 +3,9 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use shared::{beam_id::{AppOrProxyId, BeamId, AppId}, MsgId};
 
+#[cfg(all(feature = "sockets", test))]
+mod socket_test;
+
 pub const APP1: Lazy<AppOrProxyId> = Lazy::new(|| {
     AppId::set_broker_id("broker".to_string());
     AppOrProxyId::new(option_env!("APP1_P1").unwrap_or("app1.proxy1.broker")).unwrap()
