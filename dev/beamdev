@@ -76,7 +76,7 @@ function build() {
     PROXY=./target/debug/proxy
     if [ ! -x ./artifacts/binaries-$ARCH ]; then
         echo "Binaries missing -- building ..."
-        BUILD="$(cargo build --message-format=json)"
+        BUILD="$(cargo build $@ --message-format=json)"
         echo "Will rebuild docker image since binaries had not been there."
         mkdir -p artifacts/binaries-$ARCH
         rsync "$BROKER" "$PROXY" artifacts/binaries-$ARCH/
@@ -86,7 +86,7 @@ function build() {
         BUILD_DOCKER=1
     elif [ -x ./target ]; then
         echo "Checking for changed Rust source code ..."
-        BUILD="$(cargo build --message-format=json)"
+        BUILD="$(cargo build $@ --message-format=json)"
         if echo $BUILD | jq 'select(.fresh==false)' | grep -q 'fresh'; then
             echo "Will rebuild docker image due to changes in rust binaries."
             rsync "$BROKER" "$PROXY" artifacts/binaries-$ARCH/
@@ -121,7 +121,7 @@ function start {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    build
+    build $@
     docker-compose up --no-build --no-recreate --abort-on-container-exit
 }
 
@@ -129,7 +129,7 @@ function start_bg {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    build
+    build $@
     docker-compose up --no-build --no-recreate -d
     for ADDR in $P1 $P2; do
         TRIES=1
@@ -266,13 +266,16 @@ export TAG=${TAG:-localbuild}
 
 case "$1" in
   build)
-    build
+    shift
+    build $@
     ;;
   start)
-    start
+    shift
+    start $@
     ;;
   start_bg)
-    start_bg
+    shift
+    start_bg $@
     ;;
   clean)
     clean
