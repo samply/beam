@@ -134,9 +134,8 @@ jobs:
       build-file: './Dockerfile.ci.broker'
       # NOTE: This doesn't work currently
       # A list of build arguments, passed to the docker build
-#      build-args: |
-#        PROFILE=${{ env.PROFILE }}
-#        COMPONENT=broker
+      build-args: |
+        FEATURE=-${{ matrix.features }}
       # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
       # build-platforms: "linux/amd64"
       # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
@@ -171,9 +170,8 @@ jobs:
       build-file: './Dockerfile.ci.proxy'
       # NOTE: This doesn't work currently
       # A list of build arguments, passed to the docker build
-#      build-args: |
-#        PROFILE=${{ env.PROFILE }}
-#        COMPONENT=broker
+      build-args: |
+        FEATURE=-${{ matrix.features }}
       # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
       # build-platforms: "linux/amd64"
       # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
