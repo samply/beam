@@ -45,7 +45,8 @@ async fn test_full() -> Result<()> {
         let mut res = get_task(client2.clone()).await.expect("Getting task failed");
         assert_eq!(res.status(), StatusCode::OK);
         let body = hyper::body::to_bytes(res.body_mut()).await.expect("Failed to read body");
-        let tasks: Vec<MsgSocketRequest<Plain>> = serde_json::from_slice(&body).expect("Failed to deserialize body to socket reqs");
+        dbg!(String::from_utf8_lossy(&body));
+        let tasks: Vec<SocketTask> = serde_json::from_slice(&body).expect("Failed to deserialize body to socket reqs");
         assert_eq!(tasks.len(), 1);
         let res = connect_socket(client2, &tasks[0].id).await.expect("Failed to create socket connection");
         assert_eq!(res.status(), StatusCode::SWITCHING_PROTOCOLS);

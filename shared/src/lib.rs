@@ -495,7 +495,11 @@ mod serialize_time {
     }
 }
 
-pub trait MsgState: Serialize + Eq + PartialEq + Default {}
+pub trait MsgState: Serialize + Eq + PartialEq + Default {
+    fn is_empty(&self) -> bool {
+        false
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 pub struct Encrypted {
@@ -510,7 +514,11 @@ pub struct Plain {
     pub body: Option<String>,
 }
 
-impl MsgState for Plain {}
+impl MsgState for Plain {
+    fn is_empty(&self) -> bool {
+        self.body.is_none()
+    }
+}
 
 impl<T: Into<String>> From<T> for Plain {
     fn from(val: T) -> Self {

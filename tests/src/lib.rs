@@ -1,6 +1,7 @@
 
 use once_cell::sync::Lazy;
-use shared::beam_id::{AppOrProxyId, BeamId, AppId};
+use serde::{Deserialize, Serialize};
+use shared::{beam_id::{AppOrProxyId, BeamId, AppId}, MsgId};
 
 pub const APP1: Lazy<AppOrProxyId> = Lazy::new(|| {
     AppId::set_broker_id("broker".to_string());
@@ -26,3 +27,11 @@ pub const APP_KEY: &str = match option_env!("APP_KEY") {
     None => "App1Secret"
 };
 
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SocketTask {
+    pub to: Vec<AppOrProxyId>,
+    pub from: AppOrProxyId,
+    pub ttl: String,
+    pub id: MsgId,
+}

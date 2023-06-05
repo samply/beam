@@ -17,6 +17,7 @@ where State: MsgState {
     #[serde(with="serialize_time", rename="ttl")]
     pub expire: SystemTime,
     pub id: MsgId,
+    #[serde(skip_serializing_if = "MsgState::is_empty")]
     pub secret: State,
 }
 
