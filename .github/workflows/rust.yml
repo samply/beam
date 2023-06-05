@@ -106,7 +106,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/download-artifact@v3
         with:
-          name: binaries-amd64
+          name: binaries-amd64-${{ matrix.features }}
           path: artifacts/binaries-amd64-${{ matrix.features }}/
       - run: ./dev/test ci ${{ matrix.features && format('--features {0}', matrix.features) }}
 
