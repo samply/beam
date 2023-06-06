@@ -215,6 +215,22 @@ A failed task:
 - `body`: Supported and required for all `status`es except for `claimed`. Either carries the actual result payload of the task in case the status is `succeeded` or an error message.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Task](#task)) and is not encrypted.
 
+### Socket Task
+> Only avalible on feature `sockets` builds of beam
+
+```json
+{
+    "from": "app1.proxy1.broker",
+    "to": ["app2.proxy2.broker"],
+    "id": "<socket_uuid>",
+    "ttl": "60s",
+}
+```
+
+- `from`: BeamID of the client who requested the socket connection
+- `to`: BeamIDs of the intended recipients. For this type of Task this is guarnteed to be be exactly one.
+- `id`: A UUID v4 which identifies the socket connection and is used by the recipient to connect to this socket (see [here](#connecting-to-a-socket-request)).
+- `ttl`: The time too live of this socket task. After this time has elapsed the recipient can no longer connect to the socket. (Already established connections are not effected)
 ## API
 
 ### Create task
@@ -464,6 +480,8 @@ docker-compose logs -f
 Confirm that your setup works by running `./dev/test noci`, which runs the tests against your instances.
 
 To work with the environment, you may run `./dev/beamdev defaults` to see some helpful values, including the dev default URLs and a working authentication header.
+
+To run the dev setup with addtional cargo flags like fearue flags or the release flag you may run `./dev/beamdev start <cargo flags>`.
 
 ## Production Environment & Certificate Infrastructure
 
