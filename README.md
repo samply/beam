@@ -432,7 +432,7 @@ This will return a json object like the following
 The client can then proceed to connect to the socket with:
 
 Method: GET  
-URL: `/v1/sockets/<id>`
+URL: `/v1/sockets/<socket_uuid>`
 
 
 ## Development Environment
