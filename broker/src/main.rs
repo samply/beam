@@ -56,6 +56,5 @@ pub async fn main() -> anyhow::Result<()> {
 
     serve::serve(health).await?;
 
-
     Ok(())
 }

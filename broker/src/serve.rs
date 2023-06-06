@@ -34,7 +34,6 @@ pub(crate) async fn serve(health: Arc<RwLock<Health>>) -> anyhow::Result<()> {
         .layer(axum::middleware::from_fn(shared::middleware::log))
         .layer(axum::middleware::map_response(banner::set_server_header));
 
-
     info!(
         "Startup complete. Listening for requests on {}",
         config::CONFIG_CENTRAL.bind_addr
