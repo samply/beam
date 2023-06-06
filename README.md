@@ -137,6 +137,48 @@ curl -k -X GET -v -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey"
 
 This *long polling* opens the connection and sleeps until a reply is received. For more information, see the API documentation.
 
+### Using sockets
+> Only avalible on builds of beam with the `sockets` feature 
+```python
+import requests
+import threading
+import socket
+
+data = b"Hello beam sockets!"
+
+# App running in a beam network with proxy1 avalible at localhost:8081
+def app1():
+    # Post socket request to client
+    res = requests.post("http://localhost:8081/v1/sockets/app2.proxy2.broker", headers = {
+        "Upgrade": "tcp",
+        "Authorization": "ApiKey app1.proxy1.broker App1Secret"
+    }, stream=True)
+    # Get the underlying socket connection
+    stream = socket.fromfd(res.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
+    # Send some data
+    stream.send(data)
+
+# App running in a beam network with proxy2 avalible at localhost:8082
+def app2():
+    # Poll for incoming socket requests
+    socket_task_id = requests.get("http://localhost:8082/v1/sockets", headers={
+        "Authorization": "ApiKey app2.proxy2.broker App1Secret"
+    }).json()[0]["id"]
+    # Connect to the given id of the socket request
+    res = requests.get(f"http://localhost:8082/v1/sockets/{socket_task_id}", headers={
+        "Authorization": "ApiKey app2.proxy2.broker App1Secret",
+        "Upgrade": "tcp",
+    }, stream=True)
+    # Get the underlying socket connection
+    stream = socket.fromfd(res.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
+    # Recieve the data send by the other client
+    assert stream.recv(len(data)) == data
+
+threading.Thread(target=app1).start()
+threading.Thread(target=app2).start()
+```
+
+
 ## Data objects (JSON)
 
 ### Task
@@ -216,7 +258,7 @@ A failed task:
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Task](#task)) and is not encrypted.
 
 ### Socket Task
-> Only avalible on feature `sockets` builds of beam
+> Only avalible on builds of beam with the `sockets` feature 
 
 ```json
 {
