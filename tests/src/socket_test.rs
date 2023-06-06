@@ -33,8 +33,6 @@ async fn test_full() -> Result<()> {
     let client = shared::http_client::build(&Vec::new(), None, None)?;
     let client2 = client.clone();
 
-    // let res = post_socket_req(client.clone(), task_id).await?;
-    // assert_eq!(res.status(), StatusCode::CREATED);
     let app1 = async {
         let res = create_connect_socket(client, &APP2).await.expect("Failed to create socket connection");
         assert_eq!(res.status(), StatusCode::SWITCHING_PROTOCOLS);
@@ -52,12 +50,6 @@ async fn test_full() -> Result<()> {
         res
     };
 
-
-    // let res = put_socket_result(client.clone(), task_id).await?;
-    // assert_eq!(res.status(), StatusCode::CREATED);
-
-    // let res = get_task_result(client.clone(), task_id).await?;
-    // assert_eq!(res.status(), StatusCode::OK);
     test_connections(app1, app2).await;
     Ok(())
 }

@@ -418,14 +418,6 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncRead for EncryptedSocket<S> {
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> std::task::Poll<io::Result<()>> {
         Pin::new(&mut self.read).poll_read(cx, buf)
-        // self.read.poll_next_unpin(cx).map(|item| match item {
-        //     Some(Ok(plain)) => {
-        //         buf.put_slice(&plain);
-        //         Ok(())
-        //     },
-        //     Some(Err(e)) => Err(e),
-        //     None => Ok(())
-        // })
     }
 }
 
