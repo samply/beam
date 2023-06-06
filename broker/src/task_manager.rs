@@ -83,9 +83,8 @@ impl<T: HasWaitId<MsgId> + Task + Msg + Send + Sync + 'static> TaskManager<T> {
             loop {
                 tokio::time::sleep(Self::EXPIRE_CHECK_INTERVAL).await;
                 tm.tasks.retain(|_, task| !task.msg.is_expired());
-                // TODO: Maybe do a DashMap::shrink_to_fit here if capacity is way larger than number of elements
-                // This will need to be tested as shrinking locks the whole map making it inaccessible until
-                // everything is reallocated
+                // If the memory footprint of the Dashmap will get too large we might need to consider calling DashMap::shrink_to_fit or find a better solution as
+                // this would need to lock the whole map making it inaccessible until everything is reallocated
             }
         });
 
