@@ -399,37 +399,42 @@ HTTP/1.1 503
 ```
 
 ### Socket connections
-> Note: Only avalibale on builds with the feature `sockets` enabled. Both proxy and broker need to be build with this flag. There are also prebuild docker images avalible with this feature.
+> Note: Only available on builds with the feature `sockets` enabled. Both proxy and broker need to be built with this flag. There are also prebuild docker images available with this feature.
 
-All api request require the normal authenticated header see the [getting started section](#getting-started).
+All API requests require the usual authentication header (see [getting started section](#getting-started)).
 
-To create initialize a socket connection to an app with a given beam id i.e `app2.proxy2.broker`:
+#### Initialize a socket connection
+Initialize a socket connection with an Beam application, e.g. with AppId `app2.proxy2.broker`:
 
 Method: `POST`  
-URL: `/v1/sockets/<BEAM_ID>`  
+URL: `/v1/sockets/<app_id>`  
 Header: `Upgrade` is required
 
-After this you will be automatically connected to the other app if they answer your request.
+This request will automatically lead to a connection to the other app, after it answers this request.
 
-To recieve connections from other apps the server needs to poll for incoming connections.
+#### Receive and answer a socket request
+To receive socket connections, the Beam.Proxy needs to be polled for incoming connections.
 This endpoint also supports the [long polling](#long-polling-api-access) query string semantics.
 
 Method: `GET`  
 URL: `/v1/sockets`
+Parameters:
+ * The same parameters as for long-polling, i.e. to, from, filter=todo, wait_count, and wait_time are supported.
 
-This will return a json object like the following
-```
+Returns an array of JSON objects:
+``` json
 [
     {
         "from": "app1.proxy1.broker",
         "to": ["app2.proxy2.broker"]
-        "id": "Some uuid v4",
+        "id": "<socket_uuid>",
         "ttl": "60s",
     }
 ]
 ```
 
-The client can then proceed to connect to the socket with:
+#### Connecting to a socket request
+After the connection negotion above, the App can proceed to connect to the socket:
 
 Method: GET  
 URL: `/v1/sockets/<socket_uuid>`
