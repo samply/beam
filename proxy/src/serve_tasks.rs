@@ -111,7 +111,8 @@ async fn forward_request(
     let req = sign_request(encrypted_msg, parts, &config, None).await?;
     trace!("Requesting: {:?}", req);
     let resp = client.request(req).await.map_err(|e| {
-        if e.is_timeout() {
+        // Again e.is_timeout() nor any other check seems to work here
+        if e.to_string().contains("timed out") {
             debug!("Request to broker timed out after set proxy timeout of {PROXY_TIMEOUT}s");
             (StatusCode::GATEWAY_TIMEOUT, "Request to broker timed out ")
         } else {
