@@ -337,7 +337,7 @@ pub(crate) fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, (
         },
         SamplyBeamError::SignEncryptError(_) => ERR_INTERNALCRYPTO,
         e => {
-            warn!("Unhandeled error {e}");
+            warn!("Unhandled error {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "Unknown error")
         }
     })
@@ -487,7 +487,7 @@ async fn encrypt_request(
         return Err(ERR_FAKED_FROM);
     }
     let body = encrypt_msg(msg).await.map_err(|e| {
-        warn!("Encryption faild with: {e}");
+        warn!("Encryption failed with: {e}");
         ERR_INTERNALCRYPTO
     })?;
     Ok((body, parts))

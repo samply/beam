@@ -157,7 +157,7 @@ impl<M: Msg + DeserializeOwned> MsgSigned<M> {
     pub async fn verify(token: &str) -> Result<Self, SamplyBeamError> {
         let msg = extract_jwt(token).await?.2.custom;
 
-        debug!("Message has been verified succesfully.");
+        debug!("Message has been verified successfully.");
         Ok(MsgSigned {
             msg,
             jwt: token.to_string(),
@@ -400,7 +400,7 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
         // Encrypt fields content
         let cipher = XChaCha20Poly1305::new(&symmetric_key);
 
-        // I cant belive there is no better way
+        // I cant believe there is no better way
         let default = String::new();
         let plaintext = self.get_plain().body.as_ref().unwrap_or(&default);
 
@@ -500,10 +500,10 @@ pub struct Plain {
 
 impl Debug for Plain {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut formated = f.debug_struct("Plain");
+        let mut formatted = f.debug_struct("Plain");
         match &self.body {
-            Some(body) if body.len() < 1000 => formated.field("body len", &body.len()),
-            _ => formated.field("body", &self.body),
+            Some(body) if body.len() < 1000 => formatted.field("body len", &body.len()),
+            _ => formatted.field("body", &self.body),
         }.finish()
     }
 }
@@ -739,7 +739,7 @@ impl MsgTaskRequest {
 }
 
 // Don't compare expire, as it is constantly changing.
-// Todo Is the comparison of Results nessecary
+// Todo Is the comparison of Results necessary
 impl<T: MsgState> PartialEq for MsgTaskRequest<T> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id

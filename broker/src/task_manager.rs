@@ -109,7 +109,7 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
             .filter(|entry| !entry.msg.is_expired())
     }
 
-    // Once async iterators are stabelized this should be one
+    // Once async iterators are stabilized this should be one
     /// ## Note:
     /// This function may yield less tasks than `block.wait_count` if tasks expired while waiting on new ones
     pub async fn wait_for_tasks(
@@ -153,9 +153,9 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         if self.tasks.contains_key(&id) {
             return Err(TaskManagerError::Conflict);
         }
-        let max_recievers = task.get_to().len();
+        let max_receivers = task.get_to().len();
         self.tasks.insert(id.clone(), task);
-        let (results_sender, _) = broadcast::channel(max_recievers);
+        let (results_sender, _) = broadcast::channel(max_receivers);
         self.new_results.insert(id.clone(), results_sender);
         // We dont care if noone is listening
         _ = self.new_tasks.send(id);
@@ -276,7 +276,7 @@ where
     }
 
     /// This will push the result to the given task by its id
-    /// Returns true if the given task exists flase otherwise
+    /// Returns true if the given task exists false otherwise
     pub fn put_result(&self, task_id: &MsgId, result: T::Result) -> Result<(), TaskManagerError> {
         let Some(mut entry) = self.tasks.get_mut(task_id) else {
             return Err(TaskManagerError::NotFound);

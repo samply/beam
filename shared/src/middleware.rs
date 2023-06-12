@@ -64,7 +64,7 @@ impl LoggingInfo {
             "{} {} {} {}",
             from,
             self.status_code
-                .expect("Did not set Statuscode before loggin"),
+                .expect("Did not set Statuscode before logging"),
             self.method,
             self.uri
         )

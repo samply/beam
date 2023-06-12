@@ -140,7 +140,7 @@ pub const JWT_VERIFICATION_OPTIONS: Lazy<VerificationOptions> = Lazy::new(|| Ver
 #[tracing::instrument(skip(token_without_extended_signature))]
 /// This verifys a Msg from sent to the Broker
 /// The Message is encoded in the JWT Claims of the body which is a JWT.
-/// There is never really a [`MsgSigned`] involved in Deserializing the message as the signature is just copyed from the body JWT.
+/// There is never really a [`MsgSigned`] involved in Deserializing the message as the signature is just copied from the body JWT.
 /// The token is verified by a key derived from the kid of the JWT in the Header which should also match the kid of the body JWT.
 pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
     req: &mut Parts,

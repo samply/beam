@@ -499,7 +499,7 @@ mod tests {
         OsRng.fill_bytes(&mut nonce);
         let aead = XChaCha20Poly1305::new(&key);
         let client1 = StreamLE31::from_aead(aead, &nonce);
-        let mut encrypter = Encryptor::from_stream_primitive(client1);
+        let mut encryptor = Encryptor::from_stream_primitive(client1);
 
         // let mut nonce = GenericArray::<u8, U20>::default();
         // OsRng.fill_bytes(&mut nonce);
@@ -507,7 +507,7 @@ mod tests {
         let client2 = StreamLE31::from_aead(aead, &nonce);
         let mut decrypter = Decryptor::from_stream_primitive(client2);
 
-        let cipher_text = encrypter.encrypt_next(test_data.as_slice()).unwrap();
+        let cipher_text = encryptor.encrypt_next(test_data.as_slice()).unwrap();
         dbg!(cipher_text.len());
         let a = decrypter.decrypt_next(cipher_text.as_slice()).unwrap();
         assert_eq!(test_data, a.as_slice());

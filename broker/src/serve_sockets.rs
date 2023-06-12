@@ -100,7 +100,7 @@ async fn connect_socket(
     state: State<SocketState>,
     task_id: MsgId,
     mut req: Request<Body>
-    // This Result is just an Eiter type. An error value does not mean something went wrong
+    // This Result is just an Either type. An error value does not mean something went wrong
 ) -> Result<Response, StatusCode> {
     // We have to do this reconstruction of the request as calling extract on the req to get the body will take ownership of the request
     let (mut parts, body) = req.into_parts();
@@ -128,7 +128,7 @@ async fn connect_socket(
 
     if let Some(req_sender) = state.waiting_connections.remove(&task_id) {
         if let Err(_) = req_sender.send(req) {
-            warn!("Error sending socket connection to tunnel. Reciever has been dropped");
+            warn!("Error sending socket connection to tunnel. Receiver has been dropped");
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     } else {

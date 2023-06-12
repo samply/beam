@@ -10,7 +10,7 @@ use anyhow::Result;
 use crate::*;
 
 async fn upgrade(res: impl Future<Output = Response<Body>>) -> Upgraded {
-    hyper::upgrade::on(res.await).await.expect("Upgrade successfull")
+    hyper::upgrade::on(res.await).await.expect("Upgrade successful")
 }
 
 async fn test_connections(r1: impl Future<Output = Response<Body>>, r2: impl Future<Output = Response<Body>>) {
