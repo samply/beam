@@ -6,9 +6,9 @@ FROM alpine AS chmodder
 ARG FEATURE
 ARG TARGETARCH
 ARG COMPONENT
-COPY /artifacts/binaries-$TARGETARCH$FEATURE/$COMPONENT /app/
+COPY /artifacts/binaries-$TARGETARCH$FEATURE/$COMPONENT /app/component
 RUN chmod +x /app/*
 
 FROM ${IMGNAME}
-COPY --from=chmodder /app/* /usr/local/bin/
-ENTRYPOINT [ "/usr/local/bin/$COMPONENT" ]
+COPY --from=chmodder /app/component /usr/local/bin/
+ENTRYPOINT [ "/usr/local/bin/component" ]

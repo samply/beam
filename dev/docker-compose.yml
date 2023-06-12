@@ -15,7 +15,9 @@ services:
     depends_on: [vault]
     build:
       context: ../
-      dockerfile: Dockerfile.ci.broker
+      dockerfile: Dockerfile
+      args:
+        - COMPONENT=broker
     image: samply/beam-broker:${TAG}
     ports:
       - 8080:8080
@@ -43,7 +45,9 @@ services:
     depends_on: [broker]
     build:
       context: ../
-      dockerfile: Dockerfile.ci.proxy
+      dockerfile: Dockerfile
+      args:
+        - COMPONENT=proxy
     image: samply/beam-proxy:${TAG}
     ports:
       - 8081:8081
@@ -65,7 +69,9 @@ services:
     depends_on: [broker]
     build:
       context: ../
-      dockerfile: Dockerfile.ci.proxy
+      dockerfile: Dockerfile
+      args:
+        - COMPONENT=proxy
     image: samply/beam-proxy:${TAG}
     ports:
       - 8082:8082
