@@ -77,7 +77,7 @@ pub struct CliArgs {
     #[clap(long, env, value_parser)]
     pub allowed_remotes: Option<String>,
 
-    /// A blacklist of apps or proxies that may notsend messages to this proxy, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
+    /// A blacklist of apps or proxies that may not send messages to this proxy, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
     #[clap(long, env, value_parser)]
     pub blocked_remotes: Option<String>,
 

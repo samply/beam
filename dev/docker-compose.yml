@@ -58,8 +58,8 @@ services:
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
       ALL_PROXY: http://mitmproxy:8080
-      ALLOW_LIST: '["app1.proxy1.broker", "proxy1.broker"]'
-      BLOCK_LIST: '["app1.proxy1.broker", "proxy1.broker"]'
+      ALLOWED_REMOTES: '["app1.proxy1.broker", "proxy1.broker"]'
+      BLOCKED_REMOTES: '["app1.proxy1.broker", "proxy1.broker"]'
     secrets:
       - proxy1.pem
       - root.crt.pem
