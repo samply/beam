@@ -28,8 +28,7 @@ pub struct Config {
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId, ApiKey>,
     pub tls_ca_certificates: Vec<X509>,
-    pub allow_list: Vec<AppOrProxyId>,
-    pub block_list: Vec<AppOrProxyId>,
+    pub permission_manager: PermissionManager,
 }
 
 pub type ApiKey = String;
@@ -66,13 +65,21 @@ pub struct CliArgs {
     #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
     rootcert_file: PathBuf,
     
-    /// A whitelist of apps or proxies that may connect, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
+    /// A whitelist of apps or proxies that messages may be sent to, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
     #[clap(long, env, value_parser)]
-    pub allow_list: Option<String>,
+    pub allowed_receivers: Option<String>,
 
-    /// A blacklist of apps or proxies that may not connect, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
+    /// A blacklist of apps or proxies that messages may not be sent to, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
     #[clap(long, env, value_parser)]
-    pub block_list: Option<String>,
+    pub blocked_receivers: Option<String>,
+
+    /// A whitelist of apps or proxies that may send messages to this proxy, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
+    #[clap(long, env, value_parser)]
+    pub allowed_remotes: Option<String>,
+
+    /// A blacklist of apps or proxies that may notsend messages to this proxy, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
+    #[clap(long, env, value_parser)]
+    pub blocked_remotes: Option<String>,
 
     /// (included for technical reasons)
     #[clap(long, hide(true))]
@@ -106,6 +113,39 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBea
     Ok(api_keys)
 }
 
+#[derive(Debug, Clone)]
+pub struct PermissionManager {
+    pub recv_allow_list: Option<Vec<AppOrProxyId>>,
+    pub recv_block_list: Option<Vec<AppOrProxyId>>,
+    pub send_allow_list: Option<Vec<AppOrProxyId>>,
+    pub send_block_list: Option<Vec<AppOrProxyId>>,
+}
+
+impl PermissionManager {
+    pub fn allowed_to_recieve(&self, from: &AppOrProxyId) -> bool {
+        Self::check_permissions_with(&self.recv_allow_list,&self.recv_block_list, from)
+    }
+
+    pub fn allowed_to_send(&self, to: &AppOrProxyId) -> bool {
+        Self::check_permissions_with(&self.send_allow_list, &self.send_block_list, to)
+    }
+
+    fn check_permissions_with(allow: &Option<Vec<AppOrProxyId>>, deny: &Option<Vec<AppOrProxyId>>, beam_id: &AppOrProxyId) -> bool {
+        match (allow, deny) {
+            (None, None) => true,
+            (None, Some(block_list)) => !Self::contains(&block_list, beam_id),
+            (Some(allow_list), None) => Self::contains(&allow_list, beam_id),
+            (Some(allow_list), Some(block_list)) => !Self::contains(&block_list, beam_id) || Self::contains(&allow_list, beam_id)
+        }
+    }
+
+    fn contains(ids: &Vec<AppOrProxyId>, needle: &AppOrProxyId) -> bool {
+        ids.iter().find(|id| match id {
+            AppOrProxyId::AppId(app) => needle == app,
+            AppOrProxyId::ProxyId(proxy) => proxy == &needle.get_proxy_id(),
+        }).is_some()
+    }
+}
 
 impl crate::config::Config for Config {
     fn load() -> Result<Config, SamplyBeamError> {
@@ -138,27 +178,25 @@ impl crate::config::Config for Config {
             proxy_id,
             api_keys,
             tls_ca_certificates,
-            allow_list: parse_to_list_of_ids(cli_args.allow_list)?,
-            block_list: parse_to_list_of_ids(cli_args.block_list)?
+            permission_manager: PermissionManager {
+                recv_allow_list: parse_to_list_of_ids(cli_args.allowed_remotes)?,
+                recv_block_list: parse_to_list_of_ids(cli_args.blocked_remotes)?,
+                send_allow_list: parse_to_list_of_ids(cli_args.allowed_receivers)?,
+                send_block_list: parse_to_list_of_ids(cli_args.blocked_receivers)?
+            }
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
-        if !config.allow_list.is_empty() {
-            info!("Allow list set: {:?}", config.allow_list);
-        }
-        if !config.block_list.is_empty() {
-            info!("Block list set: {:?}", config.block_list);
-        }
         Ok(config)
     }
 }
 
-fn parse_to_list_of_ids(input: Option<String>) -> Result<Vec<AppOrProxyId>, SamplyBeamError> {
+fn parse_to_list_of_ids(input: Option<String>) -> Result<Option<Vec<AppOrProxyId>>, SamplyBeamError> {
     if let Some(app_list_str) = input {
-        serde_json::from_str(&app_list_str).map_err(|e| SamplyBeamError::ConfigurationFailed(
+        Ok(Some(serde_json::from_str(&app_list_str).map_err(|e| SamplyBeamError::ConfigurationFailed(
             format!("Failed to parse: {app_list_str} to a list of beam ids: {e}.\n The requiered format is a json array of strings that match the beam id spec see the system architecture section in the readme.")
-        ))
+        ))?))
     } else {
-        Ok(Vec::with_capacity(0))
+        Ok(None)
     }
 }
 
@@ -205,8 +243,8 @@ mod tests {
         BrokerId::set_broker_id(BROKER_ID.to_string());
         assert_eq!(
             parse_to_list_of_ids(Some(r#"["app1.proxy1.broker", "proxy1.broker"]"#.to_string())).unwrap(),
-            vec![AppOrProxyId::AppId(AppId::new("app1.proxy1.broker").unwrap()), AppOrProxyId::ProxyId(ProxyId::new("proxy1.broker").unwrap())]
+            Some(vec![AppOrProxyId::AppId(AppId::new("app1.proxy1.broker").unwrap()),AppOrProxyId::ProxyId(ProxyId::new("proxy1.broker").unwrap())])
         );
-        assert_eq!(parse_to_list_of_ids(None).unwrap(), Vec::<AppOrProxyId>::new());
+        assert_eq!(parse_to_list_of_ids(None).unwrap(), None);
     }
 }

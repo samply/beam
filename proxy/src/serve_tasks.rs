@@ -422,7 +422,13 @@ async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
     if let Value::Array(arr) = json {
         let mut results = Vec::with_capacity(arr.len());
         for value in arr {
-            results.push(validate_and_decrypt(value).await?);
+            match validate_and_decrypt(value).await {
+                // If we get an array of results we just filter out the ones we are not allowed to receive
+                Err(SamplyBeamError::DisallowedReceiver(app)) => {
+                    debug!("Filtered receiving message from {app} as it was blocked due to proxy permissions");
+                },
+                other => results.push(other?)
+            }
         }
         Ok(Value::Array(results))
     } else if json.is_object() {
@@ -431,7 +437,13 @@ async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
                 let msg = MsgSigned::<EncryptedMessage>::verify(&signed.jwt)
                     .await?
                     .msg;
-                Ok(serde_json::to_value(decrypt_msg(msg)?).expect("Should serialize fine"))
+                let decrypted = decrypt_msg(msg)?;
+
+                if CONFIG_PROXY.permission_manager.allowed_to_recieve(decrypted.get_from()) {
+                    Ok(serde_json::to_value(decrypted).expect("Should serialize fine"))
+                } else {
+                    Err(SamplyBeamError::DisallowedReceiver(decrypted.get_from().clone()))
+                }
             }
             Err(e) => Err(SamplyBeamError::JsonParseError(format!(
                 "Failed to parse broker response as a signed encrypted message. Err is {e}"
@@ -468,8 +480,20 @@ async fn encrypt_request(
         })
     } else {
         match serde_json::from_slice(&body) {
-            Ok(val) => {
+            Ok(mut val) => {
                 debug!("Body is valid json");
+                // If Msg was a struct generic over its other contents this would be so much nicer but this would take a lot of refactoring
+                match val {
+                    MessageType::MsgTaskRequest(ref mut m) => m.to.retain(|to| CONFIG_PROXY.permission_manager.allowed_to_send(to)),
+                    MessageType::MsgTaskResult(ref mut m) => m.to.retain(|to| CONFIG_PROXY.permission_manager.allowed_to_send(to)),
+                    MessageType::MsgEmpty(..) => (),
+                };
+                if !matches!(val, MessageType::MsgEmpty(..)) {
+                    if val.get_to().is_empty() {
+                        return Err((StatusCode::UNPROCESSABLE_ENTITY, "Message needs to have at least one `to` entry that is not blocked by this proxies recipient policy"));
+                    }
+                }
+
                 val
             }
             Err(e) => {
