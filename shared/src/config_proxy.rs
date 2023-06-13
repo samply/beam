@@ -16,7 +16,7 @@ use serde::Deserialize;
 use tracing::{debug, info};
 
 use crate::{
-    beam_id::{self, AppId, BeamId, BrokerId, ProxyId},
+    beam_id::{self, AppId, BeamId, BrokerId, ProxyId, AppOrProxyId},
     errors::SamplyBeamError,
 };
 
@@ -28,6 +28,8 @@ pub struct Config {
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId, ApiKey>,
     pub tls_ca_certificates: Vec<X509>,
+    pub allow_list: Vec<AppOrProxyId>,
+    pub block_list: Vec<AppOrProxyId>,
 }
 
 pub type ApiKey = String;
@@ -63,6 +65,14 @@ pub struct CliArgs {
     /// samply.pki: Path to CA Root certificate
     #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
     rootcert_file: PathBuf,
+    
+    /// A whitelist of apps or proxies that may connect, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
+    #[clap(long, env, value_parser)]
+    pub allow_list: Option<String>,
+
+    /// A blacklist of apps or proxies that may not connect, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
+    #[clap(long, env, value_parser)]
+    pub block_list: Option<String>,
 
     /// (included for technical reasons)
     #[clap(long, hide(true))]
@@ -96,6 +106,7 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBea
     Ok(api_keys)
 }
 
+
 impl crate::config::Config for Config {
     fn load() -> Result<Config, SamplyBeamError> {
         let cli_args = CliArgs::parse();
@@ -119,6 +130,7 @@ impl crate::config::Config for Config {
                 e
             ))
         })?;
+
         let config = Config {
             broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
             broker_uri: cli_args.broker_url,
@@ -126,9 +138,27 @@ impl crate::config::Config for Config {
             proxy_id,
             api_keys,
             tls_ca_certificates,
+            allow_list: parse_to_list_of_ids(cli_args.allow_list)?,
+            block_list: parse_to_list_of_ids(cli_args.block_list)?
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
+        if !config.allow_list.is_empty() {
+            info!("Allow list set: {:?}", config.allow_list);
+        }
+        if !config.block_list.is_empty() {
+            info!("Block list set: {:?}", config.block_list);
+        }
         Ok(config)
+    }
+}
+
+fn parse_to_list_of_ids(input: Option<String>) -> Result<Vec<AppOrProxyId>, SamplyBeamError> {
+    if let Some(app_list_str) = input {
+        serde_json::from_str(&app_list_str).map_err(|e| SamplyBeamError::ConfigurationFailed(
+            format!("Failed to parse: {app_list_str} to a list of beam ids: {e}.\n The requiered format is a json array of strings that match the beam id spec see the system architecture section in the readme.")
+        ))
+    } else {
+        Ok(Vec::with_capacity(0))
     }
 }
 
