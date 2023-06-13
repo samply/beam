@@ -198,4 +198,15 @@ mod tests {
         let parsed = parse_apikeys(&ProxyId::new(&format!("proxy.{BROKER_ID}")).unwrap()).unwrap();
         assert_eq!(parsed.len(), apps.len());
     }
+
+    #[test]
+    fn test_parse_app_list() {
+        const BROKER_ID: &str = "broker";
+        BrokerId::set_broker_id(BROKER_ID.to_string());
+        assert_eq!(
+            parse_to_list_of_ids(Some(r#"["app1.proxy1.broker", "proxy1.broker"]"#.to_string())).unwrap(),
+            vec![AppOrProxyId::AppId(AppId::new("app1.proxy1.broker").unwrap()), AppOrProxyId::ProxyId(ProxyId::new("proxy1.broker").unwrap())]
+        );
+        assert_eq!(parse_to_list_of_ids(None).unwrap(), Vec::<AppOrProxyId>::new());
+    }
 }
