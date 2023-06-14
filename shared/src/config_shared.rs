@@ -108,22 +108,22 @@ impl crate::config::Config for Config {
     }
 }
 
-fn get_enrollment_msg(proxy_id: &Option<String>) -> String {
+fn get_enrollment_msg(proxy_id: &ProxyId) -> String {
     let divider = "***************************************************************************\n
                    ***              Beam Certificate Enrollment Warning                    ***\n
                    ***************************************************************************";
     format!(
         "{}\nIf you are not yet enrolled in the central certificate store, please execute the beam-enroll companion tool (https://github.com/samply/beam-enroll) by executing:\n  docker run --rm -it -v \"$(pwd)\":/data -e PROXY_ID={} samply/beam-enroll\nand follow the steps on the screen.\nAfter your certificate signing request (CSR) has been approved, please restart this Beam.Proxy and this message should disappear.",
         divider,
-        proxy_id.as_deref().unwrap_or("<proxy_id>")
+        proxy_id
     )
 }
 
 pub async fn init_public_crypto_for_proxy(
     private_config: ConfigCrypto,
+    proxy_id: &ProxyId,
 ) -> Result<(String, String), SamplyBeamError> {
-    let cli_args = CliArgs::parse();
-    let crypto = load_public_crypto_for_proxy(&cli_args, private_config).await?;
+    let crypto = load_public_crypto_for_proxy(proxy_id, private_config).await?;
 
     let cert_info = crypto::ProxyCertInfo::try_from(
         &crypto
@@ -138,15 +138,14 @@ pub async fn init_public_crypto_for_proxy(
     Ok((cert_info.serial, cert_info.common_name))
 }
 
-pub fn load_private_crypto_for_proxy() -> Result<ConfigCrypto, SamplyBeamError> {
-    let cli_args = CliArgs::parse();
-    let privkey_pem = read_to_string(&cli_args.privkey_file)
+pub fn load_private_crypto_for_proxy(priv_key_file: &PathBuf, proxy_id: &ProxyId) -> Result<ConfigCrypto, SamplyBeamError> {
+    let privkey_pem = read_to_string(priv_key_file)
         .map_err(|e| {
             SamplyBeamError::ConfigurationFailed(format!(
                 "Unable to load private key from file {}: {}\n{}",
-                cli_args.privkey_file.to_string_lossy(),
+                priv_key_file.to_string_lossy(),
                 e,
-                get_enrollment_msg(&cli_args.proxy_id)
+                get_enrollment_msg(proxy_id)
             ))
         })?
         .trim()
@@ -173,12 +172,9 @@ pub fn load_private_crypto_for_proxy() -> Result<ConfigCrypto, SamplyBeamError> 
 }
 
 async fn load_public_crypto_for_proxy(
-    cli_args: &CliArgs,
+    proxy_id: &ProxyId,
     mut config: ConfigCrypto,
 ) -> Result<ConfigCrypto, SamplyBeamError> {
-    let proxy_id = cli_args.proxy_id.as_ref()
-        .expect("load_crypto() has been called without setting a Proxy ID (maybe in broker?). This should not happen.");
-    let proxy_id = ProxyId::new(proxy_id)?;
     let publics: Vec<CryptoPublicPortion> = get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
         .await
         .into_iter()

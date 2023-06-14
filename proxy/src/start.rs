@@ -75,7 +75,7 @@ pub async fn main(config: Config, config_shared: config_shared::Config) -> anyho
 }
 
 async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(), SamplyBeamError> {
-    let private_crypto_proxy = shared::config_shared::load_private_crypto_for_proxy()?;
+    let private_crypto_proxy = shared::config_shared::load_private_crypto_for_proxy(&config.priv_key_file, &config.proxy_id)?;
     shared::crypto::init_cert_getter(crypto::build_cert_getter(
         config.clone(),
         client.clone(),
@@ -93,7 +93,7 @@ async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(), Sam
             })
             .collect();
     let (serial, cname) =
-        shared::config_shared::init_public_crypto_for_proxy(private_crypto_proxy).await?;
+        shared::config_shared::init_public_crypto_for_proxy(private_crypto_proxy, &config.proxy_id).await?;
     if cname != config.proxy_id.to_string() {
         return Err(SamplyBeamError::ConfigurationFailed(format!("Unable to retrieve a certificate matching your Proxy ID. Expected {}, got {}. Please check your configuration", cname, config.proxy_id.to_string())));
     }

@@ -28,6 +28,7 @@ pub struct Config {
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId, ApiKey>,
     pub tls_ca_certificates: Vec<X509>,
+    pub priv_key_file: PathBuf,
 }
 
 impl Config {
@@ -35,6 +36,7 @@ impl Config {
         broker_uri: Uri,
         bind_addr: SocketAddr,
         proxy_id: &str,
+        priv_key_file: PathBuf,
         tls_ca_certificates_dir: Option<PathBuf>,
     ) -> Result<Self, SamplyBeamError> {
         BrokerId::set_broker_id(broker_uri.host().unwrap().to_string());
@@ -64,6 +66,7 @@ impl Config {
             api_keys,
             proxy_id,
             tls_ca_certificates,
+            priv_key_file
         })
     }
 }
@@ -137,7 +140,7 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBea
 impl crate::config::Config for Config {
     fn load() -> Result<Config, SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        let config = Config::new(cli_args.broker_url, cli_args.bind_addr, &cli_args.proxy_id, cli_args.tls_ca_certificates_dir)?;
+        let config = Config::new(cli_args.broker_url, cli_args.bind_addr, &cli_args.proxy_id, cli_args.privkey_file, cli_args.tls_ca_certificates_dir)?;
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)
     }
