@@ -25,6 +25,7 @@ pub async fn main() -> anyhow::Result<()> {
     shared::logger::init_logger()?;
     banner::print_banner();
 
+    CONFIG_CENTRAL.set(Config::load()?).expect("To set config");
     CONFIG_SHARED.set(Config::load()?).expect("To set config");
     let (senders, health) = health::Health::make();
     let cert_getter = crypto::build_cert_getter(senders.vault)?;

@@ -1,7 +1,6 @@
 use std::ops::Deref;
 
 use once_cell::sync::OnceCell;
-use static_init::dynamic;
 use tracing::debug;
 
 use crate::{
@@ -45,11 +44,7 @@ impl<T> Deref for ConfigWrapper<T> {
 
 pub static CONFIG_PROXY: ConfigWrapper<config_proxy::Config> = ConfigWrapper::new();
 
-#[dynamic(lazy)]
-pub static CONFIG_CENTRAL: config_broker::Config = {
-    debug!("Loading config CONFIG_CENTRAL");
-    load()
-};
+pub static CONFIG_CENTRAL: ConfigWrapper<config_broker::Config> = ConfigWrapper::new();
 
 pub static CONFIG_SHARED: ConfigWrapper<config_shared::Config> = ConfigWrapper::new();
 

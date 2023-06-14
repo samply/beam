@@ -25,7 +25,6 @@ use once_cell::unsync::Lazy;
 use openssl::base64;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
-use static_init::dynamic;
 use tracing::{debug, error, warn};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");

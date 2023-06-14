@@ -6,7 +6,6 @@ use crate::{
 };
 use axum::http::Uri;
 use clap::Parser;
-use static_init::dynamic;
 use std::str::FromStr;
 use tracing::info;
 
@@ -55,6 +54,7 @@ struct CliArgs {
     test_threads: Option<String>,
 }
 
+#[derive(Debug)]
 pub struct Config {
     pub bind_addr: SocketAddr,
     pub pki_address: Uri,

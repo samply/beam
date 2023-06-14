@@ -10,11 +10,11 @@ use crypto_jwt::extract_jwt;
 use errors::SamplyBeamError;
 use itertools::Itertools;
 use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
+use once_cell::sync::Lazy;
 use openssl::base64;
 use rsa::{RsaPrivateKey, RsaPublicKey, Oaep};
 use serde_json::{json, Value};
 use sha2::Sha256;
-use static_init::dynamic;
 use tracing::debug;
 
 use std::{
@@ -158,8 +158,7 @@ impl<M: Msg + DeserializeOwned> MsgSigned<M> {
     }
 }
 
-#[dynamic]
-pub static EMPTY_VEC_APPORPROXYID: Vec<AppOrProxyId> = Vec::new();
+pub static EMPTY_VEC_APPORPROXYID: Lazy<Vec<AppOrProxyId>> = Lazy::new(|| Vec::with_capacity(0));
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]

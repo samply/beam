@@ -42,7 +42,6 @@ itertools = "0.10.5"
 jwt-simple = "0.11.1"
 
 # Global variables
-static_init = "1.0.2"
 once_cell = "1.13.0"
 
 # Error handling
