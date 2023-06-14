@@ -43,7 +43,7 @@ impl<T> Deref for ConfigWrapper<T> {
     }
 }
 
-pub static CONFIG_PROXY: ConfigWrapper<config_proxy::Config> = ConfigWrapper::new();
+pub(crate) static CONFIG_PROXY: ConfigWrapper<config_proxy::Config> = ConfigWrapper::new();
 
 #[dynamic(lazy)]
 pub static CONFIG_CENTRAL: config_broker::Config = {
