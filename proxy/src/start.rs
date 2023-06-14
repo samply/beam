@@ -6,7 +6,8 @@ use backoff::{future::retry_notify, ExponentialBackoff};
 use hyper::{body, client::HttpConnector, Client, Method, Request, StatusCode, Uri};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use shared::config::CONFIG_PROXY;
+use shared::config::{CONFIG_PROXY, CONFIG_SHARED};
+use shared::config_shared;
 use shared::crypto::CryptoPublicPortion;
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
@@ -16,8 +17,9 @@ use crate::*;
 
 pub(crate) const PROXY_TIMEOUT: u64 = 120;
 
-pub async fn main(config: Config) -> anyhow::Result<()> {
+pub async fn main(config: Config, config_shared: config_shared::Config) -> anyhow::Result<()> {
     CONFIG_PROXY.set(config).expect("Setting config failed");
+    CONFIG_SHARED.set(config_shared).expect("Setting config failed");
     shared::config::prepare_env();
     shared::logger::init_logger()?;
     banner::print_banner();

@@ -17,7 +17,6 @@ use openssl::{
     x509::{self, X509},
 };
 use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
-use static_init::dynamic;
 use std::{fs::read_to_string, path::PathBuf, rc::Rc, sync::Arc};
 use tracing::{debug, info};
 
@@ -61,12 +60,38 @@ struct CliArgs {
     test_threads: Option<String>,
 }
 
-#[allow(dead_code)]
+#[derive(Debug)]
 pub struct Config {
-    pub(crate) tls_ca_certificates_dir: Option<PathBuf>,
     pub(crate) broker_domain: String,
     pub root_cert: X509,
     pub tls_ca_certificates: Vec<X509>,
+}
+
+impl Config {
+    pub fn new(broker_url: &Uri, root_cert_file: PathBuf, tls_ca_certificates_dir: Option<PathBuf>) -> Result<Self, SamplyBeamError> {
+        BrokerId::set_broker_id(broker_url.host().unwrap().to_string());
+
+        let root_cert = crypto::load_certificates_from_file(root_cert_file)?;
+        let broker_domain = broker_url.host();
+        if false {
+            todo!() // TODO Tobias: Check if matches certificate, and fail
+        }
+        let broker_domain = broker_domain.unwrap().to_string();
+        let tls_ca_certificates = crate::crypto::load_certificates_from_dir(
+            tls_ca_certificates_dir,
+        )
+        .map_err(|e| {
+            SamplyBeamError::ConfigurationFailed(format!(
+                "Unable to read from TLS CA directory: {}",
+                e
+            ))
+        })?;
+        Ok(Config {
+            broker_domain,
+            root_cert,
+            tls_ca_certificates,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -78,31 +103,8 @@ pub struct ConfigCrypto {
 
 impl crate::config::Config for Config {
     fn load() -> Result<Self, SamplyBeamError> {
-        let cli_args = CliArgs::parse();
-        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
-
-        let root_cert = crypto::load_certificates_from_file(cli_args.rootcert_file)?;
-        let broker_domain = cli_args.broker_url.host();
-        if false {
-            todo!() // TODO Tobias: Check if matches certificate, and fail
-        }
-        let broker_domain = broker_domain.unwrap().to_string();
-        let tls_ca_certificates_dir = cli_args.tls_ca_certificates_dir;
-        let tls_ca_certificates = crate::crypto::load_certificates_from_dir(
-            tls_ca_certificates_dir.clone(),
-        )
-        .map_err(|e| {
-            SamplyBeamError::ConfigurationFailed(format!(
-                "Unable to read from TLS CA directory: {}",
-                e
-            ))
-        })?;
-        Ok(Config {
-            broker_domain,
-            tls_ca_certificates_dir,
-            root_cert,
-            tls_ca_certificates,
-        })
+        let CliArgs { rootcert_file, broker_url, tls_ca_certificates_dir, ..} = CliArgs::parse();
+        Self::new(&broker_url, rootcert_file, tls_ca_certificates_dir)
     }
 }
 

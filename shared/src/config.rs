@@ -51,11 +51,7 @@ pub static CONFIG_CENTRAL: config_broker::Config = {
     load()
 };
 
-#[dynamic(lazy)]
-pub static CONFIG_SHARED: config_shared::Config = {
-    debug!("Loading config CONFIG_SHARED");
-    load()
-};
+pub static CONFIG_SHARED: ConfigWrapper<config_shared::Config> = ConfigWrapper::new();
 
 pub(crate) static CONFIG_SHARED_CRYPTO: OnceCell<ConfigCrypto> = OnceCell::new();
 

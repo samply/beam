@@ -7,4 +7,5 @@ mod serve_tasks;
 mod start;
 
 pub use start::main;
-pub use shared::config_proxy::Config;
+pub use shared::config_proxy::Config as ProxyConfig;
+pub use shared::config_shared::Config as SharedConfig;

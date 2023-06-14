@@ -15,7 +15,7 @@ use backoff::{
     future::{retry, retry_notify},
     Error, ExponentialBackoff, ExponentialBackoffBuilder,
 };
-use shared::{config::CONFIG_CENTRAL, *};
+use shared::{config::{CONFIG_CENTRAL, CONFIG_SHARED, Config}, *};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
@@ -25,6 +25,7 @@ pub async fn main() -> anyhow::Result<()> {
     shared::logger::init_logger()?;
     banner::print_banner();
 
+    CONFIG_SHARED.set(Config::load()?).expect("To set config");
     let (senders, health) = health::Health::make();
     let cert_getter = crypto::build_cert_getter(senders.vault)?;
 
