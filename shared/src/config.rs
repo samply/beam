@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use once_cell::sync::OnceCell;
 use static_init::dynamic;
 use tracing::debug;
@@ -9,7 +11,7 @@ use crate::{
     errors::SamplyBeamError,
 };
 
-pub(crate) trait Config: Sized {
+pub trait Config: Sized {
     fn load() -> Result<Self, SamplyBeamError>;
 }
 
@@ -21,11 +23,27 @@ fn load<T: Config>() -> T where {
         })
 }
 
-#[dynamic(lazy)]
-pub static CONFIG_PROXY: config_proxy::Config = {
-    debug!("Loading config CONFIG_PROXY");
-    load()
-};
+pub struct ConfigWrapper<T>(OnceCell<T>);
+
+impl<T> ConfigWrapper<T> {
+    pub const fn new() -> Self {
+        ConfigWrapper(OnceCell::new())
+    }
+
+    pub fn set(&self, val: T) -> Result<(), T> {
+        self.0.set(val)
+    }
+}
+
+impl<T> Deref for ConfigWrapper<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.get().expect("Config to be initialized already!")
+    }
+}
+
+pub static CONFIG_PROXY: ConfigWrapper<config_proxy::Config> = ConfigWrapper::new();
 
 #[dynamic(lazy)]
 pub static CONFIG_CENTRAL: config_broker::Config = {
