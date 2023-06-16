@@ -523,7 +523,7 @@ Confirm that your setup works by running `./dev/test noci`, which runs the tests
 
 To work with the environment, you may run `./dev/beamdev defaults` to see some helpful values, including the dev default URLs and a working authentication header.
 
-To run the dev setup with additional cargo flags like fearue flags or the release flag you may run `./dev/beamdev start <cargo flags>`.
+To run the dev setup with additional cargo flags like feature flags or the release flag you may run `dev/beamdev start <cargo flags>`, i.e. `dev/beamdev start --features sockets`.
 
 ## Production Environment & Certificate Infrastructure
 
