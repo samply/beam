@@ -65,6 +65,9 @@ services:
       ALL_PROXY: http://mitmproxy:8080
       ALLOWED_REMOTES: '["app1.proxy1", "proxy1"]'
       BLOCKED_REMOTES: '["app1.proxy1", "proxy1"]'
+      # does not exist only used for testing
+      BLOCKED_RECEIVERS: '["proxy3"]'
+      ALLOWED_RECEIVERS: '["app2.proxy3"]'
     secrets:
       - proxy1.pem
       - root.crt.pem
