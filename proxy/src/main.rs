@@ -7,7 +7,7 @@ use hyper::{body, client::HttpConnector, Client, Method, Request, StatusCode, Ur
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use shared::beam_id::AppOrProxyId;
-use shared::{PlainMessage, MsgEmpty, EncryptedMessage};
+use shared::{PlainMessage, MsgEmpty, EncryptedMessage, is_actually_hyper_timeout};
 use shared::crypto::CryptoPublicPortion;
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
@@ -195,7 +195,7 @@ fn spwan_controller_polling(client: SamplyHttpClient, config: Config) {
                     };
                 },
                 // For some reason e.is_timout() does not work
-                Err(e) if e.to_string().contains("timed out") => {
+                Err(e) if is_actually_hyper_timeout(&e) => {
                     debug!("Connection to broker timed out retrying");
                 },
                 Err(e) => {

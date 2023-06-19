@@ -42,7 +42,7 @@ use shared::{
     sse_event::SseEventType,
     DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest,
     EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest,
-    MsgTaskResult, PlainMessage,
+    MsgTaskResult, PlainMessage, is_actually_hyper_timeout,
 };
 use tokio::io::BufReader;
 use tracing::{debug, error, info, trace, warn};
@@ -111,7 +111,7 @@ async fn forward_request(
     let req = sign_request(encrypted_msg, parts, &config, None).await?;
     trace!("Requesting: {:?}", req);
     let resp = client.request(req).await.map_err(|e| {
-        if e.is_timeout() {
+        if is_actually_hyper_timeout(&e) {
             debug!("Request to broker timed out after set proxy timeout of {PROXY_TIMEOUT}s");
             (StatusCode::GATEWAY_TIMEOUT, "Request to broker timed out ")
         } else {
