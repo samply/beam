@@ -256,10 +256,57 @@ mod tests {
         assert_eq!(
             parse_to_list_of_ids(Some(r#"["app1.proxy1", "proxy1"]"#.to_string())).unwrap(),
             Some(vec![
-                AppOrProxyId::AppId(AppId::new(&format!("app1.proxy1.{BROKER_ID}")).unwrap()),
-                AppOrProxyId::ProxyId(ProxyId::new(&format!("proxy1.{BROKER_ID}")).unwrap())
+                AppOrProxyId::new(&format!("app1.proxy1.{BROKER_ID}")).unwrap(),
+                AppOrProxyId::new(&format!("proxy1.{BROKER_ID}")).unwrap()
             ])
         );
         assert_eq!(parse_to_list_of_ids(None).unwrap(), None);
     }
+
+    #[test]
+    fn test_contains() {
+        const BROKER_ID: &str = "broker.samply.de";
+        BrokerId::set_broker_id(BROKER_ID.to_string());
+        let app_ids = vec![AppOrProxyId::new(&format!("app1.proxy1.{BROKER_ID}")).unwrap()];
+        let proxy_id = vec![AppOrProxyId::new(&format!("proxy1.{BROKER_ID}")).unwrap()];
+        assert!(PermissionManager::contains(&app_ids, &AppOrProxyId::new(&format!("app1.proxy1.{BROKER_ID}")).unwrap()));
+        assert!(!PermissionManager::contains(&app_ids, &AppOrProxyId::new(&format!("proxy1.{BROKER_ID}")).unwrap()));
+        assert!(PermissionManager::contains(&proxy_id, &AppOrProxyId::new(&format!("app2.proxy1.{BROKER_ID}")).unwrap()));
+        assert!(PermissionManager::contains(&proxy_id, &AppOrProxyId::new(&format!("proxy1.{BROKER_ID}")).unwrap()));
+        assert!(!PermissionManager::contains(&proxy_id, &AppOrProxyId::new(&format!("proxy2.{BROKER_ID}")).unwrap()));
+    }
+
+    #[test]
+    fn test_check_permissions_with() {
+        const BROKER_ID: &str = "broker.samply.de";
+        BrokerId::set_broker_id(BROKER_ID.to_string());
+        let proxy1 = AppOrProxyId::new(&format!("proxy1.{BROKER_ID}")).unwrap();
+        let app_id1 = AppOrProxyId::new(&format!("app1.proxy1.{BROKER_ID}")).unwrap();
+        let app_id2 = AppOrProxyId::new(&format!("app2.proxy1.{BROKER_ID}")).unwrap();
+
+        // Both allow and deny lists empty
+        assert!(PermissionManager::check_permissions_with(&None, &None, &app_id1));
+        
+        // Deny list empty, allow list contains ID
+        let allow_list = vec![app_id1.clone()];
+        assert!(PermissionManager::check_permissions_with(&Some(allow_list.clone()), &None, &app_id1));
+        assert!(!PermissionManager::check_permissions_with(&Some(allow_list), &None, &app_id2));
+        
+        // Deny list contains ID, allow list empty
+        let block_list = vec![app_id1.clone()];
+        assert!(!PermissionManager::check_permissions_with(&None, &Some(block_list.clone()), &app_id1));
+        assert!(PermissionManager::check_permissions_with(&None, &Some(block_list), &app_id2));
+        
+        // Both lists contain ID
+        let allow_list = vec![app_id1.clone()];
+        let block_list = vec![app_id1.clone(), app_id2.clone()];
+        assert!(PermissionManager::check_permissions_with(&Some(allow_list.clone()), &Some(block_list.clone()), &app_id1));
+        assert!(!PermissionManager::check_permissions_with(&Some(allow_list), &Some(block_list), &app_id2));
+        
+        // Both lists with proxy
+        let allow_list = vec![app_id1.clone()];
+        assert!(PermissionManager::check_permissions_with(&Some(allow_list.clone()), &Some(vec![proxy1.clone()]), &app_id1));
+        assert!(!PermissionManager::check_permissions_with(&Some(allow_list), &Some(vec![proxy1]), &app_id2));
+    }
+
 }
