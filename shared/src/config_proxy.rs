@@ -16,7 +16,7 @@ use serde::Deserialize;
 use tracing::{debug, info};
 
 use crate::{
-    beam_id::{self, AppId, BeamId, BrokerId, ProxyId, AppOrProxyId},
+    beam_id::{self, AppId, BeamId, BrokerId, ProxyId, AppOrProxyId, BROKER_ID},
     errors::SamplyBeamError,
 };
 
@@ -191,10 +191,22 @@ impl crate::config::Config for Config {
 }
 
 fn parse_to_list_of_ids(input: Option<String>) -> Result<Option<Vec<AppOrProxyId>>, SamplyBeamError> {
+    let broker_id = BROKER_ID.get().expect("Should be set before parsing beam ids");
     if let Some(app_list_str) = input {
-        Ok(Some(serde_json::from_str(&app_list_str).map_err(|e| SamplyBeamError::ConfigurationFailed(
-            format!("Failed to parse: {app_list_str} to a list of beam ids: {e}.\n The requiered format is a json array of strings that match the beam id spec see the system architecture section in the readme.")
-        ))?))
+        let Ok(strings): Result<Vec<String>, _> = serde_json::from_str(&app_list_str) else {
+            return Err(SamplyBeamError::ConfigurationFailed(format!("Failed to parse {app_list_str} as a json array.")));
+        };
+        Ok(Some(strings.into_iter()
+            .map(|mut id| {
+                id.push('.');
+                id.push_str(broker_id);
+                id.parse()
+            })
+            .collect::<Result<_, _>>()
+            .map_err(|e| SamplyBeamError::ConfigurationFailed(
+                format!("Failed to parse {app_list_str} to a list of beam ids: {e}")
+            ))?
+        ))
     } else {
         Ok(None)
     }
@@ -242,7 +254,7 @@ mod tests {
         const BROKER_ID: &str = "broker";
         BrokerId::set_broker_id(BROKER_ID.to_string());
         assert_eq!(
-            parse_to_list_of_ids(Some(r#"["app1.proxy1.broker", "proxy1.broker"]"#.to_string())).unwrap(),
+            parse_to_list_of_ids(Some(r#"["app1.proxy1", "proxy1"]"#.to_string())).unwrap(),
             Some(vec![AppOrProxyId::AppId(AppId::new("app1.proxy1.broker").unwrap()),AppOrProxyId::ProxyId(ProxyId::new("proxy1.broker").unwrap())])
         );
         assert_eq!(parse_to_list_of_ids(None).unwrap(), None);
