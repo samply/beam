@@ -50,9 +50,9 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{auth::AuthenticatedApp, PROXY_TIMEOUT};
 
 #[derive(Clone, FromRef)]
-struct TasksState {
-    client: SamplyHttpClient,
-    config: config_proxy::Config,
+pub(crate) struct TasksState {
+    pub(crate) client: SamplyHttpClient,
+    pub(crate) config: config_proxy::Config,
 }
 
 pub(crate) fn router(client: &SamplyHttpClient) -> Router {
@@ -85,7 +85,7 @@ const ERR_FAKED_FROM: (StatusCode, &str) = (
     "You are not authorized to send on behalf of this app.",
 );
 
-async fn forward_request(
+pub(crate) async fn forward_request(
     mut req: Request<Body>,
     config: &config_proxy::Config,
     sender: &AppId,
@@ -122,7 +122,7 @@ async fn forward_request(
     Ok(resp)
 }
 
-async fn handler_task(
+pub(crate) async fn handler_task(
     State(client): State<SamplyHttpClient>,
     State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
@@ -325,7 +325,7 @@ async fn handler_tasks_stream(
     Ok(sse)
 }
 
-fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, (StatusCode, &'static str)> {
+pub(crate) fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, (StatusCode, &'static str)> {
     res.map_err(|e| match e {
         SamplyBeamError::JsonParseError(e) => {
             warn!("{e}");
@@ -337,7 +337,7 @@ fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, (StatusCode,
         },
         SamplyBeamError::SignEncryptError(_) => ERR_INTERNALCRYPTO,
         e => {
-            warn!("Unhandeled error {e}");
+            warn!("Unhandled error {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "Unknown error")
         }
     })
@@ -413,7 +413,7 @@ pub async fn sign_request(
 }
 
 #[async_recursion::async_recursion]
-async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
+pub(crate) async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
     // It might be possible to use MsgSigned directly instead but there are issues impl Deserialize for MsgSigned<EncryptedMessage>
     #[derive(Deserialize)]
     struct MsgSignedHelper {
@@ -487,7 +487,7 @@ async fn encrypt_request(
         return Err(ERR_FAKED_FROM);
     }
     let body = encrypt_msg(msg).await.map_err(|e| {
-        warn!("Encryption faild with: {e}");
+        warn!("Encryption failed with: {e}");
         ERR_INTERNALCRYPTO
     })?;
     Ok((body, parts))

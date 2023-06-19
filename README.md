@@ -6,7 +6,7 @@ Samply.Beam is a distributed task broker designed for efficient communication ac
 
 ## Latest version: Samply.Beam 0.6.1 &ndash; 2023-04-11
 
-This minor easter update is just a maintainance release. We updated our time-parsing dependency [fundu](https://crates.io/crates/fundu) to the next major version and fixed a bug in our CI/CD pipeline. With this fix, the project description is now correctly sent to Docker Hub. Internally, we improved the formatting of the source code.
+This minor easter update is just a maintenance release. We updated our time-parsing dependency [fundu](https://crates.io/crates/fundu) to the next major version and fixed a bug in our CI/CD pipeline. With this fix, the project description is now correctly sent to Docker Hub. Internally, we improved the formatting of the source code.
 
 Find info on all previous versions in the [Changelog](CHANGELOG.md).
 
@@ -137,6 +137,48 @@ curl -k -X GET -v -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey"
 
 This *long polling* opens the connection and sleeps until a reply is received. For more information, see the API documentation.
 
+### Using sockets
+> Only available on builds of beam with the `sockets` feature 
+```python
+import requests
+import threading
+import socket
+
+data = b"Hello beam sockets!"
+
+# App running in a beam network with proxy1 available at localhost:8081
+def app1():
+    # Post socket request to client
+    res = requests.post("http://localhost:8081/v1/sockets/app2.proxy2.broker", headers = {
+        "Upgrade": "tcp",
+        "Authorization": "ApiKey app1.proxy1.broker App1Secret"
+    }, stream=True)
+    # Get the underlying socket connection
+    stream = socket.fromfd(res.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
+    # Send some data
+    stream.send(data)
+
+# App running in a beam network with proxy2 available at localhost:8082
+def app2():
+    # Poll for incoming socket requests
+    socket_task_id = requests.get("http://localhost:8082/v1/sockets", headers={
+        "Authorization": "ApiKey app2.proxy2.broker App1Secret"
+    }).json()[0]["id"]
+    # Connect to the given id of the socket request
+    res = requests.get(f"http://localhost:8082/v1/sockets/{socket_task_id}", headers={
+        "Authorization": "ApiKey app2.proxy2.broker App1Secret",
+        "Upgrade": "tcp",
+    }, stream=True)
+    # Get the underlying socket connection
+    stream = socket.fromfd(res.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
+    # Receive the data send by the other client
+    assert stream.recv(len(data)) == data
+
+threading.Thread(target=app1).start()
+threading.Thread(target=app2).start()
+```
+
+
 ## Data objects (JSON)
 
 ### Task
@@ -215,6 +257,22 @@ A failed task:
 - `body`: Supported and required for all `status`es except for `claimed`. Either carries the actual result payload of the task in case the status is `succeeded` or an error message.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Task](#task)) and is not encrypted.
 
+### Socket Task
+> Only available on builds of beam with the `sockets` feature 
+
+```json
+{
+    "from": "app1.proxy1.broker",
+    "to": ["app2.proxy2.broker"],
+    "id": "<socket_uuid>",
+    "ttl": "60s",
+}
+```
+
+- `from`: BeamID of the client who requested the socket connection
+- `to`: BeamIDs of the intended recipients. For this type of Task this is guaranteed to be be exactly one.
+- `id`: A UUID v4 which identifies the socket connection and is used by the recipient to connect to this socket (see [here](#connecting-to-a-socket-request)).
+- `ttl`: The time too live of this socket task. After this time has elapsed the recipient can no longer connect to the socket. (Already established connections are not effected)
 ## API
 
 ### Create task
@@ -315,7 +373,7 @@ Date: Mon, 27 Jun 2022 14:26:45 GMT
 As part of making this API performant, all reading endpoints support long-polling as an efficient alternative to regular (repeated) polling. Using this function requires the following parameters:
 
 - `wait_count`: The API call will block until this many results are available ...
-- `wait_time`: ... or this time has passed (if not stated differntly, e.g., by adding 'm', 'h', 'ms', ..., this is interpreted as seconds), whichever comes first.
+- `wait_time`: ... or this time has passed (if not stated differently, e.g., by adding 'm', 'h', 'ms', ..., this is interpreted as seconds), whichever comes first.
 
 For example, retrieving a task's results:
 
@@ -398,6 +456,48 @@ HTTP/1.1 503
 }
 ```
 
+### Socket connections
+> Note: Only available on builds with the feature `sockets` enabled. Both proxy and broker need to be built with this flag. There are also prebuild docker images available with this feature.
+
+All API requests require the usual authentication header (see [getting started section](#getting-started)).
+
+#### Initialize a socket connection
+Initialize a socket connection with an Beam application, e.g. with AppId `app2.proxy2.broker`:
+
+Method: `POST`  
+URL: `/v1/sockets/<app_id>`  
+Header: `Upgrade` is required
+
+This request will automatically lead to a connection to the other app, after it answers this request.
+
+#### Receive and answer a socket request
+To receive socket connections, the Beam.Proxy needs to be polled for incoming connections.
+This endpoint also supports the [long polling](#long-polling-api-access) query string semantics.
+
+Method: `GET`  
+URL: `/v1/sockets`
+Parameters:
+ * The same parameters as for long-polling, i.e. to, from, filter=todo, wait_count, and wait_time are supported.
+
+Returns an array of JSON objects:
+``` json
+[
+    {
+        "from": "app1.proxy1.broker",
+        "to": ["app2.proxy2.broker"]
+        "id": "<socket_uuid>",
+        "ttl": "60s",
+    }
+]
+```
+
+#### Connecting to a socket request
+After the connection negotiation above, the App can proceed to connect to the socket:
+
+Method: GET  
+URL: `/v1/sockets/<socket_uuid>`
+
+
 ## Development Environment
 
 A dev environment is provided consisting of one broker and two proxies.
@@ -422,6 +522,8 @@ docker-compose logs -f
 Confirm that your setup works by running `./dev/test noci`, which runs the tests against your instances.
 
 To work with the environment, you may run `./dev/beamdev defaults` to see some helpful values, including the dev default URLs and a working authentication header.
+
+To run the dev setup with additional cargo flags like feature flags or the release flag you may run `dev/beamdev start <cargo flags>`, i.e. `dev/beamdev start --features sockets`.
 
 ## Production Environment & Certificate Infrastructure
 
@@ -465,7 +567,7 @@ Both the Broker and the Proxy respect the log level in the `RUST_LOG` environmen
 
 Samply.Beam encrypts all information in the `body` fields of both Tasks and Results. The data is encryted in the Samply.Proxy before forwarding to the Beam.Broker. Similarly, the decryption takes place in the Beam.Proxy as well. This is in addition to the transport encryption (TLS) and different in that even the broker is unable to decipher the message's content fields.
 
-The data is symmetrically encrypted using the Autheticated Encryption with Authenticated Data (AEAD) algorithm "XChaCha20Poly1305", a widespread algorithm (e.g., mandatory for the TLS protocol), regarded as highly secure by experts. The used [chacha20poly1305 library](https://docs.rs/chacha20poly1305/latest/chacha20poly1305/) was sublected to a [security audit](https://research.nccgroup.com/2020/02/26/public-report-rustcrypto-aes-gcm-and-chacha20poly1305-implementation-review/), with no significant findings. The randomly generated symmetric keys are encapsulated in a RSA encrypted ciphertext using OAEP Padding. This ensures, that only the intended recipients can decrypt the key and subsequently the transfered data.
+The data is symmetrically encrypted using the Authenticated Encryption with Authenticated Data (AEAD) algorithm "XChaCha20Poly1305", a widespread algorithm (e.g., mandatory for the TLS protocol), regarded as highly secure by experts. The used [chacha20poly1305 library](https://docs.rs/chacha20poly1305/latest/chacha20poly1305/) was sublected to a [security audit](https://research.nccgroup.com/2020/02/26/public-report-rustcrypto-aes-gcm-and-chacha20poly1305-implementation-review/), with no significant findings. The randomly generated symmetric keys are encapsulated in a RSA encrypted ciphertext using OAEP Padding. This ensures, that only the intended recipients can decrypt the key and subsequently the transferred data.
 
 ## Roadmap
 

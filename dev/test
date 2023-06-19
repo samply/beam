@@ -19,16 +19,21 @@ function test() {
     echo "=> $(basename $test) ..."
     source $test
   done
+  
   echo -e "  ${COL_GREEN}All tests have completed successfully.${COL_NONE}"
 }
 
 case "$1" in
   noci)
     test
+    shift
+    cargo test $@
     ;;
   ci)
     start
     test
+    shift
+    cargo test $@
     ;;
   *)
     echo "Usage: $0 noci|ci"

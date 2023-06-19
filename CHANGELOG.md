@@ -1,6 +1,6 @@
 # Samply.Beam 0.6.1 -- 2023-04-11
 
-This minor easter update is just a maintainance release. We updated our time-parsing dependency [fundu](https://crates.io/crates/fundu) to the next major version and fixed a bug in our CI/CD pipeline. With this fix, the project description is now correctly sent to Docker Hub. Internally, we improved the formatting of the source code.
+This minor easter update is just a maintenance release. We updated our time-parsing dependency [fundu](https://crates.io/crates/fundu) to the next major version and fixed a bug in our CI/CD pipeline. With this fix, the project description is now correctly sent to Docker Hub. Internally, we improved the formatting of the source code.
 
 # Samply.Beam 0.6.0 -- 2023-03-30
 
@@ -41,7 +41,7 @@ This change is incompatible with older versions of Samply.Beam, so please update
 
 # Samply.Beam 0.4.2 -- 2023-02-01
 
-In this first minor relase of the year, the following minor improvements were implemented:
+In this first minor release of the year, the following minor improvements were implemented:
 
 * The default log level is now "info", instead of "error"
 * The error handling, especially regarding proxy certificate validation, has been improved

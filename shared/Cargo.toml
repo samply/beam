@@ -56,10 +56,15 @@ clap = { version = "4.0.12", features = ["env", "derive"] }
 http = "0.2.8"
 fundu = "1.0.0"
 
+# expire map dependencies
+dashmap =  { version = "5.4", optional = true}
+
 [dev-dependencies]
 tokio-test = "0.4.2"
 
 [features]
+expire_map = ["dep:dashmap"]
+sockets = ["expire_map"]
 default = []
 config-for-proxy = []
 config-for-central = []

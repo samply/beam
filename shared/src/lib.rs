@@ -20,7 +20,7 @@ use tracing::debug;
 use std::{
     fmt::{Debug, Display},
     ops::Deref,
-    time::{Duration, Instant, SystemTime}, error::Error,
+    time::{Duration, Instant, SystemTime}, net::SocketAddr, error::Error,
 };
 
 use rand::Rng;
@@ -32,6 +32,8 @@ use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
 
 use crate::{crypto_jwt::JWT_VERIFICATION_OPTIONS, serde_helpers::*};
+// Reexport b64 implementation
+pub use jwt_simple::reexports::ct_codecs;
 
 pub type MsgId = MyUuid;
 pub type MsgType = String;
@@ -50,7 +52,12 @@ pub mod config_shared;
 pub mod config_broker;
 // #[cfg(feature = "config-for-proxy")]
 pub mod config_proxy;
-
+#[cfg(feature = "expire_map")]
+pub mod expire_map;
+#[cfg(feature = "sockets")]
+mod sockets;
+#[cfg(feature = "sockets")]
+pub use sockets::*;
 pub mod beam_id;
 pub mod graceful_shutdown;
 pub mod http_client;
@@ -150,7 +157,7 @@ impl<M: Msg + DeserializeOwned> MsgSigned<M> {
     pub async fn verify(token: &str) -> Result<Self, SamplyBeamError> {
         let msg = extract_jwt(token).await?.2.custom;
 
-        debug!("Message has been verified succesfully.");
+        debug!("Message has been verified successfully.");
         Ok(MsgSigned {
             msg,
             jwt: token.to_string(),
@@ -181,15 +188,17 @@ impl Msg for MsgEmpty {
     }
 }
 
+
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MessageType<State>
 where
     State: MsgState,
 {
-    // Maybe add MessageSigned and Encrypted versions
     MsgTaskRequest(MsgTaskRequest<State>),
     MsgTaskResult(MsgTaskResult<State>),
+    #[cfg(feature = "sockets")]
+    MsgSocketRequest(sockets::MsgSocketRequest<State>),
     MsgEmpty(MsgEmpty),
 }
 
@@ -204,6 +213,8 @@ impl EncryptableMsg for PlainMessage {
             Self::MsgTaskRequest(m) => Self::Output::MsgTaskRequest(m.convert_self(body)),
             Self::MsgTaskResult(m) => Self::Output::MsgTaskResult(m.convert_self(body)),
             Self::MsgEmpty(m) => Self::Output::MsgEmpty(m),
+            #[cfg(feature = "sockets")]
+            Self::MsgSocketRequest(m) => Self::Output::MsgSocketRequest(m.convert_self(body))
         }
     }
 
@@ -212,14 +223,12 @@ impl EncryptableMsg for PlainMessage {
             Self::MsgTaskRequest(m) => m.get_plain(),
             Self::MsgTaskResult(m) => m.get_plain(),
             Self::MsgEmpty(_) => &Plain { body: None },
+            #[cfg(feature = "sockets")]
+            Self::MsgSocketRequest(m) => m.get_plain(),
         }
     }
 }
 
-const MESSAGE_EMPTY_ENCRYPTION: &Encrypted = &Encrypted {
-    encrypted: Vec::new(),
-    encryption_keys: Vec::new(),
-};
 
 impl DecryptableMsg for EncryptedMessage {
     type Output = PlainMessage;
@@ -229,14 +238,18 @@ impl DecryptableMsg for EncryptedMessage {
             Self::MsgTaskRequest(m) => Self::Output::MsgTaskRequest(m.convert_self(body)),
             Self::MsgTaskResult(m) => Self::Output::MsgTaskResult(m.convert_self(body)),
             Self::MsgEmpty(m) => Self::Output::MsgEmpty(m),
+            #[cfg(feature = "sockets")]
+            Self::MsgSocketRequest(m) => Self::Output::MsgSocketRequest(m.convert_self(body))
         }
     }
 
-    fn get_encryption(&self) -> &Encrypted {
+    fn get_encryption(&self) -> Option<&Encrypted> {
         match self {
             Self::MsgTaskRequest(m) => m.get_encryption(),
             Self::MsgTaskResult(m) => m.get_encryption(),
-            Self::MsgEmpty(_) => MESSAGE_EMPTY_ENCRYPTION,
+            Self::MsgEmpty(_) => None,
+            #[cfg(feature = "sockets")]
+            Self::MsgSocketRequest(m) => m.get_encryption(),
         }
     }
 }
@@ -247,6 +260,8 @@ impl<T: MsgState> Msg for MessageType<T> {
         match self {
             MsgTaskRequest(m) => m.get_from(),
             MsgTaskResult(m) => m.get_from(),
+            #[cfg(feature = "sockets")]
+            MsgSocketRequest(m) => m.get_from(),
             MsgEmpty(m) => m.get_from(),
         }
     }
@@ -255,6 +270,8 @@ impl<T: MsgState> Msg for MessageType<T> {
         use MessageType::*;
         match self {
             MsgTaskRequest(m) => m.get_to(),
+            #[cfg(feature = "sockets")]
+            MsgSocketRequest(m) => m.get_to(),
             MsgTaskResult(m) => m.get_to(),
             MsgEmpty(m) => m.get_to(),
         }
@@ -265,6 +282,8 @@ impl<T: MsgState> Msg for MessageType<T> {
         match self {
             MsgTaskRequest(m) => m.get_metadata(),
             MsgTaskResult(m) => m.get_metadata(),
+            #[cfg(feature = "sockets")]
+            MsgSocketRequest(m) => m.get_metadata(),
             MsgEmpty(m) => m.get_metadata(),
         }
     }
@@ -273,7 +292,7 @@ impl<T: MsgState> Msg for MessageType<T> {
 pub trait DecryptableMsg: Msg + Serialize + Sized {
     type Output: Msg + DeserializeOwned;
 
-    fn get_encryption(&self) -> &Encrypted;
+    fn get_encryption(&self) -> Option<&Encrypted>;
     fn convert_self(self, body: String) -> Self::Output;
 
     /// Decrypts an encrypted message. Caution: can panic.
@@ -283,10 +302,14 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
         my_id: &AppOrProxyId,
         my_priv_key: &RsaPrivateKey,
     ) -> Result<Self::Output, SamplyBeamError> {
-        let Encrypted {
+        let Some(Encrypted {
             encrypted,
             encryption_keys,
-        } = self.get_encryption();
+        }) = self.get_encryption() else {
+            // We have something that is not encryptable
+            return Ok(self.convert_self(String::new()));
+        };
+
         let to_array_index: usize = self
             .get_to()
             .iter()
@@ -377,7 +400,7 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
         // Encrypt fields content
         let cipher = XChaCha20Poly1305::new(&symmetric_key);
 
-        // I cant belive there is no better way
+        // I cant believe there is no better way
         let default = String::new();
         let plaintext = self.get_plain().body.as_ref().unwrap_or(&default);
 
@@ -445,7 +468,11 @@ impl<T: MsgState> Msg for MsgTaskResult<T> {
 }
 
 
-pub trait MsgState: Serialize + Eq + PartialEq + Default {}
+pub trait MsgState: Serialize + Eq + PartialEq + Default {
+    fn is_empty(&self) -> bool {
+        false
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct Encrypted {
@@ -473,15 +500,19 @@ pub struct Plain {
 
 impl Debug for Plain {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut formated = f.debug_struct("Plain");
+        let mut formatted = f.debug_struct("Plain");
         match &self.body {
-            Some(body) if body.len() < 1000 => formated.field("body len", &body.len()),
-            _ => formated.field("body", &self.body),
+            Some(body) if body.len() < 1000 => formatted.field("body len", &body.len()),
+            _ => formatted.field("body", &self.body),
         }.finish()
     }
 }
 
-impl MsgState for Plain {}
+impl MsgState for Plain {
+    fn is_empty(&self) -> bool {
+        self.body.is_none()
+    }
+}
 
 impl<T: Into<String>> From<T> for Plain {
     fn from(val: T) -> Self {
@@ -566,8 +597,8 @@ impl DecryptableMsg for MsgTaskRequest<Encrypted> {
         }
     }
 
-    fn get_encryption(&self) -> &Encrypted {
-        &self.body
+    fn get_encryption(&self) -> Option<&Encrypted> {
+        Some(&self.body)
     }
 }
 
@@ -611,8 +642,8 @@ impl DecryptableMsg for MsgTaskResult<Encrypted> {
         }
     }
 
-    fn get_encryption(&self) -> &Encrypted {
-        &self.body
+    fn get_encryption(&self) -> Option<&Encrypted> {
+        Some(&self.body)
     }
 }
 
@@ -708,7 +739,7 @@ impl MsgTaskRequest {
 }
 
 // Don't compare expire, as it is constantly changing.
-// Todo Is the comparison of Results nessecary
+// Todo Is the comparison of Results necessary
 impl<T: MsgState> PartialEq for MsgTaskRequest<T> {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
