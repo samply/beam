@@ -251,11 +251,14 @@ mod tests {
 
     #[test]
     fn test_parse_app_list() {
-        const BROKER_ID: &str = "broker";
+        const BROKER_ID: &str = "broker.samply.de";
         BrokerId::set_broker_id(BROKER_ID.to_string());
         assert_eq!(
             parse_to_list_of_ids(Some(r#"["app1.proxy1", "proxy1"]"#.to_string())).unwrap(),
-            Some(vec![AppOrProxyId::AppId(AppId::new("app1.proxy1.broker").unwrap()),AppOrProxyId::ProxyId(ProxyId::new("proxy1.broker").unwrap())])
+            Some(vec![
+                AppOrProxyId::AppId(AppId::new(&format!("app1.proxy1.{BROKER_ID}")).unwrap()),
+                AppOrProxyId::ProxyId(ProxyId::new(&format!("proxy1.{BROKER_ID}")).unwrap())
+            ])
         );
         assert_eq!(parse_to_list_of_ids(None).unwrap(), None);
     }
