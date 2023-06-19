@@ -29,8 +29,15 @@ jobs:
         arch:
           - amd64
           - arm64
+        features:
+          - ""
+          - "sockets"
 
     steps:
+      - name: Print matrix vars
+        run: |
+          echo "Arch: ${{ matrix.arch }}"
+          echo "Features: ${{ matrix.features }}"
       - name: Set arch ${{ matrix.arch }}
         env:
           ARCH: ${{ matrix.arch }}
@@ -69,17 +76,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.arch }}-${{ env.PROFILE }}
-          prefix-key: "v1-rust" # Increase to invalidate old caches.
+          prefix-key: v1-rust-${{ matrix.features && format('features_{0}', matrix.features) || 'nofeatures' }} # Increase to invalidate old caches.
       - name: Build (${{ matrix.arch }})
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ env.is_cross }}
           command: build
-          args: --target ${{ env.rustarch }} ${{ env.profilestr }}
+          args: --target ${{ env.rustarch }} ${{ matrix.features && format('--features {0}', matrix.features) }} ${{ env.profilestr }}
       - name: Upload Artifact
         uses: actions/upload-artifact@v3
         with:
-          name: binaries-${{ matrix.arch }}
+          name: binaries-${{ matrix.arch }}-${{ matrix.features }}
           path: |
             target/${{ env.rustarch }}/${{ env.PROFILE }}/proxy
             target/${{ env.rustarch }}/${{ env.PROFILE }}/broker
@@ -89,62 +96,50 @@ jobs:
     needs: [ build-rust ]
     runs-on: ubuntu-22.04
 
+    strategy:
+      matrix:
+        features:
+          - ""
+          - "sockets"
+
     steps:
       - uses: actions/checkout@v3
       - uses: actions/download-artifact@v3
         with:
-          name: binaries-amd64
+          name: binaries-amd64-${{ matrix.features }}
           path: artifacts/binaries-amd64/
-      - run: ./dev/test ci
+      - run: ./dev/test ci ${{ matrix.features && format('--features {0}', matrix.features) }}
 
-  docker-broker:
+  docker:
     needs: [ build-rust, pre-check, test ]
+
+    strategy:
+      matrix:
+        components:
+          - broker
+          - proxy
+        features:
+          - ""
+          - "sockets"
+
     # This workflow defines how a maven package is built, tested and published.
     # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
     uses: samply/github-workflows/.github/workflows/docker-ci.yml@main
     with:
       # The Docker Hub Repository you want eventually push to, e.g samply/share-client
-      image-name: "samply/beam-broker"
+      image-name: "samply/beam-${{ matrix.components }}"
+      image-tag-suffix: ${{ matrix.features && format('-{0}', matrix.features) }}
       # Define special prefixes for docker tags. They will prefix each images tag.
       # image-tag-prefix: "foo"
       # Define the build context of your image, typically default '.' will be enough
       # build-context: '.'
       # Define the Dockerfile of your image, typically default './Dockerfile' will be enough
-      build-file: './Dockerfile.ci.broker'
+      build-file: './Dockerfile'
       # NOTE: This doesn't work currently
       # A list of build arguments, passed to the docker build
-#      build-args: |
-#        PROFILE=${{ env.PROFILE }}
-#        COMPONENT=broker
-      # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
-      # build-platforms: "linux/amd64"
-      # If your actions generate an artifact in a previous build step, you can tell this workflow to download it
-      artifact-name: '*'
-    # This passes the secrets from calling workflow to the called workflow
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-
-  # NOTE: Repetition currently necessary. Reusable workflows are not runable with strategy matrix. See: https://stackoverflow.com/a/70173578, workaround could be later implemented: https://github.community/t/reusable-workflow-with-strategy-matrix/205676
-  docker-proxy:
-    needs: [ build-rust, pre-check, test ]
-    # This workflow defines how a maven package is built, tested and published.
-    # Visit: https://github.com/samply/github-workflows/blob/develop/.github/workflows/docker-ci.yml, for more information
-    uses: samply/github-workflows/.github/workflows/docker-ci.yml@main
-    with:
-      # The Docker Hub Repository you want eventually push to, e.g samply/share-client
-      image-name: "samply/beam-proxy"
-      # Define special prefixes for docker tags. They will prefix each images tag.
-      # image-tag-prefix: "foo"
-      # Define the build context of your image, typically default '.' will be enough
-      # build-context: '.'
-      # Define the Dockerfile of your image, typically default './Dockerfile' will be enough
-      build-file: './Dockerfile.ci.proxy'
-      # NOTE: This doesn't work currently
-      # A list of build arguments, passed to the docker build
-#      build-args: |
-#        PROFILE=${{ env.PROFILE }}
-#        COMPONENT=broker
+      build-args: |
+        FEATURE=-${{ matrix.features }}
+        COMPONENT=${{ matrix.components }}
       # Define the target platforms of the docker build (default "linux/amd64,linux/arm64/v8")
       # build-platforms: "linux/amd64"
       # If your actions generate an artifact in a previous build step, you can tell this workflow to download it

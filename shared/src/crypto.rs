@@ -329,7 +329,7 @@ impl CertificateCache {
             let opensslcert = match X509::from_pem(certificate.as_bytes()) {
                 Ok(x) => x,
                 Err(err) => {
-                    error!("Skipping unparseable certificate {serial}: {err}");
+                    error!("Skipping unparsable certificate {serial}: {err}");
                     continue;
                 }
             };

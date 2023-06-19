@@ -64,7 +64,7 @@ struct CliArgs {
 #[allow(dead_code)]
 pub struct Config {
     pub(crate) tls_ca_certificates_dir: Option<PathBuf>,
-    pub(crate) broker_domain: String,
+    pub broker_domain: String,
     pub root_cert: X509,
     pub tls_ca_certificates: Vec<X509>,
 }

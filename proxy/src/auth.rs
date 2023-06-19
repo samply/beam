@@ -10,8 +10,8 @@ use hyper::{
     Request, StatusCode,
 };
 use shared::{
-    beam_id::{AppId, BeamId},
-    config, config_proxy,
+    beam_id::{AppId, BeamId, AppOrProxyId},
+    config, config_proxy, middleware::ProxyLogger,
 };
 
 use tracing::debug;
@@ -45,6 +45,9 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedApp {
                 return Err(UNAUTH_ERR);
             }
             debug!("Request authenticated (ClientID {})", client_id);
+            _ = parts.extensions.remove::<ProxyLogger>()
+                .expect("Added by middleware")
+                .send(AppOrProxyId::AppId(client_id.clone()));
             Ok(Self(client_id))
         } else {
             Err(UNAUTH_ERR)
