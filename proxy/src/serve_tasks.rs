@@ -486,6 +486,8 @@ async fn encrypt_request(
                 match val {
                     MessageType::MsgTaskRequest(ref mut m) => m.to.retain(|to| CONFIG_PROXY.permission_manager.allowed_to_send(to)),
                     MessageType::MsgTaskResult(ref mut m) => m.to.retain(|to| CONFIG_PROXY.permission_manager.allowed_to_send(to)),
+                    #[cfg(feature = "sockets")]
+                    MessageType::MsgSocketRequest(ref mut m) => m.to.retain(|to| CONFIG_PROXY.permission_manager.allowed_to_send(to)),
                     MessageType::MsgEmpty(..) => (),
                 };
                 if !matches!(val, MessageType::MsgEmpty(..)) {
