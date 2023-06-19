@@ -459,6 +459,33 @@ Next, send the CSR to the central CA's administrator for signing and enrolling t
 
 Both the Broker and the Proxy respect the log level in the `RUST_LOG` environment variable. E.g., `RUST_LOG=debug` enables debug outputs. Warning: the `trace` log level is *very* noisy.
 
+## Restricting accesses
+We have a black/whitelisting option that can be used to restrict traeffic to and from a given proxy. The lists contains a json array of app or proxy ids (see [system architecture](#system-architecture)). Setting a proxy id will permit or allow, dpending on the kind of list, all apps from the given proxy while the app id will only do that for the specific app.
+
+Restrinction logic will follow these rules:
+- Only a whitelist is set -> Traeffic is permitted according to the whitelist
+- Only a blacklist is set -> Traeffic is denied according to the blacklist
+- Neither white nor blacklist -> All traeffic is permitted
+- A white and blacklist is set -> The whitelist will be used as an **exception** to the blacklist
+
+> Note: All config options may also be set via environment variables matching the cli argument name in uppercase with `-` repplaced by `_`.
+### Deny receiving messages from other proxies
+This is done by setting `allowed-remotes` and/or `blocked-remotes` options accordingly as described in [Restricting access](#restricting-accesses).
+
+Example:
+```bash
+./proxy ... --allowed-remotes='["app1.proxy1", "proxy2"]'
+```
+
+### Deny sending messages to specific proxies
+This is done by setting `allowed-receivers` and/or `blocked-receivers` options accordingly as described in [Restricting access](#restricting-accesses).
+> Note: When all receivers of a message are being blocked due to these restrictions the proxy will return a status code of 422 Unprocessable Entity.
+
+Example:
+```bash
+./proxy ... --allowed-receivers='["app1.proxy1", "proxy2"]'
+```
+
 ## Technical Background Information
 
 ### End-to-End Encryption
