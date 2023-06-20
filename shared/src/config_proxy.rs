@@ -72,13 +72,7 @@ pub struct CliArgs {
 
 pub const APP_PREFIX: &str = "APP";
 
-/// Parses legacy API-Keys from the environment:
-/// APP_0_ID=app1
-/// APP_0_KEY=App1Secret
-/// APP_1_ID=app2
-/// APP_1_KEY=App2Secret
-/// 
-/// and new API-Keys like:
+/// Parses API-Keys from the environment like:
 /// APP_app1_KEY=App1Secret
 /// APP_app2_KEY=App2Secret
 fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBeamError> {
