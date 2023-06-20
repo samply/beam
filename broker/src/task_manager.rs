@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     ops::Deref,
-    time::{Duration, SystemTime}, collections::HashMap, sync::Arc,
+    time::{Duration, SystemTime}, collections::HashMap, sync::Arc, convert::Infallible,
 };
 
 use axum::{response::{IntoResponse, sse::Event, Sse}, Json};
@@ -10,6 +10,7 @@ use futures_core::Stream;
 use hyper::StatusCode;
 use once_cell::sync::Lazy;
 use serde::Serialize;
+use serde_json::json;
 use shared::{
     beam_id::AppOrProxyId, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned,
     MsgState, MsgTaskRequest, MsgTaskResult, sse_event::SseEventType,
@@ -82,7 +83,12 @@ impl<T: HasWaitId<MsgId> + Task + Msg + Send + Sync + 'static> TaskManager<T> {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Self::EXPIRE_CHECK_INTERVAL).await;
-                tm.tasks.retain(|_, task| !task.msg.is_expired());
+                tm.tasks.retain(|_, task| if task.msg.is_expired() {
+                    tm.new_results.remove(&task.msg.wait_id());
+                    false
+                } else {
+                    true
+                });
                 // If the memory footprint of the Dashmap will get too large we might need to consider calling DashMap::shrink_to_fit or find a better solution as
                 // this would need to lock the whole map making it inaccessible until everything is reallocated
             }
@@ -187,7 +193,7 @@ where
         let mut new_results = self
             .new_results
             .get(task_id)
-            .ok_or(TaskManagerError::NotFound)?
+            .expect("Found task but no coresponding results channel")
             .subscribe();
         while num_of_results < max_elements && Instant::now() < wait_until {
             tokio::select! {
@@ -214,7 +220,10 @@ where
             }
         }
 
-        Ok(self.get(task_id).map_err(|_| TaskManagerError::Gone)?)
+        // Somehow mapping this task to its results creates lifetime issues that I failed to solve.
+        // So the caller needs to get the results himself which is not to bad I guess.
+        // FIXME: Return results here
+        self.get(task_id).map_err(|_| TaskManagerError::Gone)
     }
 
     pub fn stream_results<'a>(
@@ -222,11 +231,14 @@ where
         task_id: &'a MsgId,
         block: &'a HowLongToBlock,
         filter: impl Fn(&T::Result) -> bool + 'a
-    ) -> Result<impl Stream<Item = Result<Event, TaskManagerError>> + 'a, TaskManagerError>
+    ) -> impl Stream<Item = Result<Event, Infallible>> + 'a
         where T::Result: Serialize
     {
-        let task = self.get(task_id)?;
-        Ok(async_stream::stream! {
+        async_stream::stream! {
+            let Ok(task) = self.get(task_id) else {
+                yield Ok(to_event("Did not find task", SseEventType::Error));
+                return;
+            };
             let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
             let wait_until = Instant::now() + block.wait_time.unwrap_or(Duration::from_secs(600));
             let ready_results = task.msg
@@ -244,11 +256,12 @@ where
             let mut new_results = self
                 .new_results
                 .get(task_id)
-                .ok_or(TaskManagerError::NotFound)?
+                .expect("Found task but no coresponding results channel")
                 .subscribe();
             while num_of_results < max_elements && Instant::now() < wait_until {
                 tokio::select! {
                     _ = tokio::time::sleep_until(wait_until) => {
+                        yield Ok(to_event((), SseEventType::WaitExpired));
                         break;
                     },
                     result = new_results.recv() => {
@@ -261,31 +274,31 @@ where
                                         yield Ok(to_event(new_result, SseEventType::NewResult));
                                     };
                                 } else {
-                                    yield Err(TaskManagerError::Gone);
+                                    yield Ok(to_event(json!({"task_id": task_id}), SseEventType::DeletedTask));
                                 }
                             },
                             Err(e) => {
                                 warn!("new_results channel lagged: {e}");
-                                yield Err(TaskManagerError::BroadcastBufferOverflow);
+                                yield Ok(to_event("Internal server error", SseEventType::Error));
                             }
                         }
                     },
                 }
             }
-        })
+        }
     }
 
-    /// This will push the result to the given task by its id
-    /// Returns true if the given task exists false otherwise
-    pub fn put_result(&self, task_id: &MsgId, result: T::Result) -> Result<(), TaskManagerError> {
-        let Some(mut entry) = self.tasks.get_mut(task_id) else {
+    /// This will push the result to the given task by its id.
+    /// Returns true if the given result was an update to an existing result
+    pub fn put_result(&self, task_id: &MsgId, result: T::Result) -> Result<bool, TaskManagerError> {
+        let Some(mut task) = self.tasks.get_mut(task_id) else {
             return Err(TaskManagerError::NotFound);
         };
-        if !entry.get_to().contains(result.get_from()) {
+        if !task.get_to().contains(result.get_from()) {
             return Err(TaskManagerError::Unauthorized);
         }
         let sender = result.get_from().clone();
-        entry.msg.insert_result(result);
+        let is_updated = task.msg.insert_result(result);
         // We dont care if noone is listening
         _ = self
             .new_results
@@ -294,10 +307,11 @@ where
                 "This task id must be present because it is present at the start of the function",
             )
             .send(sender);
-        Ok(())
+        Ok(is_updated)
     }
 }
 
+#[derive(Debug)]
 pub enum TaskManagerError {
     NotFound,
     Conflict,

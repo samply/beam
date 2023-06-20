@@ -17,7 +17,7 @@ use serde::Deserialize;
 use shared::{
     beam_id::AppOrProxyId, config, errors::SamplyBeamError, sse_event::SseEventType,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg, MsgEmpty,
-    MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, WorkStatus, EMPTY_VEC_APPORPROXYID,
+    MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, WorkStatus, EMPTY_VEC_APPORPROXYID, serde_helpers::DerefSerializer,
 };
 use tokio::{
     sync::{
@@ -28,23 +28,15 @@ use tokio::{
 };
 use tracing::{debug, error, info, trace, warn};
 
-use crate::expire;
+use crate::task_manager::TaskManager;
 
 #[derive(Clone)]
 struct TasksState {
-    tasks: Arc<RwLock<HashMap<MsgId, MsgSigned<EncryptedMsgTaskRequest>>>>,
-    new_task_tx: Arc<Sender<MsgSigned<EncryptedMsgTaskRequest>>>,
-    new_result_tx: Arc<RwLock<HashMap<MsgId, Sender<MsgSigned<EncryptedMsgTaskResult>>>>>,
-    removed_task_rx: Arc<Sender<MsgId>>,
+    task_manager: Arc<TaskManager<EncryptedMsgTaskRequest>>
 }
 
 pub(crate) fn router() -> Router {
     let state = TasksState::default();
-    let state2 = state.clone();
-    tokio::task::spawn(async move {
-        let err = expire::watch(state2.tasks.clone(), state2.new_task_tx.subscribe()).await;
-        error!("Internal error: expire() returned with error {:?}", err);
-    });
     Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
         .route("/v1/tasks/:task_id/results", get(get_results_for_task))
@@ -54,17 +46,8 @@ pub(crate) fn router() -> Router {
 
 impl Default for TasksState {
     fn default() -> Self {
-        let tasks: HashMap<MsgId, MsgSigned<EncryptedMsgTaskRequest>> = HashMap::new();
-        let (new_task_tx, _) =
-            tokio::sync::broadcast::channel::<MsgSigned<EncryptedMsgTaskRequest>>(512);
-
-        let tasks = Arc::new(RwLock::new(tasks));
-        let new_task_tx = Arc::new(new_task_tx);
         TasksState {
-            tasks,
-            new_task_tx,
-            new_result_tx: Arc::new(RwLock::new(HashMap::new())),
-            removed_task_rx: Arc::new(tokio::sync::broadcast::channel(512).0),
+            task_manager: TaskManager::new()
         }
     }
 }
@@ -76,7 +59,7 @@ async fn get_results_for_task(
     task_id: MsgId,
     headers: HeaderMap,
     msg: MsgSigned<MsgEmpty>,
-) -> Result<Response, (StatusCode, &'static str)> {
+) -> Response {
     let found = &headers
         .get(header::ACCEPT)
         .unwrap_or(&HeaderValue::from_static(""))
@@ -87,16 +70,15 @@ async fn get_results_for_task(
         .find(|part| *part == "text/event-stream")
         .is_some();
 
-    let result = if *found {
+    if *found {
         get_results_for_task_stream(addr, state, block, task_id, msg)
-            .await?
+            .await
             .into_response()
     } else {
         get_results_for_task_nostream(addr, state, block, task_id, msg)
-            .await?
+            .await
             .into_response()
-    };
-    Ok(result)
+    }
 }
 
 // GET /v1/tasks/:task_id/results
@@ -106,61 +88,27 @@ async fn get_results_for_task_nostream(
     block: HowLongToBlock,
     task_id: MsgId,
     msg: MsgSigned<MsgEmpty>,
-) -> Result<(StatusCode, Json<Vec<MsgSigned<EncryptedMsgTaskResult>>>), (StatusCode, &'static str)>
-{
+) -> Result<DerefSerializer, StatusCode> {
     debug!(
         "get_results_for_task(task={}) called by {} with IP {addr}, wait={:?}",
         task_id.to_string(),
         msg.get_from(),
         block
     );
+    if msg.get_from() != state.task_manager.get(&task_id)?.get_from() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
     let filter_for_me = MsgFilterNoTask {
         from: None,
         to: Some(msg.get_from()),
         mode: MsgFilterMode::Or,
     };
-    let (mut results, rx_new_result, rx_deleted_task) = {
-        let tasks = state.tasks.read().await;
-        let Some(task) = tasks.get(&task_id) else {
-            return Err((StatusCode::NOT_FOUND, "Task not found"));
-        };
-        if task.get_from() != msg.get_from() {
-            return Err((StatusCode::UNAUTHORIZED, "Not your task."));
-        }
-        let results: Vec<MsgSigned<EncryptedMsgTaskResult>> =
-            task.msg.results.values().cloned().collect();
-        let rx_new_result = match would_wait_for_elements(results.len(), &block) {
-            true => Some(
-                state
-                    .new_result_tx
-                    .read()
-                    .await
-                    .get(&task_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "Internal error: No new_result_tx found for task {}",
-                            task_id
-                        )
-                    })
-                    .subscribe(),
-            ),
-            false => None,
-        };
-        (results, rx_new_result, state.removed_task_rx.subscribe())
-    };
-    if let Some(rx) = rx_new_result {
-        wait_for_results_for_task(
-            &mut results,
-            &block,
-            rx,
-            move |m| filter_for_me.matches(m),
-            rx_deleted_task,
-            &task_id,
-        )
-        .await;
-    }
-    let statuscode = wait_get_statuscode(&results, &block);
-    Ok((statuscode, Json(results)))
+    let task_with_results = state.task_manager.wait_for_results(&task_id, &block, move |m| filter_for_me.matches(&m.msg)).await?;
+    
+    DerefSerializer::new(task_with_results.msg.results.values(), block.wait_count).map_err(|e| {
+        warn!("Failed to serialize task results: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 // GET /v1/tasks/:task_id/results/stream
@@ -170,278 +118,34 @@ async fn get_results_for_task_stream(
     block: HowLongToBlock,
     task_id: MsgId,
     msg: MsgSigned<MsgEmpty>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, &'static str)> {
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, StatusCode> {
     debug!(
         "get_results_for_task_stream(task={}) called by {} with IP {addr}, wait={:?}",
         task_id.to_string(),
         msg.get_from(),
         block
     );
-    let (mut results, rx_new_result, rx_deleted_task) = {
-        let tasks = state.tasks.read().await;
-        let Some(task) = tasks.get(&task_id) else {
-            return Err((StatusCode::NOT_FOUND, "Task not found"));
-        };
-        if task.get_from() != msg.get_from() {
-            return Err((StatusCode::UNAUTHORIZED, "Not your task."));
-        }
-        let results = task.msg.results.clone();
-        let rx_new_result = match would_wait_for_elements(results.len(), &block) {
-            true => Some(
-                state
-                    .new_result_tx
-                    .read()
-                    .await
-                    .get(&task_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "Internal error: No new_result_tx found for task {}",
-                            task_id
-                        )
-                    })
-                    .subscribe(),
-            ),
-            false => None,
-        };
-        (results, rx_new_result, state.removed_task_rx.subscribe())
-    };
+    let from = msg.get_from().clone();
+    if &from != state.task_manager.get(&task_id)?.get_from() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
 
+    // There must be a way to just use the stream of stream_results directly but I could not get it to work as the stream returned has a lifetime bound and this one somehow does not
     let stream = async_stream::stream! {
-        for (_from, result) in &results {
-            let event = Event::default()
-                .event(SseEventType::NewResult)
-                .json_data(result);
-            yield match event {
-                Ok(event) => Ok(event),
-                Err(err) => {
-                    error!("Unable to serialize message: {}; offending message was {:?}", err, result);
-                    Ok(Event::default()
-                        .event(SseEventType::Error)
-                        .data("Internal error: Unable to serialize message.")
-                    )
-                }
-            };
-        }
-        if let Some(rx_new_result) = rx_new_result {
-            let from = msg.get_from();
-            let filter_for_me = MsgFilterNoTask { from: None, to: Some(&from), mode: MsgFilterMode::Or };
-            let other_stream = wait_for_results_for_task_stream(&mut results, &block, rx_new_result, &filter_for_me, rx_deleted_task, &task_id).await;
-            for await event in other_stream {
-                yield event;
-            }
+        let filter = MsgFilterNoTask { from: None, to: Some(&from), mode: MsgFilterMode::Or };
+        let stream = state.task_manager.stream_results(
+            &task_id,
+            &block,
+            move |m| filter.matches(&m.msg)
+        );
+        for await event in stream {
+            yield event;
         }
     };
 
-    let sse = Sse::new(stream);
-
-    Ok(sse)
+    Ok(Sse::new(stream))
 }
 
-fn would_wait_for_elements(existing_elements: usize, block: &HowLongToBlock) -> bool {
-    usize::from(block.wait_count.unwrap_or(0)) > existing_elements
-}
-
-pub(crate) fn wait_get_statuscode<S>(vec: &Vec<S>, block: &HowLongToBlock) -> StatusCode {
-    if usize::from(block.wait_count.unwrap_or(0)) > vec.len() {
-        StatusCode::PARTIAL_CONTENT
-    } else {
-        StatusCode::OK
-    }
-}
-
-async fn wait_for_results_for_task_stream<'a, M: Msg, I: PartialEq>(
-    results: &'a mut HashMap<AppOrProxyId, M>,
-    block: &'a HowLongToBlock,
-    mut new_result_rx: Receiver<M>,
-    filter: &'a MsgFilterNoTask<'a>,
-    mut deleted_task_rx: Receiver<MsgId>,
-    task_id: &'a MsgId,
-) -> impl Stream<Item = Result<Event, Infallible>> + 'a
-where
-    M: Clone + HasWaitId<I> + Debug,
-{
-    let wait_until = time::Instant::now()
-        + block
-            .wait_time
-            .unwrap_or(time::Duration::from_secs(31536000));
-    trace!(
-        "Now is {:?}. Will wait until {:?}",
-        time::Instant::now(),
-        wait_until
-    );
-    let mut running = true;
-    let stream = async_stream::stream! {
-    while usize::from(block.wait_count.unwrap_or(0)) > results.len()
-        && time::Instant::now() < wait_until
-        && running {
-        trace!(
-            "Items in vec: {}, time remaining: {:?}",
-            results.len(),
-            wait_until - time::Instant::now()
-        );
-            tokio::select! {
-                _ = tokio::time::sleep_until(wait_until) => {
-                    debug!("SSE: Wait expired.");
-                    yield Ok(Event::default()
-                        .event(SseEventType::WaitExpired)
-                        .data("{}"));
-                    running = false;
-                },
-                result = new_result_rx.recv() => {
-                    match result {
-                        Ok(req) => {
-                            if filter.matches(&req) {
-                                let previous = results.insert(req.get_from().clone(), req.clone());
-                                let event_type = match previous {
-                                    Some(_) => SseEventType::UpdatedResult,
-                                    None => SseEventType::NewResult
-                                };
-                                let event = Event::default()
-                                    .event(event_type)
-                                    .json_data(&req);
-                                yield match event {
-                                    Ok(event) => Ok(event),
-                                    Err(err) => {
-                                        error!("Unable to serialize message: {}; offending message was {:?}", err, req);
-                                        Ok(Event::default()
-                                            .event(SseEventType::Error)
-                                            .data("Internal error: Unable to serialize message.")
-                                        )
-                                    }
-                                };
-                            }
-                        },
-                        Err(e) => { panic!("Unable to receive from queue new_result_rx: {}", e); }
-                    }
-                },
-                deleted_task_id = deleted_task_rx.recv() => {
-                    match deleted_task_id {
-                        Ok(deleted_task_id) => {
-                            if deleted_task_id == *task_id {
-                                warn!("Task {} was just deleted while someone was waiting for results. Returning the {} results up to now.", task_id, results.len());
-                                yield Ok(Event::default()
-                                    .event(SseEventType::DeletedTask)
-                                    .data("{ \"task_id\": \"{deleted_task_id}\" }"));
-                                running = false;
-                            }
-                        },
-                        Err(e) => { panic!("Unable to receive from queue deleted_task_rx: {}", e); }
-                    }
-                }
-            }
-        }
-    };
-    stream
-}
-
-// TODO: Is there a way to write this function in a generic way? (1/2)
-pub(crate) async fn wait_for_results_for_task<'a, M: Msg, I: PartialEq>(
-    vec: &mut Vec<M>,
-    block: &HowLongToBlock,
-    mut new_result_rx: Receiver<M>,
-    filter: impl Fn(&M) -> bool,
-    mut deleted_task_rx: Receiver<MsgId>,
-    task_id: &MsgId,
-) where
-    M: Clone + HasWaitId<I>,
-{
-    let wait_until = time::Instant::now()
-        + block
-            .wait_time
-            .unwrap_or(time::Duration::from_secs(31536000));
-    trace!(
-        "Now is {:?}. Will wait until {:?}",
-        time::Instant::now(),
-        wait_until
-    );
-    while usize::from(block.wait_count.unwrap_or(0)) > vec.len()
-        && time::Instant::now() < wait_until
-    {
-        trace!(
-            "Items in vec: {}, time remaining: {:?}",
-            vec.len(),
-            wait_until - time::Instant::now()
-        );
-        tokio::select! {
-            _ = tokio::time::sleep_until(wait_until) => {
-                break;
-            },
-            result = new_result_rx.recv() => {
-                match result {
-                    Ok(req) => {
-                        if filter(&req) {
-                            vec.retain(|el| el.wait_id() != req.wait_id());
-                            vec.push(req);
-                        }
-                    },
-                    Err(e) => { panic!("Unable to receive from queue new_result_rx: {}", e); }
-                }
-            },
-            deleted_task_id = deleted_task_rx.recv() => {
-                match deleted_task_id {
-                    Ok(deleted_task_id) => {
-                        if deleted_task_id == *task_id {
-                            warn!("Task {} was just deleted while someone was waiting for results. Returning the {} results up to now.", task_id, vec.len());
-                            return;
-                        }
-                    },
-                    Err(e) => { panic!("Unable to receive from queue deleted_task_rx: {}", e); }
-                }
-            }
-        }
-    }
-}
-
-pub(crate) async fn wait_for_elements_task<M: HasWaitId<MsgId> + Clone>(
-    vec: &mut Vec<M>,
-    block: &HowLongToBlock,
-    mut new_element_rx: Receiver<M>,
-    filter: impl Fn(&M) -> bool,
-    mut deleted_task_rx: Receiver<MsgId>,
-) {
-    let wait_until = time::Instant::now()
-        + block
-            .wait_time
-            .unwrap_or(time::Duration::from_secs(31536000));
-    trace!(
-        "Now is {:?}. Will wait until {:?}",
-        time::Instant::now(),
-        wait_until
-    );
-    while usize::from(block.wait_count.unwrap_or(0)) > vec.len()
-        && time::Instant::now() < wait_until
-    {
-        trace!(
-            "Items in vec: {}, time remaining: {:?}",
-            vec.len(),
-            wait_until - time::Instant::now()
-        );
-        tokio::select! {
-            _ = tokio::time::sleep_until(wait_until) => {
-                break;
-            },
-            result = new_element_rx.recv() => {
-                match result {
-                    Ok(req) => {
-                        if filter(&req) {
-                            vec.retain(|el| el.wait_id() != req.wait_id());
-                            vec.push(req);
-                        }
-                    },
-                    Err(_) => { panic!("Unable to receive from queue! What happened?"); }
-                }
-            },
-            deleted_task_id = deleted_task_rx.recv() => {
-                match deleted_task_id {
-                    Ok(deleted_task_id) => {
-                        vec.retain(|el| el.wait_id() != deleted_task_id);
-                    },
-                    Err(_) => { panic!("Unable to receive from queue deleted_task_rx! What happened?"); }
-                }
-            }
-        }
-    }
-}
 
 #[derive(Deserialize)]
 struct TaskFilter {
@@ -459,12 +163,11 @@ enum FilterParam {
 /// GET /v1/tasks
 /// Will retrieve tasks that are at least FROM or TO the supplied parameters.
 async fn get_tasks(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     block: HowLongToBlock,
     Query(taskfilter): Query<TaskFilter>,
     State(state): State<TasksState>,
     msg: MsgSigned<MsgEmpty>,
-) -> Result<(StatusCode, impl IntoResponse), (StatusCode, impl IntoResponse)> {
+) -> Result<DerefSerializer, (StatusCode, impl IntoResponse)> {
     let from = taskfilter.from;
     let mut to = taskfilter.to;
     let unanswered_by = match taskfilter.filter {
@@ -505,31 +208,11 @@ async fn get_tasks(
             .map(std::mem::discriminant)
             .collect(),
     };
-    let (mut vec, new_task_rx) = {
-        let map = state.tasks.read().await;
-        let vec: Vec<MsgSigned<EncryptedMsgTaskRequest>> = map
-            .iter()
-            .filter_map(|(_, v)| {
-                if filter.matches(v) {
-                    Some(v.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        (vec, state.new_task_tx.subscribe())
-    };
-    // Step 2: Extend vector with new elements, waiting for `block` amount of time/items
-    wait_for_elements_task(
-        &mut vec,
-        &block,
-        new_task_rx,
-        move |m| filter.matches(m),
-        state.removed_task_rx.subscribe(),
-    )
-    .await;
-    let statuscode = wait_get_statuscode(&vec, &block);
-    Ok((statuscode, Json(vec)))
+    let tasks = state.task_manager.get_tasks_by(move |m| filter.matches(m));
+    DerefSerializer::new(tasks, block.wait_count).map_err(|e| {
+        warn!("Failed to serialize tasks: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize tasks")
+    })
 }
 
 trait MsgFilterTrait<M: Msg> {
@@ -621,7 +304,7 @@ impl<'a> MsgFilterForTask<'a> {
     }
 }
 
-impl<'a> MsgFilterTrait<MsgSigned<EncryptedMsgTaskRequest>> for MsgFilterForTask<'a> {
+impl<'a> MsgFilterTrait<EncryptedMsgTaskRequest> for MsgFilterForTask<'a> {
     fn from(&self) -> Option<&AppOrProxyId> {
         self.normal.from
     }
@@ -630,8 +313,8 @@ impl<'a> MsgFilterTrait<MsgSigned<EncryptedMsgTaskRequest>> for MsgFilterForTask
         self.normal.to
     }
 
-    fn matches(&self, msg: &MsgSigned<EncryptedMsgTaskRequest>) -> bool {
-        MsgFilterNoTask::matches(&self.normal, msg) && self.unanswered(&msg.msg)
+    fn matches(&self, msg: &EncryptedMsgTaskRequest) -> bool {
+        MsgFilterNoTask::matches(&self.normal, msg) && self.unanswered(&msg)
     }
 
     fn mode(&self) -> &MsgFilterMode {
@@ -658,7 +341,7 @@ async fn post_task(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<TasksState>,
     msg: MsgSigned<EncryptedMsgTaskRequest>,
-) -> Result<(StatusCode, impl IntoResponse), (StatusCode, String)> {
+) -> Result<(StatusCode, impl IntoResponse), StatusCode> {
     // let id = MsgId::new();
     // msg.id = id;
     // TODO: Check if ID is taken
@@ -666,25 +349,11 @@ async fn post_task(
         "Client {} with IP {addr} is creating task {:?}",
         msg.msg.from, msg
     );
-    let (new_tx, _) = tokio::sync::broadcast::channel(256);
-    {
-        let mut tasks = state.tasks.write().await;
-        let mut txes = state.new_result_tx.write().await;
-        if tasks.contains_key(&msg.msg.id) {
-            return Err((
-                StatusCode::CONFLICT,
-                format!("ID {} is already taken.", msg.msg.id),
-            ));
-        }
-        tasks.insert(msg.msg.id, msg.clone());
-        txes.insert(msg.msg.id, new_tx);
-        if let Err(e) = state.new_task_tx.send(msg.clone()) {
-            debug!("Unable to send notification: {}. Ignoring since probably noone is currently waiting for tasks.", e);
-        }
-    }
+    let id = msg.msg.id;
+    state.task_manager.post_task(msg)?;
     Ok((
         StatusCode::CREATED,
-        [(header::LOCATION, format!("/v1/tasks/{}", msg.msg.id))],
+        [(header::LOCATION, format!("/v1/tasks/{}", id))],
     ))
 }
 
@@ -710,37 +379,13 @@ async fn put_result(
         ));
     }
 
-    // Step 1: Check prereqs.
-    let mut tasks = state.tasks.write().await;
 
-    // TODO: Check if this can be written nicer using .entry()
-    let task = match tasks.get_mut(&task_id) {
-        Some(task) => &mut task.msg,
-        None => return Err((StatusCode::NOT_FOUND, "Task not found")),
+    let status = if state.task_manager.put_result(&task_id, result).map_err(|e| (e.into(), ""))? {
+        StatusCode::NO_CONTENT
+    } else {
+        StatusCode::CREATED
     };
-    trace!(?task, ?worker_id, "Checking if task is in worker ID: ");
-    if !task.to.contains(&worker_id) {
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            "Your result is not requested for this task.",
-        ));
-    }
-
-    // Step 2: Insert.
-    let statuscode = match task.results.insert(worker_id.clone(), result.clone()) {
-        Some(_) => StatusCode::NO_CONTENT,
-        None => StatusCode::CREATED,
-    };
-
-    // Step 3: Notify. This has to happen while the lock for tasks is still held since otherwise results could get lost.
-    let sender = state.new_result_tx.read().await;
-    let sender = sender
-        .get(&task_id)
-        .unwrap_or_else(|| panic!("Internal error: No result_tx found for task {}", task_id));
-    if let Err(e) = sender.send(result) {
-        debug!("Unable to send notification: {}. Ignoring since probably noone is currently waiting for tasks.", e);
-    }
-    Ok(statuscode)
+    Ok(status)
 }
 
 #[cfg(all(test, never))] // Removed until the errors down below are fixed
