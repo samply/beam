@@ -92,7 +92,7 @@ pub enum CertificateInvalidReason {
     InvalidPublicKey,
     #[error("Internal error: {0}")]
     InternalError(String),
-    #[error("Not disclosed: Broker consideres this certificate invalid")]
+    #[error("Not disclosed: Broker considers this certificate invalid")]
     NotDisclosedByBroker,
     #[error("Other problem: {0}")]
     Other(String),

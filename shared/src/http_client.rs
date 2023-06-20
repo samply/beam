@@ -16,7 +16,7 @@ use hyper_tls::{
 use mz_http_proxy::hyper::connector;
 use once_cell::sync::OnceCell;
 use openssl::x509::X509;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::{config, errors::SamplyBeamError, BeamId};
 
@@ -31,30 +31,13 @@ pub fn build(
     http.set_connect_timeout(Some(Duration::from_secs(1)));
     http.enforce_http(false);
     http.set_keepalive(keepalive);
-    let https = HttpsConnector::new_with_connector(http);
+    let tls = build_tls_connector(ca_certificates)?;
+    let https = HttpsConnector::from((http, tls.clone().into()));
     let proxy_connector = connector()
         .map_err(|e| panic!("Unable to build HTTP client: {}", e))
         .unwrap();
     let mut proxy_connector = proxy_connector.with_connector(https);
-
-    if !ca_certificates.is_empty() {
-        let mut tls = TlsConnector::builder();
-        for cert in ca_certificates {
-            const ERR: &str = "Internal Error: Unable to convert Certificate.";
-            let cert = Certificate::from_pem(&cert.to_pem().expect(ERR)).expect(ERR);
-            tls.add_root_certificate(cert);
-        }
-        let tls = tls.build().map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!(
-                    "Unable to build TLS Connector with custom CA certificates: {}",
-                    e
-                ),
-            )
-        })?;
-        proxy_connector.set_tls(Some(tls));
-    }
+    proxy_connector.set_tls(Some(tls));
 
     let proxies = proxy_connector
         .proxies()
@@ -63,7 +46,7 @@ pub fn build(
         .collect::<HashSet<_>>();
 
     if proxies.len() == 0 && ca_certificates.len() > 0 {
-        return Err(std::io::Error::new(std::io::ErrorKind::Other, "Certificates for TLS termination were provided but no proxy to use. Please supply correct configuration."));
+        warn!("Certificates for TLS termination were provided but no proxy to use. If you want to set a proxy see https://docs.rs/mz-http-proxy/0.1.0/mz_http_proxy/#proxy-selection");
     }
 
     let proxies = match proxies.len() {
@@ -86,6 +69,24 @@ pub fn build(
     let client = Client::builder().build(timeout_connector);
 
     Ok(client)
+}
+
+fn build_tls_connector(ca_certificates: &Vec<X509>) -> Result<TlsConnector, std::io::Error> {
+    let mut tls = TlsConnector::builder();
+    for cert in ca_certificates {
+        const ERR: &str = "Internal Error: Unable to convert Certificate.";
+        let cert = Certificate::from_pem(&cert.to_pem().expect(ERR)).expect(ERR);
+        tls.add_root_certificate(cert);
+    }
+    tls.build().map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!(
+                "Unable to build TLS Connector with custom CA certificates: {}",
+                e
+            ),
+        )
+    })
 }
 
 #[cfg(test)]

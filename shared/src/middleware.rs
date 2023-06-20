@@ -64,7 +64,7 @@ impl LoggingInfo {
             "{} {} {} {}",
             from,
             self.status_code
-                .expect("Did not set Statuscode before loggin"),
+                .expect("Did not set Statuscode before logging"),
             self.method,
             self.uri
         )
@@ -95,7 +95,8 @@ pub async fn log(
     }
 
     let line = info.get_log();
-    if resp.status().is_success() {
+    // If we get a gateway timeout we won't log it with log level warn as this happens regularly with the long polling api
+    if resp.status().is_success() || resp.status().is_informational() || resp.status() == StatusCode::GATEWAY_TIMEOUT {
         info!(target: "in", "{}", line);
     } else {
         warn!(target: "in", "{}", line);

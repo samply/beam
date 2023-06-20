@@ -50,7 +50,7 @@ where
     type Rejection = (StatusCode, &'static str);
 
     async fn from_request(req: Request<B>, _state: &S) -> Result<Self, Self::Rejection> {
-        let (parts, body) = req.into_parts();
+        let (mut parts, body) = req.into_parts();
         let bytes = hyper::body::to_bytes(body).await.map_err(|_| ERR_BODY)?;
         let token_without_extended_signature = std::str::from_utf8(&bytes).map_err(|e| {
             warn!(
@@ -59,7 +59,7 @@ where
             );
             ERR_SIG
         })?;
-        verify_with_extended_header(parts, token_without_extended_signature).await
+        verify_with_extended_header(&mut parts, token_without_extended_signature).await
     }
 }
 
@@ -140,10 +140,10 @@ pub const JWT_VERIFICATION_OPTIONS: Lazy<VerificationOptions> = Lazy::new(|| Ver
 #[tracing::instrument(skip(token_without_extended_signature))]
 /// This verifys a Msg from sent to the Broker
 /// The Message is encoded in the JWT Claims of the body which is a JWT.
-/// There is never really a [`MsgSigned`] involved in Deserializing the message as the signature is just copyed from the body JWT.
+/// There is never really a [`MsgSigned`] involved in Deserializing the message as the signature is just copied from the body JWT.
 /// The token is verified by a key derived from the kid of the JWT in the Header which should also match the kid of the body JWT.
-async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
-    mut req: Parts,
+pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
+    req: &mut Parts,
     token_without_extended_signature: &str,
 ) -> Result<MsgSigned<M>, (StatusCode, &'static str)> {
     let token_with_extended_signature = std::str::from_utf8(

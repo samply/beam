@@ -19,6 +19,15 @@ fn main() {
     build_data::set_BUILD_DATE();
     build_data::set_BUILD_TIME();
     build_data::no_debug_rebuilds();
+    let env_vars: Vec<_> = std::env::vars().collect();
+    println!(
+        "cargo:rustc-env=FEATURES={}",
+            env_vars.iter()
+                .filter_map(|(name, _)| name.strip_prefix("CARGO_FEATURE_"))
+                .collect::<Vec<_>>()
+                .join(", ")
+                .to_lowercase()
+    );
     println!(
         "cargo:rustc-env=SAMPLY_USER_AGENT=Samply.Beam.{}/{}",
         env!("CARGO_PKG_NAME"),

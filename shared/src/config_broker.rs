@@ -50,6 +50,10 @@ struct CliArgs {
     #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
     rootcert_file: PathBuf,
 
+    /// The API key for accessing monitoring endpoints of the broker
+    #[clap(long, env, value_parser)]
+    monitoring_api_key: Option<String>,
+
     /// (included for technical reasons)
     #[clap(long, hide(true))]
     test_threads: Option<String>,
@@ -61,6 +65,7 @@ pub struct Config {
     pub pki_realm: String,
     pub pki_token: String,
     pub tls_ca_certificates_dir: Option<PathBuf>,
+    pub monitoring_api_key: Option<String>,
 }
 
 impl crate::config::Config for Config {
@@ -85,6 +90,7 @@ impl crate::config::Config for Config {
             pki_realm: cli_args.pki_realm,
             pki_token,
             tls_ca_certificates_dir: cli_args.tls_ca_certificates_dir,
+            monitoring_api_key: cli_args.monitoring_api_key,
         };
         Ok(config)
     }
