@@ -83,21 +83,13 @@ pub mod serde_base64 {
     }
 }
 
-// Made a PR in DashMap to impl Serialize for refs but the last commit was in January
-fn serialize_deref_iter<S: Serializer>(serializer: S, iter: impl Iterator<Item = impl Deref<Target = impl Serialize>>) -> Result<S::Ok, S::Error> {
-    let mut seq_ser = serializer.serialize_seq(iter.size_hint().1).map_err(serde::ser::Error::custom)?;
-    for item in iter {
-        seq_ser.serialize_element(item.deref())?;
-    }
-    seq_ser.end()
-}
-
 pub struct DerefSerializer {
     pub read_expected: bool,
     buffer: bytes::Bytes
 }
 
 impl DerefSerializer {
+    // Made a PR in DashMap to impl Serialize for refs but the last commit was in January
     pub fn new<T: Serialize>(iter: impl Iterator<Item = impl Deref<Target = T>>, expected_len: Option<u16>) -> Result<DerefSerializer, serde_json::Error> {
         let mut items_read = 0;
         let writer = bytes::BytesMut::new().writer(); 
