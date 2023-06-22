@@ -4,6 +4,8 @@ use http::StatusCode;
 use openssl::error::ErrorStack;
 use tokio::time::error::Elapsed;
 
+use crate::beam_id::ProxyId;
+
 #[derive(thiserror::Error, Debug)]
 pub enum SamplyBeamError {
     #[error("Invalid bind address supplied: {0}")]
@@ -50,6 +52,8 @@ pub enum SamplyBeamError {
     CertificateError(#[from] CertificateInvalidReason),
     #[error("Timeout executing HTTP request: {0}")]
     HttpTimeoutError(Elapsed),
+    #[error("Expired receiver public keys: {0:?}")]
+    ExpiredProxyCerts(Vec<ProxyId>)
 }
 
 impl From<AddrParseError> for SamplyBeamError {
