@@ -156,8 +156,11 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
 
     pub fn post_task(&self, task: MsgSigned<T>) -> Result<(), TaskManagerError> {
         let id = task.wait_id();
-        if self.tasks.contains_key(&id) {
-            return Err(TaskManagerError::Conflict);
+        if let Some(task) = self.tasks.get(&id) {
+            // We only have a conflict if the conflicting task has not yet expired
+            if !task.msg.is_expired() {
+                return Err(TaskManagerError::Conflict);
+            }
         }
         let max_receivers = task.get_to().len();
         self.tasks.insert(id.clone(), task);
@@ -166,6 +169,19 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         // We dont care if noone is listening
         _ = self.new_tasks.send(id);
         Ok(())
+    }
+}
+
+fn decide_blocking_conditions(block: &HowLongToBlock) -> (usize, Instant) {
+    match (block.wait_count, block.wait_time) {
+        // Dont wait
+        (None, None) => (0, Instant::now()),
+        // Wait for as long as specified regardless of the number of elements
+        (None, Some(wait_time)) => (usize::MAX, Instant::now() + wait_time),
+        // Wait for n elements or timeout after 1h
+        (Some(wait_count), None) => (wait_count as usize, Instant::now() + Duration::from_secs(60 * 60)),
+        // Stop waiting after either some time or some number of elements
+        (Some(wait_count), Some(wait_time)) => (wait_count as usize, Instant::now() + wait_time),
     }
 }
 
@@ -180,9 +196,7 @@ where
         block: &HowLongToBlock,
         filter: impl Fn(&T::Result) -> bool,
     ) -> Result<impl Deref<Target = MsgSigned<T>> + '_, TaskManagerError> {
-        let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
-        let wait_until = Instant::now() + block.wait_time.unwrap_or(Duration::from_secs(600));
-
+        let (max_elements, wait_until) = decide_blocking_conditions(block);
         let mut num_of_results = self
             .get(task_id)?
             .msg
@@ -193,7 +207,7 @@ where
         let mut new_results = self
             .new_results
             .get(task_id)
-            .expect("Found task but no coresponding results channel")
+            .expect("Found task but no corresponding results channel")
             .subscribe();
         while num_of_results < max_elements && Instant::now() < wait_until {
             tokio::select! {
@@ -239,8 +253,7 @@ where
                 yield Ok(to_event("Did not find task", SseEventType::Error));
                 return;
             };
-            let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
-            let wait_until = Instant::now() + block.wait_time.unwrap_or(Duration::from_secs(600));
+            let (max_elements, wait_until) = decide_blocking_conditions(block);
             let ready_results = task.msg
                 .get_results()
                 .values()
@@ -249,14 +262,15 @@ where
             for res in ready_results {
                 yield Ok(to_event(res, SseEventType::NewResult));
                 num_of_results += 1;
-                if num_of_results >= max_elements {
+                // Only break when wait_count was actually set otherwise we want all the tasks that are present
+                if num_of_results >= max_elements && max_elements!=0 {
                     break;
                 }
             }
             let mut new_results = self
                 .new_results
                 .get(task_id)
-                .expect("Found task but no coresponding results channel")
+                .expect("Found task but no corresponding results channel")
                 .subscribe();
             while num_of_results < max_elements && Instant::now() < wait_until {
                 tokio::select! {
