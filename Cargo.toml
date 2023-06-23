@@ -1,5 +1,5 @@
 [workspace]
-members = ["proxy", "broker", "shared", "tests"]
+members = ["proxy", "broker", "shared", "tests", "beam-lib"]
 
 [profile.release]
 #opt-level = "z"     # Optimize for size.
