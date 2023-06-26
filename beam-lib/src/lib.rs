@@ -6,8 +6,6 @@ mod sockets;
 pub use sockets::*;
 
 pub use ids::*;
-#[cfg(feature = "strict-ids")]
-pub use ids::app_or_proxy::AppOrProxyId;
 
 pub use messages::*;
 
