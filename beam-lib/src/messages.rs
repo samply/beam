@@ -1,15 +1,16 @@
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use uuid::Uuid;
-use crate::ids::AppOrProxyId;
+use crate::AddressingId;
 
 pub type MsgId = Uuid;
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TaskRequest<T> {
     pub id: MsgId,
-    pub from: AppOrProxyId,
-    pub to: Vec<AppOrProxyId>,
+    pub from: AddressingId,
+    pub to: Vec<AddressingId>,
     pub body: T,
     pub ttl: String,
     pub failure_strategy: FailureStrategy,
@@ -18,8 +19,8 @@ struct TaskRequest<T> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TaskResult<T> {
-    pub from: AppOrProxyId,
-    pub to: Vec<AppOrProxyId>,
+    pub from: AddressingId,
+    pub to: Vec<AddressingId>,
     pub task: MsgId,
     pub status: WorkStatus,
     pub body: T,
@@ -47,5 +48,5 @@ pub enum WorkStatus {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MsgEmpty {
-    from: AppOrProxyId,
+    from: AddressingId,
 }
