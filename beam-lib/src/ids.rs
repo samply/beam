@@ -30,6 +30,16 @@ impl BeamId for AppOrProxyId {
 }
 
 #[cfg(feature = "strict-ids")]
+impl AsRef<str> for AppOrProxyId {
+    fn as_ref(&self) -> &str {
+        match self {
+            AppOrProxyId::App(a) => a.as_ref(),
+            AppOrProxyId::Proxy(p) => p.as_ref(),
+        }
+    }
+}
+
+#[cfg(feature = "strict-ids")]
 impl Display for AppOrProxyId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
@@ -130,8 +140,13 @@ fn strip_broker_id(id: &str) -> Result<&str, BeamIdError> {
     }
 }
 
-pub trait BeamId: Sized {
+pub trait BeamId: Sized + AsRef<str> {
     fn new(id: &str) -> Result<Self, BeamIdError>;
+
+    #[cfg(feature = "strict-ids")]
+    fn can_be_signed_by(&self, other: &impl AsRef<str>) -> bool {
+        self.as_ref().ends_with(other.as_ref())
+    }
 }
 
 fn get_id_type(id: &str) -> Result<BeamIdType, BeamIdError> {
@@ -180,6 +195,12 @@ impl AppId {
     }
 }
 
+impl AsRef<str> for AppId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
 impl BeamId for AppId {
     fn new(id: &str) -> Result<Self, BeamIdError> {
         match get_id_type(id)? {
@@ -197,6 +218,12 @@ impl Display for AppId {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub struct ProxyId(String);
+
+impl AsRef<str> for ProxyId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
 
 impl BeamId for ProxyId {
     fn new(id: &str) -> Result<Self, BeamIdError> {

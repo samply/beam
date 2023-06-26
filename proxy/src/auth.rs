@@ -9,8 +9,8 @@ use hyper::{
     header::{self, HeaderName},
     Request, StatusCode,
 };
+use beam_lib::{AppId, BeamId, AppOrProxyId};
 use shared::{
-    beam_id::{AppId, BeamId, AppOrProxyId},
     config, config_proxy, middleware::ProxyLogger,
 };
 
@@ -47,7 +47,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedApp {
             debug!("Request authenticated (ClientID {})", client_id);
             _ = parts.extensions.remove::<ProxyLogger>()
                 .expect("Added by middleware")
-                .send(AppOrProxyId::AppId(client_id.clone()));
+                .send(AppOrProxyId::App(client_id.clone()));
             Ok(Self(client_id))
         } else {
             Err(UNAUTH_ERR)

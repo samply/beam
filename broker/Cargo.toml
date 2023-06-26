@@ -9,6 +9,7 @@ documentation = "https://github.com/samply/beam"
 
 [dependencies]
 shared = { path = "../shared", features = ["config-for-central"] }
+beam-lib = { workspace = true }
 
 tokio = { version = "1", features = ["full"] }
 uuid = { version = "1.1.2", features = [

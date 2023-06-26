@@ -98,7 +98,7 @@ async fn post_socket_request(
 
 async fn connect_socket(
     state: State<SocketState>,
-    task_id: MsgId,
+    Path(task_id): Path<MsgId>,
     mut req: Request<Body>
     // This Result is just an Either type. An error value does not mean something went wrong
 ) -> Result<Response, StatusCode> {

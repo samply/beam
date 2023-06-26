@@ -30,8 +30,8 @@ use hyper_tls::HttpsConnector;
 use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
+use beam_lib::{AppId, AppOrProxyId, ProxyId};
 use shared::{
-    beam_id::{AppId, AppOrProxyId, ProxyId},
     config::{self, CONFIG_PROXY},
     config_proxy,
     config_shared::ConfigCrypto,
@@ -446,7 +446,7 @@ pub(crate) async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBea
 
 fn decrypt_msg<M: DecryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> {
     msg.decrypt(
-        &AppOrProxyId::ProxyId(CONFIG_PROXY.proxy_id.to_owned()),
+        &AppOrProxyId::Proxy(CONFIG_PROXY.proxy_id.to_owned()),
         &crypto::get_own_crypto_material().privkey_rsa,
     )
 }
@@ -464,7 +464,7 @@ async fn encrypt_request(
     let msg = if body.is_empty() {
         debug!("Body is empty, substituting MsgEmpty.");
         PlainMessage::MsgEmpty(MsgEmpty {
-            from: sender.into(),
+            from: (*sender).into(),
         })
     } else {
         match serde_json::from_slice(&body) {

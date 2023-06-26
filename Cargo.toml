@@ -1,6 +1,9 @@
 [workspace]
 members = ["proxy", "broker", "shared", "tests", "beam-lib"]
 
+[workspace.dependencies]
+beam-lib = { path = "./beam-lib", features = [ "strict-ids" ] }
+
 [profile.release]
 #opt-level = "z"     # Optimize for size.
 lto = true          # Enable Link Time Optimization

@@ -1,7 +1,7 @@
 use std::{fmt::Display, sync::Arc, time::{Duration, SystemTime}, collections::HashMap};
 
 use serde::{Serialize, Deserialize};
-use shared::beam_id::ProxyId;
+use beam_lib::ProxyId;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 

@@ -44,7 +44,7 @@ pub fn generate_example_tasks(
     proxy: Option<ProxyId>,
 ) -> (Vec<MsgTaskRequest>, Vec<MsgTaskResult>) {
     let broker =
-        broker.unwrap_or(config::CONFIG_SHARED.broker_domain);
+        broker.unwrap_or(config::CONFIG_SHARED.broker_domain.clone());
     let proxy = {
         if let Some(id) = proxy {
             if !id.can_be_signed_by(&broker) {

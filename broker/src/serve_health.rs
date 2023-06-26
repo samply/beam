@@ -1,8 +1,9 @@
 use std::{sync::Arc, time::{Duration, SystemTime}};
 
 use axum::{extract::{State, Path}, http::StatusCode, routing::get, Json, Router, TypedHeader, headers::{Authorization, authorization::Basic}};
+use beam_lib::ProxyId;
 use serde::{Serialize, Deserialize};
-use shared::{crypto_jwt::Authorized, Msg, beam_id::ProxyId, config::CONFIG_CENTRAL};
+use shared::{crypto_jwt::Authorized, Msg, config::CONFIG_CENTRAL};
 use tokio::sync::RwLock;
 
 use crate::health::{Health, VaultStatus, Verdict, ProxyStatus};
@@ -78,7 +79,7 @@ async fn get_control_tasks(
     State(state): State<Arc<RwLock<Health>>>,
     proxy_auth: Authorized,
 ) -> StatusCode {
-    let proxy_id = proxy_auth.get_from().get_proxy_id(); 
+    let proxy_id = proxy_auth.get_from().proxy_id(); 
     // Once this is freed the connection will be removed from the map of connected proxies again
     // This ensures that when the connection is dropped and therefore this response future the status of this proxy will be updated
     let _connection_remover = ConnectedGuard::connect(&proxy_id, &state).await;
