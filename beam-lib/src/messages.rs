@@ -48,5 +48,5 @@ pub enum WorkStatus {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MsgEmpty {
-    from: AddressingId,
+    pub from: AddressingId,
 }

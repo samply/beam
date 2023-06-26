@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub type AddressingId = crate::AppOrProxyId;
 
 #[cfg(not(feature = "strict-ids"))]
-pub type BeamIdType = crate::AppId;
+pub type AddressingId = crate::AppId;
 
 #[cfg(feature = "strict-ids")]
 static BROKER_ID: OnceLock<String> = OnceLock::new();
@@ -29,6 +29,14 @@ impl BeamId for AppOrProxyId {
     }
 }
 
+impl Display for AppOrProxyId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            AppOrProxyId::App(app) => &app.0,
+            AppOrProxyId::Proxy(proxy) => &proxy.0,
+        })
+    }
+}
 
 #[cfg(feature = "strict-ids")]
 impl AppOrProxyId {
@@ -59,16 +67,6 @@ enum BeamIdType {
     AppId,
     ProxyId,
     BrokerId,
-}
-
-impl BeamIdType {
-    const fn num_parts(&self) -> u8 {
-        match self {
-            BeamIdType::AppId => 3,
-            BeamIdType::ProxyId => 2,
-            BeamIdType::BrokerId => 1,
-        }
-    }
 }
 
 impl Display for BeamIdType {
@@ -116,7 +114,7 @@ fn strip_broker_id(id: &str) -> Result<&str, BeamIdError> {
     }
 }
 
-trait BeamId: Sized {
+pub trait BeamId: Sized {
     fn new(id: &str) -> Result<Self, BeamIdError>;
 }
 
@@ -175,6 +173,12 @@ impl BeamId for AppId {
     }
 }
 
+impl Display for AppId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ProxyId(String);
 
@@ -184,6 +188,12 @@ impl BeamId for ProxyId {
             BeamIdType::ProxyId => Ok(Self(id.to_owned())),
             _ => Err(BeamIdError::InvalidIdKind),
         }
+    }
+}
+
+impl Display for ProxyId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
