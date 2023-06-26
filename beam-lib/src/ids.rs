@@ -1,4 +1,4 @@
-use std::{fmt::Display, sync::OnceLock};
+use std::{fmt::Display, sync::OnceLock, error::Error};
 
 use serde::{Deserialize, Serialize};
 
@@ -12,7 +12,7 @@ pub type AddressingId = crate::AppId;
 static BROKER_ID: OnceLock<String> = OnceLock::new();
 
 #[cfg(feature = "strict-ids")]
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub enum AppOrProxyId {
     App(AppId),
     Proxy(ProxyId),
@@ -45,6 +45,21 @@ impl AppOrProxyId {
         match self {
             AppOrProxyId::App(app) => app.proxy_id(),
             AppOrProxyId::Proxy(proxy) => proxy.clone(),
+        }
+    }
+
+    pub fn hide_broker(&self) -> String {
+        match self {
+            AppOrProxyId::App(app) => {
+                let without_broker = strip_broker_id(&app.0).expect("Is valid id");
+                without_broker[..without_broker.len() - 1].to_owned()
+            }
+            AppOrProxyId::Proxy(proxy) => proxy
+                .0
+                .split_once('.')
+                .map(|(proxy, _broker)| proxy)
+                .unwrap_or_default()
+                .to_string(),
         }
     }
 }
@@ -147,7 +162,7 @@ fn get_id_type(id: &str) -> Result<BeamIdType, BeamIdError> {
     ret
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub struct AppId(String);
 
 impl AppId {
@@ -180,7 +195,7 @@ impl Display for AppId {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub struct ProxyId(String);
 
 impl BeamId for ProxyId {
@@ -206,6 +221,8 @@ pub enum BeamIdError {
     #[cfg(feature = "strict-ids")]
     WrongBrokerId,
 }
+
+impl Error for BeamIdError {}
 
 impl Display for BeamIdError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

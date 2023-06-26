@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
 use axum::async_trait;
-use beam_id::{AppId, AppOrProxyId, BeamId, ProxyId};
+use beam_lib::{AppId, AppOrProxyId, BeamId, ProxyId};
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     XChaCha20Poly1305, XNonce,
@@ -35,7 +35,7 @@ use crate::{crypto_jwt::JWT_VERIFICATION_OPTIONS, serde_helpers::*};
 // Reexport b64 implementation
 pub use jwt_simple::reexports::ct_codecs;
 
-pub type MsgId = MyUuid;
+pub type MsgId = beam_lib::MsgId;
 pub type MsgType = String;
 pub type TaskResponse = String;
 
@@ -58,7 +58,7 @@ pub mod expire_map;
 mod sockets;
 #[cfg(feature = "sockets")]
 pub use sockets::*;
-pub mod beam_id;
+// pub mod beam_id;
 pub mod graceful_shutdown;
 pub mod http_client;
 pub mod middleware;
@@ -70,44 +70,6 @@ pub mod sse_event;
 // Reexports
 pub use openssl;
 
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MyUuid(Uuid);
-impl MyUuid {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-}
-impl Default for MyUuid {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-impl Deref for MyUuid {
-    type Target = Uuid;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-impl From<Uuid> for MyUuid {
-    fn from(uuid: Uuid) -> Self {
-        MyUuid(uuid)
-    }
-}
-impl TryFrom<&str> for MyUuid {
-    type Error = uuid::Error;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        let parsed = Uuid::from_str(value)?;
-        Ok(Self(parsed))
-    }
-}
-
-impl Display for MyUuid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
 
 #[derive(PartialEq, Eq, Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "lowercase", tag = "status")]
@@ -803,16 +765,15 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::beam_id::BrokerId;
 
     use super::*;
 
     #[test]
     fn encrypt_decrypt_task() {
         //Create Task
-        AppId::set_broker_id("broker.samply.de".to_string());
-        let p1_id = AppOrProxyId::AppId(AppId::new("app.proxy1.broker.samply.de").unwrap());
-        let p2_id = AppOrProxyId::AppId(AppId::new("app.proxy2.broker.samply.de").unwrap());
+        beam_lib::set_broker_id("broker.samply.de".to_string());
+        let p1_id = AppOrProxyId::App(AppId::new("app.proxy1.broker.samply.de").unwrap());
+        let p2_id = AppOrProxyId::App(AppId::new("app.proxy2.broker.samply.de").unwrap());
         let from = p1_id.clone();
         let to = vec![p1_id.clone(), p2_id.clone()];
         let expiry = SystemTime::now() + Duration::from_secs(60);
@@ -859,9 +820,9 @@ mod tests {
 
     #[test]
     fn encrypt_decrypt_result() {
-        AppId::set_broker_id("broker.samply.de".to_string());
-        let p1_id = AppOrProxyId::AppId(AppId::new("app.proxy1.broker.samply.de").unwrap());
-        let p2_id = AppOrProxyId::AppId(AppId::new("app.proxy2.broker.samply.de").unwrap());
+        beam_lib::set_broker_id("broker.samply.de".to_string());
+        let p1_id = AppOrProxyId::App(AppId::new("app.proxy1.broker.samply.de").unwrap());
+        let p2_id = AppOrProxyId::App(AppId::new("app.proxy2.broker.samply.de").unwrap());
         let from = p1_id.clone();
         let to = vec![p1_id.clone(), p2_id.clone()];
         let status = WorkStatus::Succeeded;

@@ -26,8 +26,8 @@ use std::{
 use tokio::{sync::{mpsc, oneshot, RwLock}, time::Instant};
 use tracing::{debug, error, info, warn};
 
+use beam_lib::{AppOrProxyId, BeamId, ProxyId};
 use crate::{
-    beam_id::{AppOrProxyId, BeamId, ProxyId},
     config,
     config_shared::ConfigCrypto,
     crypto,
@@ -855,10 +855,7 @@ pub async fn get_proxy_public_keys(
 ) -> Result<Vec<RsaPublicKey>, SamplyBeamError> {
     let proxy_receivers: Vec<ProxyId> = receivers
         .into_iter()
-        .map(|app_or_proxy| match app_or_proxy {
-            AppOrProxyId::ProxyId(id) => id.to_owned(),
-            AppOrProxyId::AppId(id) => id.proxy_id(),
-        })
+        .map(|app_or_proxy| app_or_proxy.proxy_id())
         .collect();
     let receivers_crypto_bundle =
         crypto::get_newest_certs_for_cnames_as_pemstr(proxy_receivers.iter()).await;

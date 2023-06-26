@@ -3,8 +3,20 @@ use serde_json::Value;
 use uuid::Uuid;
 use crate::AddressingId;
 
-pub type MsgId = Uuid;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+pub struct MsgId(Uuid);
 
+impl MsgId {
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl std::fmt::Display for MsgId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TaskRequest<T> {
@@ -50,3 +62,4 @@ pub enum WorkStatus {
 pub struct MsgEmpty {
     pub from: AddressingId,
 }
+

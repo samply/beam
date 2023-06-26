@@ -15,8 +15,8 @@ use hyper::Uri;
 use serde::Deserialize;
 use tracing::{debug, info};
 
+use beam_lib::{AppId, BeamId, ProxyId};
 use crate::{
-    beam_id::{self, AppId, BeamId, BrokerId, ProxyId},
     errors::SamplyBeamError,
 };
 
@@ -99,7 +99,7 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBea
 impl crate::config::Config for Config {
     fn load() -> Result<Config, SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
+        beam_lib::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
         let proxy_id = ProxyId::new(&cli_args.proxy_id).map_err(|e| {
             SamplyBeamError::ConfigurationFailed(format!(
                 "Invalid Beam ID \"{}\" supplied: {}",
@@ -164,7 +164,7 @@ mod tests {
             std::env::set_var(format!("APP_{i}_KEY"), key);
         }
         const BROKER_ID: &str = "broker.samply.de";
-        BrokerId::set_broker_id(BROKER_ID.to_string());
+        beam_lib::set_broker_id(BROKER_ID.to_string());
         let parsed = parse_apikeys(&ProxyId::new(&format!("proxy.{BROKER_ID}")).unwrap()).unwrap();
         assert_eq!(parsed.len(), apps.len());
     }

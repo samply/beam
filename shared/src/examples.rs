@@ -3,18 +3,17 @@ use std::collections::HashMap;
 use rand::Rng;
 use serde_json::json;
 
+use beam_lib::{AppId, BeamId, ProxyId};
 use crate::{
-    beam_id::{AppId, BeamId, BrokerId, ProxyId},
     config, FailureStrategy, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult,
 };
+
+type BrokerId = String;
 
 #[cfg(debug_assertions)]
 pub fn print_example_objects() -> bool {
     if std::env::args().nth(1).unwrap_or_default() == "examples" {
-        let broker_id = match std::env::args().nth(2) {
-            Some(id) => BrokerId::new(&id).ok(),
-            None => None,
-        };
+        let broker_id = std::env::args().nth(2);
         let proxy_id = match std::env::args().nth(3) {
             Some(id) => ProxyId::new(&id).ok(),
             None => None,
@@ -45,7 +44,7 @@ pub fn generate_example_tasks(
     proxy: Option<ProxyId>,
 ) -> (Vec<MsgTaskRequest>, Vec<MsgTaskResult>) {
     let broker =
-        broker.unwrap_or_else(|| BrokerId::new(&config::CONFIG_SHARED.broker_domain).unwrap());
+        broker.unwrap_or(config::CONFIG_SHARED.broker_domain);
     let proxy = {
         if let Some(id) = proxy {
             if !id.can_be_signed_by(&broker) {
@@ -101,23 +100,6 @@ pub fn generate_example_tasks(
 
 // Random
 
-impl AppId {
-    pub fn random(parent: &ProxyId) -> Self {
-        let mut rnd = random_str();
-        rnd.push('.');
-        rnd.push_str(&parent.to_string());
-        Self::new(&rnd).expect("Internal error: Tried to construct faulty random AppId")
-    }
-}
-
-impl ProxyId {
-    pub fn random(parent: &BrokerId) -> Self {
-        let mut rnd = random_str();
-        rnd.push('.');
-        rnd.push_str(&parent.to_string());
-        Self::new(&rnd).expect("Internal error: Tried to construct faulty random ProxyId")
-    }
-}
 
 fn random_str() -> String {
     const LENGTH: u8 = 8;

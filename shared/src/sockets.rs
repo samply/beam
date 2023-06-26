@@ -3,9 +3,8 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{MsgState, beam_id::AppOrProxyId, serialize_time, MsgId, Msg, DecryptableMsg, Plain, Encrypted, EncryptableMsg, HasWaitId};
-
-
+use crate::{MsgState, serialize_time, MsgId, Msg, DecryptableMsg, Plain, Encrypted, EncryptableMsg, HasWaitId};
+use beam_lib::AppOrProxyId;
 
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
