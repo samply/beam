@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
 use axum::async_trait;
-use beam_lib::{AppId, AppOrProxyId, BeamId, ProxyId};
+use beam_lib::{AppId, AppOrProxyId, BeamId, ProxyId, FailureStrategy, WorkStatus};
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     XChaCha20Poly1305, XNonce,
@@ -72,37 +72,6 @@ pub mod sse_event;
 // Reexports
 pub use openssl;
 
-
-#[derive(PartialEq, Eq, Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "lowercase", tag = "status")]
-pub enum WorkStatus {
-    Claimed,
-    TempFailed,
-    PermFailed,
-    Succeeded,
-}
-
-impl Display for WorkStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str = match self {
-            WorkStatus::Claimed => String::from("Claimed"),
-            WorkStatus::TempFailed => String::from("Temporary failure"),
-            WorkStatus::PermFailed => String::from("Permanent failure"),
-            WorkStatus::Succeeded => String::from("Success"),
-        };
-        f.write_str(&str)
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum FailureStrategy {
-    Discard,
-    Retry {
-        backoff_millisecs: usize,
-        max_tries: usize,
-    }, // backoff for Duration and try max. times
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct HowLongToBlock {
@@ -577,7 +546,6 @@ where
     pub from: AppOrProxyId,
     pub to: Vec<AppOrProxyId>,
     pub task: MsgId,
-    #[serde(flatten)]
     pub status: WorkStatus,
     #[serde(flatten)]
     pub body: State,

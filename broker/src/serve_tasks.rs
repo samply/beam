@@ -15,10 +15,11 @@ use beam_lib::AppOrProxyId;
 use futures_core::{stream, Stream};
 use hyper::HeaderMap;
 use serde::Deserialize;
+use beam_lib::WorkStatus;
 use shared::{
     config, errors::SamplyBeamError, sse_event::SseEventType,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg, MsgEmpty,
-    MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, WorkStatus, EMPTY_VEC_APPORPROXYID,
+    MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, EMPTY_VEC_APPORPROXYID,
 };
 use tokio::{
     sync::{

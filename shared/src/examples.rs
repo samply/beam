@@ -75,7 +75,7 @@ pub fn generate_example_tasks(
         from: app1.clone().into(),
         to: vec![app1.clone().into()],
         task: task_for_apps_1_2.id,
-        status: crate::WorkStatus::Succeeded,
+        status: beam_lib::WorkStatus::Succeeded,
         body: "All done!".into(),
         metadata: json!("A normal string works, too!"),
     };
@@ -83,7 +83,7 @@ pub fn generate_example_tasks(
         from: app2.into(),
         to: vec![app1.into()],
         task: task_for_apps_1_2.id,
-        status: crate::WorkStatus::PermFailed,
+        status: beam_lib::WorkStatus::PermFailed,
         body: "Unable to complete".into(),
         metadata: json!({ "I": { "like": [ "results", "cake" ] } }),
     };
