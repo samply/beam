@@ -9,7 +9,7 @@ use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use anyhow::Result;
 use crate::*;
 
-type Client = hyper::Client<HttpConnector>;
+type Client = hyper::client::Client<HttpConnector>;
 
 async fn upgrade(res: impl Future<Output = Response<Body>>) -> Upgraded {
     hyper::upgrade::on(res.await).await.expect("Upgrade successful")
