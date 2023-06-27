@@ -74,7 +74,7 @@ async fn get_results_for_task(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<TasksState>,
     block: HowLongToBlock,
-    task_id: MsgId,
+    Path(task_id): Path<MsgId>,
     headers: HeaderMap,
     msg: MsgSigned<MsgEmpty>,
 ) -> Result<Response, (StatusCode, &'static str)> {

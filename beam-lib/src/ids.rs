@@ -30,6 +30,16 @@ impl BeamId for AppOrProxyId {
 }
 
 #[cfg(feature = "strict-ids")]
+impl PartialEq<AppId> for AppOrProxyId {
+    fn eq(&self, other: &AppId) -> bool {
+        match self {
+            AppOrProxyId::App(app) => app == other,
+            AppOrProxyId::Proxy(_) => false,
+        }
+    }
+}
+
+#[cfg(feature = "strict-ids")]
 impl AsRef<str> for AppOrProxyId {
     fn as_ref(&self) -> &str {
         match self {

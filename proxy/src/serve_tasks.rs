@@ -464,7 +464,7 @@ async fn encrypt_request(
     let msg = if body.is_empty() {
         debug!("Body is empty, substituting MsgEmpty.");
         PlainMessage::MsgEmpty(MsgEmpty {
-            from: (*sender).into(),
+            from: sender.clone().into(),
         })
     } else {
         match serde_json::from_slice(&body) {
