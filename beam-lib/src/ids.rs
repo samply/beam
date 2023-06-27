@@ -1,4 +1,4 @@
-use std::{fmt::Display, sync::OnceLock, error::Error};
+use std::{fmt::Display, error::Error};
 
 use serde::{Deserialize, Serialize};
 
@@ -9,10 +9,11 @@ pub type AddressingId = crate::AppOrProxyId;
 pub type AddressingId = crate::AppId;
 
 #[cfg(feature = "strict-ids")]
-static BROKER_ID: OnceLock<String> = OnceLock::new();
+static BROKER_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 #[cfg(feature = "strict-ids")]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
+#[serde(untagged)]
 pub enum AppOrProxyId {
     App(AppId),
     Proxy(ProxyId),
@@ -199,7 +200,7 @@ impl AppId {
     pub fn proxy_id(&self) -> ProxyId {
         let proxy_id = self
             .0
-            .get(self.app_name().len()..)
+            .get(self.app_name().len() + 1..)
             .expect("AppId should be valid");
         ProxyId::new(proxy_id).expect("This was a valid AppId so it should have a valid proxy part")
     }
@@ -300,3 +301,50 @@ impl_deserialize!(AppId);
 impl_deserialize!(ProxyId);
 #[cfg(feature = "strict-ids")]
 impl_deserialize!(AppOrProxyId);
+
+#[cfg(all(test, feature = "strict-ids"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_str_has_type() {
+        set_broker_id("broker.samply.de".to_string());
+        assert_eq!(
+            get_id_type("broker.samply.de").unwrap(),
+            BeamIdType::BrokerId
+        );
+        assert_eq!(
+            get_id_type("proxy23.broker.samply.de").unwrap(),
+            BeamIdType::ProxyId
+        );
+        assert_eq!(
+            get_id_type("app12.proxy23.broker.samply.de").unwrap(),
+            BeamIdType::AppId
+        );
+        assert!(get_id_type("roker.samply.de").is_err());
+        assert!(get_id_type("moreString.app12.proxy23.broker.samply.de").is_err());
+    }
+
+    #[test]
+    fn test_appid_proxyid() {
+        let app_id_str = "app.proxy1.broker.samply.de";
+
+        set_broker_id("broker.samply.de".to_string());
+        let app_id = AppId::new(app_id_str).unwrap();
+        assert_eq!(app_id.proxy_id(), ProxyId::new("proxy1.broker.samply.de").unwrap());
+    }
+
+    #[test]
+    fn test_app_or_proxy_id() {
+        let app_id_str = "app.proxy1.broker.samply.de";
+
+        set_broker_id("broker.samply.de".to_string());
+        let app_id = AppId::new(app_id_str).unwrap();
+        let app_id_app: AppOrProxyId = app_id.clone().into();
+        assert_eq!(app_id_app, app_id);
+
+        let proxy_id = app_id.proxy_id();
+        let app_id_proxy: AppOrProxyId = proxy_id.clone().into();
+        assert_eq!(proxy_id, app_id_proxy.proxy_id());
+    }
+}
