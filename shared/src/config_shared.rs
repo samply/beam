@@ -1,4 +1,4 @@
-use beam_lib::{BeamId, ProxyId};
+use beam_lib::ProxyId;
 use crate::{
     config::CONFIG_SHARED_CRYPTO,
     crypto::{

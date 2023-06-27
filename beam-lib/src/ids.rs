@@ -1,4 +1,5 @@
-use std::{fmt::Display, error::Error};
+
+use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
@@ -17,17 +18,6 @@ static BROKER_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 pub enum AppOrProxyId {
     App(AppId),
     Proxy(ProxyId),
-}
-
-#[cfg(feature = "strict-ids")]
-impl BeamId for AppOrProxyId {
-    fn new(id: &str) -> Result<Self, BeamIdError> {
-        match get_id_type(id)? {
-            BeamIdType::AppId => Ok(Self::App(AppId(id.to_owned()))),
-            BeamIdType::ProxyId => Ok(Self::Proxy(ProxyId(id.to_owned()))),
-            BeamIdType::BrokerId => Err(BeamIdError::InvalidIdKind),
-        }
-    }
 }
 
 #[cfg(feature = "strict-ids")]
@@ -62,11 +52,27 @@ impl Display for AppOrProxyId {
 
 #[cfg(feature = "strict-ids")]
 impl AppOrProxyId {
+    pub fn new(id: &str) -> Result<Self, BeamIdError> {
+        match get_id_type(id)? {
+            BeamIdType::AppId => Ok(Self::App(AppId(id.to_owned()))),
+            BeamIdType::ProxyId => Ok(Self::Proxy(ProxyId(id.to_owned()))),
+            BeamIdType::BrokerId => Err(BeamIdError::InvalidIdKind),
+        }
+    }
+
+    pub fn new_unchecked(id: &str) -> Self {
+        Self::App(AppId::new_unchecked(id))
+    }
+
     pub fn proxy_id(&self) -> ProxyId {
         match self {
             AppOrProxyId::App(app) => app.proxy_id(),
             AppOrProxyId::Proxy(proxy) => proxy.clone(),
         }
+    }
+
+    pub fn can_be_signed_by(&self, other: &impl AsRef<str>) -> bool {
+        self.as_ref().ends_with(other.as_ref())
     }
 
     pub fn hide_broker(&self) -> String {
@@ -99,23 +105,6 @@ impl From<ProxyId> for AppOrProxyId {
     }
 }
 
-#[derive(PartialEq, Debug)]
-enum BeamIdType {
-    AppId,
-    ProxyId,
-    BrokerId,
-}
-
-impl Display for BeamIdType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let str = match self {
-            BeamIdType::AppId => "AppId",
-            BeamIdType::ProxyId => "ProxyId",
-            BeamIdType::BrokerId => "BrokerId",
-        };
-        f.write_str(str)
-    }
-}
 
 #[cfg(feature = "strict-ids")]
 pub fn set_broker_id(id: String) {
@@ -135,31 +124,53 @@ pub fn get_broker_id() -> &'static String {
         .expect("Global broker ID has not yet been set! This is required for feature strict-ids.")
 }
 
+#[cfg(feature = "strict-ids")]
 fn strip_broker_id(id: &str) -> Result<&str, BeamIdError> {
-    #[cfg(feature = "strict-ids")]
     if let Some(rest) = id.strip_suffix(get_broker_id()) {
         Ok(rest)
     } else {
         Err(BeamIdError::WrongBrokerId)
     }
-    #[cfg(not(feature = "strict-ids"))]
-    {
-        let Some(i) = id.rfind('.') else {
-            return Ok("");
-        };
-        Ok(&id[i..id.len() - 1])
-    }
 }
 
-pub trait BeamId: Sized + AsRef<str> {
-    fn new(id: &str) -> Result<Self, BeamIdError>;
-
-    #[cfg(feature = "strict-ids")]
-    fn can_be_signed_by(&self, other: &impl AsRef<str>) -> bool {
-        self.as_ref().ends_with(other.as_ref())
-    }
+#[derive(PartialEq, Debug)]
+pub(crate) enum BeamIdType {
+    AppId,
+    ProxyId,
+    BrokerId,
 }
 
+macro_rules! impl_new {
+    ($id:ident) => {
+        impl $id {
+            #[cfg(feature = "strict-ids")]
+            pub fn new(id: impl Into<String>) -> Result<Self, BeamIdError> {
+                {
+                    let id = id.into();
+                    if get_id_type(&id)? == BeamIdType::$id {
+                        Ok(Self(id))
+                    } else {
+                        Err(BeamIdError::InvalidIdKind)
+                    }
+                }
+            }
+            
+            pub fn new_unchecked(id: impl Into<String>) -> Self {
+                Self(id.into())
+            }
+
+            #[cfg(feature = "strict-ids")]
+            pub fn can_be_signed_by(&self, other: &impl AsRef<str>) -> bool {
+                self.as_ref().ends_with(other.as_ref())
+            }
+        }
+    };
+}
+
+impl_new!(AppId);
+impl_new!(ProxyId);
+
+#[cfg(feature = "strict-ids")]
 fn get_id_type(id: &str) -> Result<BeamIdType, BeamIdError> {
     let rest = strip_broker_id(id)?;
     let Some(rest) = rest.strip_suffix('.') else {
@@ -178,14 +189,11 @@ fn get_id_type(id: &str) -> Result<BeamIdType, BeamIdError> {
         }
         (None, _) => unreachable!(),
     };
-    #[cfg(feature = "strict-ids")]
     if let Some(_) = split.next() {
         Err(BeamIdError::InvalidNumberOfIdFragments)
     } else {
         ret
     }
-    #[cfg(not(feature = "strict-ids"))]
-    ret
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
@@ -202,22 +210,13 @@ impl AppId {
             .0
             .get(self.app_name().len() + 1..)
             .expect("AppId should be valid");
-        ProxyId::new(proxy_id).expect("This was a valid AppId so it should have a valid proxy part")
+        ProxyId(proxy_id.to_string())
     }
 }
 
 impl AsRef<str> for AppId {
     fn as_ref(&self) -> &str {
         &self.0
-    }
-}
-
-impl BeamId for AppId {
-    fn new(id: &str) -> Result<Self, BeamIdError> {
-        match get_id_type(id)? {
-            BeamIdType::AppId => Ok(Self(id.to_owned())),
-            _ => Err(BeamIdError::InvalidIdKind),
-        }
     }
 }
 
@@ -236,21 +235,13 @@ impl AsRef<str> for ProxyId {
     }
 }
 
-impl BeamId for ProxyId {
-    fn new(id: &str) -> Result<Self, BeamIdError> {
-        match get_id_type(id)? {
-            BeamIdType::ProxyId => Ok(Self(id.to_owned())),
-            _ => Err(BeamIdError::InvalidIdKind),
-        }
-    }
-}
-
 impl Display for ProxyId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }
 }
 
+#[cfg(feature = "strict-ids")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BeamIdError {
     InvalidNumberOfIdFragments,
@@ -260,8 +251,10 @@ pub enum BeamIdError {
     WrongBrokerId,
 }
 
-impl Error for BeamIdError {}
+#[cfg(feature = "strict-ids")]
+impl std::error::Error for BeamIdError {}
 
+#[cfg(feature = "strict-ids")]
 impl Display for BeamIdError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = match self {
@@ -277,6 +270,7 @@ impl Display for BeamIdError {
     }
 }
 
+#[cfg(feature = "strict-ids")]
 fn check_valid_id_part(id: &str) -> Result<(), BeamIdError> {
     for char in id.chars() {
         if !(char.is_alphanumeric() || char == '-') {
@@ -290,8 +284,11 @@ macro_rules! impl_deserialize {
     ($idType:ident) => {
         impl<'de> Deserialize<'de> for $idType {
             fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                #[cfg(feature = "strict-ids")]
                 return Self::new(<&str as Deserialize>::deserialize(deserializer)?)
                     .map_err(serde::de::Error::custom);
+                #[cfg(not(feature = "strict-ids"))]
+                return Ok(Self::new_unchecked(String::deserialize(deserializer)?))
             }
         }
     };
@@ -331,7 +328,10 @@ mod tests {
 
         set_broker_id("broker.samply.de".to_string());
         let app_id = AppId::new(app_id_str).unwrap();
-        assert_eq!(app_id.proxy_id(), ProxyId::new("proxy1.broker.samply.de").unwrap());
+        assert_eq!(
+            app_id.proxy_id(),
+            ProxyId::new("proxy1.broker.samply.de").unwrap()
+        );
     }
 
     #[test]

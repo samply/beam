@@ -1,7 +1,7 @@
 
 use std::future::Future;
 
-use beam_lib::{SocketTask, MsgId, MsgEmpty};
+use beam_lib::{SocketTask, MsgId, MsgEmpty, AddressingId};
 use http::{Request, header, Method, Response, StatusCode};
 use hyper::{Body, upgrade::Upgraded, client::HttpConnector};
 use rand::RngCore;

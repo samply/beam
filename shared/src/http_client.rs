@@ -18,7 +18,7 @@ use once_cell::sync::OnceCell;
 use openssl::x509::X509;
 use tracing::{debug, info, warn};
 
-use crate::{config, errors::SamplyBeamError, BeamId};
+use crate::{config, errors::SamplyBeamError};
 
 pub type SamplyHttpClient = Client<TimeoutConnector<ProxyConnector<HttpsConnector<HttpConnector>>>>;
 

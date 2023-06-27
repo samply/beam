@@ -3,7 +3,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use beam_lib::{set_broker_id, AppOrProxyId, BeamId, MsgId};
+use beam_lib::{set_broker_id, AppOrProxyId, MsgId};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::json;
 

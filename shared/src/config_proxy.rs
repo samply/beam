@@ -15,7 +15,7 @@ use hyper::Uri;
 use serde::Deserialize;
 use tracing::{debug, info};
 
-use beam_lib::{AppId, BeamId, ProxyId};
+use beam_lib::{AppId, ProxyId};
 use crate::{
     errors::SamplyBeamError,
 };

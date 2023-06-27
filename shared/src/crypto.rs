@@ -26,7 +26,7 @@ use std::{
 use tokio::{sync::{mpsc, oneshot, RwLock}, time::Instant};
 use tracing::{debug, error, info, warn};
 
-use beam_lib::{AppOrProxyId, BeamId, ProxyId};
+use beam_lib::{AppOrProxyId, ProxyId};
 use crate::{
     config,
     config_shared::ConfigCrypto,

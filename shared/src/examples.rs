@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use rand::Rng;
 use serde_json::json;
 
-use beam_lib::{AppId, BeamId, ProxyId};
+use beam_lib::{AppId, ProxyId};
 use crate::{
     config, FailureStrategy, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult,
 };

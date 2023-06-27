@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
 use axum::async_trait;
-use beam_lib::{AppId, AppOrProxyId, BeamId, ProxyId, FailureStrategy, WorkStatus};
+use beam_lib::{AppId, AppOrProxyId, ProxyId, FailureStrategy, WorkStatus};
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     XChaCha20Poly1305, XNonce,

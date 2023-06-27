@@ -5,7 +5,7 @@ use crate::{
     crypto::{self, CryptoPublicPortion},
     errors::{CertificateInvalidReason, SamplyBeamError},
     middleware::{LoggingInfo, ProxyLogger},
-    BeamId, Msg, MsgEmpty, MsgId, MsgSigned,
+    Msg, MsgEmpty, MsgId, MsgSigned,
 };
 use axum::{async_trait, body::HttpBody, extract::FromRequest, http::StatusCode, BoxError};
 use http::{request::Parts, uri::PathAndQuery, Request};

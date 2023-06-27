@@ -9,7 +9,7 @@ use hyper::{
     header::{self, HeaderName},
     Request, StatusCode,
 };
-use beam_lib::{AppId, BeamId, AppOrProxyId};
+use beam_lib::{AppId, AppOrProxyId};
 use shared::{
     config, config_proxy, middleware::ProxyLogger,
 };
