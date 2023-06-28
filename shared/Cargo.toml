@@ -1,6 +1,6 @@
 [package]
 name = "shared"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 license = "Apache-2.0"
 documentation = "https://github.com/samply/beam"
@@ -55,6 +55,7 @@ clap = { version = "4.0.12", features = ["env", "derive"] }
 
 http = "0.2.8"
 fundu = "1.0.0"
+regex = "1"
 
 # expire map dependencies
 dashmap =  { version = "5.4", optional = true}
