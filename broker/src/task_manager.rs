@@ -124,8 +124,7 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         filter: impl Fn(&T) -> bool,
     ) -> Result<impl Iterator<Item = impl Deref<Target = MsgSigned<T>> + '_>, TaskManagerError>
     {
-        let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
-        let wait_until = Instant::now() + block.wait_time.unwrap_or(Duration::from_secs(600));
+        let (max_elements, wait_until) = decide_blocking_conditions(block);
         let mut new_tasks = self.new_tasks.subscribe();
 
         let mut num_of_tasks = self.get_tasks_by(&filter).count();
@@ -164,7 +163,7 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         }
         let max_receivers = task.get_to().len();
         self.tasks.insert(id.clone(), task);
-        let (results_sender, _) = broadcast::channel(max_receivers);
+        let (results_sender, _) = broadcast::channel(1.max(max_receivers));
         self.new_results.insert(id.clone(), results_sender);
         // We dont care if noone is listening
         _ = self.new_tasks.send(id);
@@ -332,6 +331,18 @@ pub enum TaskManagerError {
     Unauthorized,
     Gone,
     BroadcastBufferOverflow,
+}
+
+impl TaskManagerError {
+    pub fn error_msg(&self) -> &'static str {
+        match self {
+            TaskManagerError::NotFound => "Task not found",
+            TaskManagerError::Conflict => "Task already exists",
+            TaskManagerError::Unauthorized => "Unautherized to access this task",
+            TaskManagerError::Gone => "Task expired while waiting on it",
+            TaskManagerError::BroadcastBufferOverflow => "Internal server error",
+        }
+    }
 }
 
 impl From<TaskManagerError> for StatusCode {

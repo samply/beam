@@ -208,7 +208,13 @@ async fn get_tasks(
             .map(std::mem::discriminant)
             .collect(),
     };
-    let tasks = state.task_manager.get_tasks_by(move |m| filter.matches(m));
+    let tasks = state.task_manager
+        .wait_for_tasks(&block, move |m| filter.matches(m))
+        .await
+        .map_err(|e| {
+            let err = e.error_msg();
+            (e.into(), err)
+        })?;
     DerefSerializer::new(tasks, block.wait_count).map_err(|e| {
         warn!("Failed to serialize tasks: {e}");
         (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize tasks")
