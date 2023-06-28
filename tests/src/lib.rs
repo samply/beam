@@ -1,15 +1,17 @@
 
 use once_cell::sync::Lazy;
-use beam_lib::AddressingId;
+use beam_lib::{AddressingId, set_broker_id, AppOrProxyId};
 
 #[cfg(all(feature = "sockets", test))]
 mod socket_test;
 
 pub static APP1: Lazy<AddressingId> = Lazy::new(|| {
-    AddressingId::new_unchecked(option_env!("APP1_P1").unwrap_or("app1.proxy1.broker"))
+    set_broker_id("broker".into());
+    AppOrProxyId::new(option_env!("APP1_P1").unwrap_or("app1.proxy1.broker")).unwrap()
 }); 
 pub static APP2: Lazy<AddressingId> = Lazy::new(|| {
-    AddressingId::new_unchecked(option_env!("APP2_P2").unwrap_or("app2.proxy2.broker"))
+    set_broker_id("broker".into());
+    AppOrProxyId::new(option_env!("APP2_P2").unwrap_or("app2.proxy2.broker")).unwrap()
 });
 
 // unwrap_or is not const yet

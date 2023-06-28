@@ -60,10 +60,6 @@ impl AppOrProxyId {
         }
     }
 
-    pub fn new_unchecked(id: &str) -> Self {
-        Self::App(AppId::new_unchecked(id))
-    }
-
     pub fn proxy_id(&self) -> ProxyId {
         match self {
             AppOrProxyId::App(app) => app.proxy_id(),
