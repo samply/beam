@@ -103,9 +103,9 @@ async fn get_results_for_task_nostream(
         to: Some(msg.get_from()),
         mode: MsgFilterMode::Or,
     };
-    let task_with_results = state.task_manager.wait_for_results(&task_id, &block, move |m| filter_for_me.matches(&m.msg)).await?;
+    let task_with_results = state.task_manager.wait_for_results(&task_id, &block, |m| filter_for_me.matches(&m.msg)).await?;
     
-    DerefSerializer::new(task_with_results.msg.results.values(), block.wait_count).map_err(|e| {
+    DerefSerializer::new(task_with_results.msg.results.values().filter(|m| filter_for_me.matches(&m.msg)), block.wait_count).map_err(|e| {
         warn!("Failed to serialize task results: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })
@@ -210,11 +210,7 @@ async fn get_tasks(
     };
     let tasks = state.task_manager
         .wait_for_tasks(&block, move |m| filter.matches(m))
-        .await
-        .map_err(|e| {
-            let err = e.error_msg();
-            (e.into(), err)
-        })?;
+        .await?;
     DerefSerializer::new(tasks, block.wait_count).map_err(|e| {
         warn!("Failed to serialize tasks: {e}");
         (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize tasks")
@@ -386,7 +382,7 @@ async fn put_result(
     }
 
 
-    let status = if state.task_manager.put_result(&task_id, result).map_err(|e| (e.into(), ""))? {
+    let status = if state.task_manager.put_result(&task_id, result)? {
         StatusCode::NO_CONTENT
     } else {
         StatusCode::CREATED
