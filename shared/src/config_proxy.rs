@@ -78,7 +78,7 @@ pub const APP_PREFIX: &str = "APP";
 fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBeamError> {
     let env_vars = std::env::vars().collect::<HashMap<String, ApiKey>>();
     let mut api_keys = HashMap::new();
-    let pattern = Regex::new(&format!("{APP_PREFIX}_([^\\W_]+)_KEY")).expect("This is a valid regex");
+    let pattern = Regex::new(&format!("{APP_PREFIX}_([A-Za-z0-9-]+)_KEY")).expect("This is a valid regex");
     for (env_var_name, secret) in env_vars {
         if let Some(app_name) = pattern.captures_iter(&env_var_name).next().and_then(|cap| cap.get(1)) {
             let Ok(app_id) = AppId::new(&format!("{}.{proxy_id}", app_name.as_str())) else {
@@ -156,7 +156,7 @@ mod tests {
     #[test]
     fn test_parse_apikeys() {
         let apps = [
-            ("app1", "App1Secret"),
+            ("app1-test", "App1Secret"),
             ("app2", "App2Secret"),
             ("app3", "App3Secret"),
         ];
