@@ -58,7 +58,7 @@ async fn proxy_health(
     State(state): State<Arc<RwLock<Health>>>,
     Path(proxy): Path<ProxyId>,
     auth: TypedHeader<Authorization<Basic>>
-) -> Result<Json<ProxyStatus>, StatusCode> {
+) -> Result<(StatusCode, Json<ProxyStatus>), StatusCode> {
     let Some(ref monitoring_key) = CONFIG_CENTRAL.monitoring_api_key else {
         return Err(StatusCode::NOT_IMPLEMENTED);
     };
@@ -71,7 +71,7 @@ async fn proxy_health(
         if reported_back.online() {
             Err(StatusCode::OK)
         } else {
-            Ok(Json(reported_back.clone()))
+            Ok((StatusCode::SERVICE_UNAVAILABLE, Json(reported_back.clone())))
         }
     } else {
         Err(StatusCode::NOT_FOUND)
