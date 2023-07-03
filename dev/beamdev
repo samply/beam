@@ -31,6 +31,7 @@ export APP1_P2=${APP1_ID_SHORT}.$PROXY2_ID
 export APP2_P2=${APP2_ID_SHORT}.$PROXY2_ID
 export APP_KEY=App1Secret
 export BROKER_MONITORING_KEY=SuperSecretKey
+export PROXY_MONITORING_KEY=SuperSecretKey
 export RUST_LOG=${RUST_LOG:-info}
 
 export VAULT_TOKEN=$(echo $RANDOM | md5sum | head -c 20; echo;)

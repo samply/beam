@@ -22,6 +22,8 @@ pub(crate) async fn serve(
 
     #[cfg(feature = "sockets")]
     let app = app.merge(crate::serve_sockets::router(client));
+    #[cfg(feature = "monitor")]
+    let app = app.merge(crate::monitorer::router());
     // Middleware needs to be set last
     let app = app
         .layer(axum::middleware::from_fn(shared::middleware::log))

@@ -46,9 +46,12 @@ async-stream = "0.3.4"
 chacha20poly1305 = { version = "0.10.1", features = ["stream"], optional = true }
 bytes = { version = "1.4", optional = true}
 dashmap =  { version = "5.4", optional = true}
+hyper_serde = "0.13.0"
+once_cell = { version = "1", optional = true }
 
 [features]
 sockets = ["dep:bytes", "dep:chacha20poly1305", "dep:dashmap", "tokio-util/codec", "tokio-util/compat", "shared/sockets", "shared/expire_map"]
+monitor = ["shared/proxy-monitor", "dep:once_cell"]
 
 [build-dependencies]
 build-data = "0"

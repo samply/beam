@@ -55,6 +55,7 @@ services:
     environment:
       BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY1_ID}
+      MONITORING_API_KEY: ${PROXY_MONITORING_KEY}
       APP_app1_KEY: ${APP_KEY}
       APP_app2_KEY: ${APP_KEY}
       PRIVKEY_FILE: /run/secrets/proxy1.pem
@@ -77,6 +78,7 @@ services:
     environment:
       BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY2_ID}
+      MONITORING_API_KEY: ${PROXY_MONITORING_KEY}
       APP_app1_KEY: ${APP_KEY}
       APP_app2_KEY: ${APP_KEY}
       PRIVKEY_FILE: /run/secrets/proxy2.pem

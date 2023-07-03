@@ -28,6 +28,8 @@ pub struct Config {
     pub bind_addr: SocketAddr,
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId, ApiKey>,
+    #[cfg(feature = "proxy-monitor")]
+    pub monitoring_api_key: String,
     pub tls_ca_certificates: Vec<X509>,
 }
 
@@ -56,6 +58,11 @@ pub struct CliArgs {
     /// This proxy's beam id, e.g. proxy42.broker23.beam.samply.de
     #[clap(long, env, value_parser)]
     pub proxy_id: String,
+
+    /// This proxy's beam id, e.g. proxy42.broker23.beam.samply.de
+    #[cfg(feature = "proxy-monitor")]
+    #[clap(long, env, value_parser)]
+    pub monitoring_api_key: String,
 
     /// samply.pki: Path to own secret key
     #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
@@ -127,6 +134,7 @@ impl crate::config::Config for Config {
             proxy_id,
             api_keys,
             tls_ca_certificates,
+            monitoring_api_key: cli_args.monitoring_api_key,
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)

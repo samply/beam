@@ -24,6 +24,7 @@ mod serve_health;
 mod serve_tasks;
 #[cfg(feature = "sockets")]
 mod serve_sockets;
+mod monitorer;
 
 pub(crate) const PROXY_TIMEOUT: u64 = 120;
 
