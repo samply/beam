@@ -8,6 +8,7 @@ use crate::{BeamRequestBuilder, APP1, APP_KEY, CLIENT, PROXY1};
 
 #[tokio::test]
 async fn test_no_senders() {
+    let to = vec![AppOrProxyId::new("app1.proxy3.broker").unwrap()];
     let req = Request::builder()
         .uri(format!("{PROXY1}/v1/tasks"))
         .method(Method::POST)
@@ -15,7 +16,7 @@ async fn test_no_senders() {
         .with_json(&shared::MsgTaskRequest {
             id: MsgId::new(),
             from: APP1.clone(),
-            to: vec![AppOrProxyId::new("app1.proxy3.broker").unwrap()],
+            to: to.clone(),
             body: Plain::from(""),
             expire: SystemTime::now() + Duration::from_secs(60),
             failure_strategy: shared::FailureStrategy::Discard,
@@ -24,11 +25,12 @@ async fn test_no_senders() {
         })
         .unwrap();
     let res = CLIENT.request(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY)
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(serde_json::from_slice::<Vec<AppOrProxyId>>(&hyper::body::to_bytes(res.into_body()).await.unwrap()).unwrap(), to);
 }
 
 #[tokio::test]
-async fn test_allowed_sender() {
+async fn test_allowed_sender_but_invalid_proxy() {
     let req = Request::builder()
         .uri(format!("{PROXY1}/v1/tasks"))
         .method(Method::POST)
@@ -45,5 +47,5 @@ async fn test_allowed_sender() {
         })
         .unwrap();
     let res = CLIENT.request(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::CREATED)
+    assert_eq!(res.status(), StatusCode::FAILED_DEPENDENCY)
 }

@@ -53,7 +53,7 @@ pub enum SamplyBeamError {
     #[error("Timeout executing HTTP request: {0}")]
     HttpTimeoutError(Elapsed),
     #[error("Invalid receivers: {0:?}")]
-    InvalidReceivers(Vec<ProxyId>)
+    InvalidReceivers(Vec<ProxyId>),
     #[error("Not allowed to receive messge from: {0}")]
     DisallowedReceiver(AppOrProxyId),
 }
