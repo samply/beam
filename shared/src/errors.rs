@@ -4,7 +4,7 @@ use http::StatusCode;
 use openssl::error::ErrorStack;
 use tokio::time::error::Elapsed;
 
-use crate::beam_id::AppOrProxyId;
+use crate::beam_id::{ProxyId, AppOrProxyId};
 
 #[derive(thiserror::Error, Debug)]
 pub enum SamplyBeamError {
@@ -52,6 +52,8 @@ pub enum SamplyBeamError {
     CertificateError(#[from] CertificateInvalidReason),
     #[error("Timeout executing HTTP request: {0}")]
     HttpTimeoutError(Elapsed),
+    #[error("Invalid receivers: {0:?}")]
+    InvalidReceivers(Vec<ProxyId>)
     #[error("Not allowed to receive messge from: {0}")]
     DisallowedReceiver(AppOrProxyId),
 }
