@@ -299,6 +299,10 @@ async fn handler_tasks_stream(
                         };
                         let json = match validate_and_decrypt(json).await {
                             Ok(json) => json,
+                            Err(SamplyBeamError::DisallowedReceiver(rec)) => {
+                                info!("Did not send result from {rec} as it was forbidden by the config");
+                                continue;
+                            },
                             Err(err) => {
                                 warn!("Got an error decrypting Broker's reply: {err}");
                                 continue;
