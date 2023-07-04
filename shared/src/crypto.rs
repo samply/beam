@@ -874,7 +874,7 @@ pub async fn get_proxy_public_keys(
     if proxies_with_invalid_certs.is_empty() {
         Ok(receivers_keys)
     } else {
-        Err(SamplyBeamError::ExpiredProxyCerts(proxies_with_invalid_certs))
+        Err(SamplyBeamError::InvalidReceivers(proxies_with_invalid_certs))
     }
 }
 

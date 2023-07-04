@@ -483,7 +483,7 @@ async fn encrypt_request(
     }
     let body = encrypt_msg(msg).await.map_err(|e| {
         match e {
-            SamplyBeamError::ExpiredProxyCerts(proxies) => {
+            SamplyBeamError::InvalidReceivers(proxies) => {
                 (StatusCode::FAILED_DEPENDENCY, Json(proxies)).into_response()
             }
             e => {

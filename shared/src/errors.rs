@@ -52,8 +52,8 @@ pub enum SamplyBeamError {
     CertificateError(#[from] CertificateInvalidReason),
     #[error("Timeout executing HTTP request: {0}")]
     HttpTimeoutError(Elapsed),
-    #[error("Expired receiver public keys: {0:?}")]
-    ExpiredProxyCerts(Vec<ProxyId>)
+    #[error("Invalid receivers: {0:?}")]
+    InvalidReceivers(Vec<ProxyId>)
 }
 
 impl From<AddrParseError> for SamplyBeamError {
