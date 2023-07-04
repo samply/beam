@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::{Duration, SystemTime}};
 
-use axum::{extract::{State, Path}, http::StatusCode, routing::get, Json, Router, TypedHeader, headers::{Authorization, authorization::Basic}};
+use axum::{extract::{State, Path}, http::StatusCode, routing::get, Json, Router, TypedHeader, headers::{Authorization, authorization::Basic}, response::Response};
 use serde::{Serialize, Deserialize};
 use shared::{crypto_jwt::Authorized, Msg, beam_id::ProxyId, config::CONFIG_CENTRAL};
 use tokio::sync::RwLock;
@@ -58,7 +58,7 @@ async fn proxy_health(
     State(state): State<Arc<RwLock<Health>>>,
     Path(proxy): Path<ProxyId>,
     auth: TypedHeader<Authorization<Basic>>
-) -> Result<Json<ProxyStatus>, StatusCode> {
+) -> Result<(StatusCode, Json<ProxyStatus>), StatusCode> {
     let Some(ref monitoring_key) = CONFIG_CENTRAL.monitoring_api_key else {
         return Err(StatusCode::NOT_IMPLEMENTED);
     };
@@ -67,10 +67,14 @@ async fn proxy_health(
         return Err(StatusCode::UNAUTHORIZED)
     }
 
-    if let Some(proxy_status) = state.read().await.proxies.get(&proxy) {
-        Ok(Json(proxy_status.clone()))
+    if let Some(reported_back) = state.read().await.proxies.get(&proxy) {
+        if reported_back.online() {
+            Err(StatusCode::OK)
+        } else {
+            Ok((StatusCode::SERVICE_UNAVAILABLE, Json(reported_back.clone())))
+        }
     } else {
-        Err(StatusCode::SERVICE_UNAVAILABLE)
+        Err(StatusCode::NOT_FOUND)
     }
 }
 
@@ -97,7 +101,10 @@ struct ConnectedGuard<'a> {
 impl<'a> ConnectedGuard<'a> {
     async fn connect(proxy: &'a ProxyId, state: &'a Arc<RwLock<Health>>) -> ConnectedGuard<'a> {
         {
-            state.write().await.proxies.insert(proxy.clone(), ProxyStatus::new());
+            state.write().await.proxies
+                .entry(proxy.clone())
+                .and_modify(ProxyStatus::connect)
+                .or_insert(ProxyStatus::new());
         }
         Self { proxy, state }
     }
@@ -108,7 +115,14 @@ impl<'a> Drop for ConnectedGuard<'a> {
         let proxy_id = self.proxy.clone();
         let map = self.state.clone();
         tokio::spawn(async move {
-            map.write().await.proxies.remove(&proxy_id);
+            // We wait here for one second to give the client a bit of time to reconnect incrementing the connection count so that it will be one again after the decrement
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            map.write()
+                .await
+                .proxies
+                .get_mut(&proxy_id)
+                .expect("Has to exist as we don't remove items and the constructor of this type inserts the entry")
+                .disconnect();
         });
     }
 }

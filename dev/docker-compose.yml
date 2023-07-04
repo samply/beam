@@ -1,7 +1,7 @@
 version: "3.7"
 services:
   vault:
-    image: vault
+    image: hashicorp/vault
     ports:
       - 127.0.0.1:8200:8200
     environment:
@@ -55,10 +55,8 @@ services:
     environment:
       BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY1_ID}
-      APP_0_ID: ${APP1_ID_SHORT}
-      APP_0_KEY: ${APP_KEY}
-      APP_1_ID: ${APP2_ID_SHORT}
-      APP_1_KEY: ${APP_KEY}
+      APP_app1_KEY: ${APP_KEY}
+      APP_app2_KEY: ${APP_KEY}
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
@@ -84,10 +82,8 @@ services:
     environment:
       BROKER_URL: ${BROKER_URL}
       PROXY_ID: ${PROXY2_ID}
-      APP_0_ID: ${APP1_ID_SHORT}
-      APP_0_KEY: ${APP_KEY}
-      APP_1_ID: ${APP2_ID_SHORT}
-      APP_1_KEY: ${APP_KEY}
+      APP_app1_KEY: ${APP_KEY}
+      APP_app2_KEY: ${APP_KEY}
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
       RUST_LOG: ${RUST_LOG}

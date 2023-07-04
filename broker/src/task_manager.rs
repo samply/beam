@@ -1,7 +1,7 @@
 use std::{
     borrow::Cow,
     ops::Deref,
-    time::{Duration, SystemTime}, collections::HashMap, sync::Arc,
+    time::{Duration, SystemTime}, collections::HashMap, sync::Arc, convert::Infallible,
 };
 
 use axum::{response::{IntoResponse, sse::Event, Sse}, Json};
@@ -10,6 +10,7 @@ use futures_core::Stream;
 use hyper::StatusCode;
 use once_cell::sync::Lazy;
 use serde::Serialize;
+use serde_json::json;
 use shared::{
     beam_id::AppOrProxyId, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned,
     MsgState, MsgTaskRequest, MsgTaskResult, sse_event::SseEventType,
@@ -82,7 +83,12 @@ impl<T: HasWaitId<MsgId> + Task + Msg + Send + Sync + 'static> TaskManager<T> {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Self::EXPIRE_CHECK_INTERVAL).await;
-                tm.tasks.retain(|_, task| !task.msg.is_expired());
+                tm.tasks.retain(|_, task| if task.msg.is_expired() {
+                    tm.new_results.remove(&task.msg.wait_id());
+                    false
+                } else {
+                    true
+                });
                 // If the memory footprint of the Dashmap will get too large we might need to consider calling DashMap::shrink_to_fit or find a better solution as
                 // this would need to lock the whole map making it inaccessible until everything is reallocated
             }
@@ -118,8 +124,7 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         filter: impl Fn(&T) -> bool,
     ) -> Result<impl Iterator<Item = impl Deref<Target = MsgSigned<T>> + '_>, TaskManagerError>
     {
-        let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
-        let wait_until = Instant::now() + block.wait_time.unwrap_or(Duration::from_secs(600));
+        let (max_elements, wait_until) = decide_blocking_conditions(block);
         let mut new_tasks = self.new_tasks.subscribe();
 
         let mut num_of_tasks = self.get_tasks_by(&filter).count();
@@ -150,16 +155,32 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
 
     pub fn post_task(&self, task: MsgSigned<T>) -> Result<(), TaskManagerError> {
         let id = task.wait_id();
-        if self.tasks.contains_key(&id) {
-            return Err(TaskManagerError::Conflict);
+        if let Some(task) = self.tasks.get(&id) {
+            // We only have a conflict if the conflicting task has not yet expired
+            if !task.msg.is_expired() {
+                return Err(TaskManagerError::Conflict);
+            }
         }
         let max_receivers = task.get_to().len();
         self.tasks.insert(id.clone(), task);
-        let (results_sender, _) = broadcast::channel(max_receivers);
+        let (results_sender, _) = broadcast::channel(1.max(max_receivers));
         self.new_results.insert(id.clone(), results_sender);
         // We dont care if noone is listening
         _ = self.new_tasks.send(id);
         Ok(())
+    }
+}
+
+fn decide_blocking_conditions(block: &HowLongToBlock) -> (usize, Instant) {
+    match (block.wait_count, block.wait_time) {
+        // Dont wait
+        (None, None) => (0, Instant::now()),
+        // Wait for as long as specified regardless of the number of elements
+        (None, Some(wait_time)) => (usize::MAX, Instant::now() + wait_time),
+        // Wait for n elements or timeout after 1h
+        (Some(wait_count), None) => (wait_count as usize, Instant::now() + Duration::from_secs(60 * 60)),
+        // Stop waiting after either some time or some number of elements
+        (Some(wait_count), Some(wait_time)) => (wait_count as usize, Instant::now() + wait_time),
     }
 }
 
@@ -174,9 +195,7 @@ where
         block: &HowLongToBlock,
         filter: impl Fn(&T::Result) -> bool,
     ) -> Result<impl Deref<Target = MsgSigned<T>> + '_, TaskManagerError> {
-        let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
-        let wait_until = Instant::now() + block.wait_time.unwrap_or(Duration::from_secs(600));
-
+        let (max_elements, wait_until) = decide_blocking_conditions(block);
         let mut num_of_results = self
             .get(task_id)?
             .msg
@@ -187,7 +206,7 @@ where
         let mut new_results = self
             .new_results
             .get(task_id)
-            .ok_or(TaskManagerError::NotFound)?
+            .expect("Found task but no corresponding results channel")
             .subscribe();
         while num_of_results < max_elements && Instant::now() < wait_until {
             tokio::select! {
@@ -214,7 +233,10 @@ where
             }
         }
 
-        Ok(self.get(task_id).map_err(|_| TaskManagerError::Gone)?)
+        // Somehow mapping this task to its results creates lifetime issues that I failed to solve.
+        // So the caller needs to get the results himself which is not to bad I guess.
+        // FIXME: Return results here
+        self.get(task_id).map_err(|_| TaskManagerError::Gone)
     }
 
     pub fn stream_results<'a>(
@@ -222,13 +244,15 @@ where
         task_id: &'a MsgId,
         block: &'a HowLongToBlock,
         filter: impl Fn(&T::Result) -> bool + 'a
-    ) -> Result<impl Stream<Item = Result<Event, TaskManagerError>> + 'a, TaskManagerError>
+    ) -> impl Stream<Item = Result<Event, Infallible>> + 'a
         where T::Result: Serialize
     {
-        let task = self.get(task_id)?;
-        Ok(async_stream::stream! {
-            let max_elements = block.wait_count.unwrap_or(u16::MAX) as usize;
-            let wait_until = Instant::now() + block.wait_time.unwrap_or(Duration::from_secs(600));
+        async_stream::stream! {
+            let Ok(task) = self.get(task_id) else {
+                yield Ok(to_event("Did not find task", SseEventType::Error));
+                return;
+            };
+            let (max_elements, wait_until) = decide_blocking_conditions(block);
             let ready_results = task.msg
                 .get_results()
                 .values()
@@ -237,18 +261,20 @@ where
             for res in ready_results {
                 yield Ok(to_event(res, SseEventType::NewResult));
                 num_of_results += 1;
-                if num_of_results >= max_elements {
+                // Only break when wait_count was actually set otherwise we want all the tasks that are present
+                if num_of_results >= max_elements && max_elements!=0 {
                     break;
                 }
             }
             let mut new_results = self
                 .new_results
                 .get(task_id)
-                .ok_or(TaskManagerError::NotFound)?
+                .expect("Found task but no corresponding results channel")
                 .subscribe();
             while num_of_results < max_elements && Instant::now() < wait_until {
                 tokio::select! {
                     _ = tokio::time::sleep_until(wait_until) => {
+                        yield Ok(to_event((), SseEventType::WaitExpired));
                         break;
                     },
                     result = new_results.recv() => {
@@ -261,31 +287,31 @@ where
                                         yield Ok(to_event(new_result, SseEventType::NewResult));
                                     };
                                 } else {
-                                    yield Err(TaskManagerError::Gone);
+                                    yield Ok(to_event(json!({"task_id": task_id}), SseEventType::DeletedTask));
                                 }
                             },
                             Err(e) => {
                                 warn!("new_results channel lagged: {e}");
-                                yield Err(TaskManagerError::BroadcastBufferOverflow);
+                                yield Ok(to_event("Internal server error", SseEventType::Error));
                             }
                         }
                     },
                 }
             }
-        })
+        }
     }
 
-    /// This will push the result to the given task by its id
-    /// Returns true if the given task exists false otherwise
-    pub fn put_result(&self, task_id: &MsgId, result: T::Result) -> Result<(), TaskManagerError> {
-        let Some(mut entry) = self.tasks.get_mut(task_id) else {
+    /// This will push the result to the given task by its id.
+    /// Returns true if the given result was an update to an existing result
+    pub fn put_result(&self, task_id: &MsgId, result: T::Result) -> Result<bool, TaskManagerError> {
+        let Some(mut task) = self.tasks.get_mut(task_id) else {
             return Err(TaskManagerError::NotFound);
         };
-        if !entry.get_to().contains(result.get_from()) {
+        if !task.get_to().contains(result.get_from()) {
             return Err(TaskManagerError::Unauthorized);
         }
         let sender = result.get_from().clone();
-        entry.msg.insert_result(result);
+        let is_updated = task.msg.insert_result(result);
         // We dont care if noone is listening
         _ = self
             .new_results
@@ -294,16 +320,29 @@ where
                 "This task id must be present because it is present at the start of the function",
             )
             .send(sender);
-        Ok(())
+        Ok(is_updated)
     }
 }
 
+#[derive(Debug)]
 pub enum TaskManagerError {
     NotFound,
     Conflict,
     Unauthorized,
     Gone,
     BroadcastBufferOverflow,
+}
+
+impl TaskManagerError {
+    pub fn error_msg(&self) -> &'static str {
+        match self {
+            TaskManagerError::NotFound => "Task not found",
+            TaskManagerError::Conflict => "Task already exists",
+            TaskManagerError::Unauthorized => "Unautherized to access this task",
+            TaskManagerError::Gone => "Task expired while waiting on it",
+            TaskManagerError::BroadcastBufferOverflow => "Internal server error",
+        }
+    }
 }
 
 impl From<TaskManagerError> for StatusCode {
