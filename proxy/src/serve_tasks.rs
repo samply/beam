@@ -10,7 +10,7 @@ use axum::{
     http::{request::Parts, HeaderValue},
     response::{sse::Event, IntoResponse, Response, Sse},
     routing::{any, get, put},
-    Router,
+    Router, Json,
 };
 use futures::{
     stream::{StreamExt, TryStreamExt},
@@ -470,11 +470,11 @@ fn decrypt_msg<M: DecryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> 
 async fn encrypt_request(
     req: Request<Body>,
     sender: &AppId,
-) -> Result<(EncryptedMessage, Parts), (StatusCode, &'static str)> {
+) -> Result<(EncryptedMessage, Parts), Response> {
     let (parts, body) = req.into_parts();
     let body = body::to_bytes(body).await.map_err(|e| {
         warn!("Unable to read message body: {e}");
-        ERR_BODY
+        ERR_BODY.into_response()
     })?;
 
     let msg = if body.is_empty() {
@@ -483,21 +483,12 @@ async fn encrypt_request(
             from: sender.into(),
         })
     } else {
-        match serde_json::from_slice(&body) {
-            Ok(mut val) => {
+        match serde_json::from_slice::<PlainMessage>(&body) {
+            Ok(val) => {
                 debug!("Body is valid json");
-                // If Msg was a struct generic over its other contents this would be so much nicer but this would take a lot of refactoring
-                match val {
-                    MessageType::MsgTaskRequest(ref mut m) => m.to.retain(|to| CONFIG_PROXY.permission_manager.allowed_to_send(to)),
-                    MessageType::MsgTaskResult(ref mut m) => m.to.retain(|to| CONFIG_PROXY.permission_manager.allowed_to_send(to)),
-                    #[cfg(feature = "sockets")]
-                    MessageType::MsgSocketRequest(ref mut m) => m.to.retain(|to| CONFIG_PROXY.permission_manager.allowed_to_send(to)),
-                    MessageType::MsgEmpty(..) => (),
-                };
-                if !matches!(val, MessageType::MsgEmpty(..)) {
-                    if val.get_to().is_empty() {
-                        return Err((StatusCode::UNPROCESSABLE_ENTITY, "Message needs to have at least one `to` entry that is not blocked by this proxies recipient policy"));
-                    }
+                let filtered = val.get_to().iter().filter(|app| !CONFIG_PROXY.permission_manager.allowed_to_send(app)).cloned().collect::<Vec<_>>();
+                if !filtered.is_empty() {
+                    return Err((StatusCode::UNPROCESSABLE_ENTITY, Json(filtered)).into_response());
                 }
 
                 val
@@ -508,17 +499,17 @@ async fn encrypt_request(
                     e,
                     std::str::from_utf8(&body).unwrap_or("(not valid UTF-8)")
                 );
-                return Err(ERR_BODY);
+                return Err(ERR_BODY.into_response());
             }
         }
     };
     // Sanity/security checks: From address sane?
     if msg.get_from() != sender {
-        return Err(ERR_FAKED_FROM);
+        return Err(ERR_FAKED_FROM.into_response());
     }
     let body = encrypt_msg(msg).await.map_err(|e| {
         warn!("Encryption failed with: {e}");
-        ERR_INTERNALCRYPTO
+        ERR_INTERNALCRYPTO.into_response()
     })?;
     Ok((body, parts))
 }
