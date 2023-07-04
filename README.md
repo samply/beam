@@ -581,7 +581,7 @@ Example:
 
 ### Deny sending messages to specific proxies
 This is done by setting `allowed-receivers` and/or `blocked-receivers` options accordingly as described in [Restricting access](#restricting-accesses).
-> Note: When all receivers of a message are being blocked due to these restrictions the proxy will return a status code of 422 Unprocessable Entity.
+> Note: When a receiver of a message is being blocked due to these restrictions the proxy will return a status code of 422 Unprocessable Entity and a json list containing the offending entries.
 
 Example:
 ```bash
