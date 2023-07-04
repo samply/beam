@@ -88,7 +88,7 @@ impl Monitorer {
         }
         if self.task_sender.send(update.into()).is_err() {
             info!("Noone is listening");
-            MONITORER.stop_recording();
+            self.stop_recording();
         };
     }
 }

@@ -47,7 +47,7 @@ use shared::{
 use tokio::io::BufReader;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::{auth::AuthenticatedApp, PROXY_TIMEOUT};
+use crate::{auth::AuthenticatedApp, PROXY_TIMEOUT, monitor};
 
 #[derive(Clone, FromRef)]
 pub(crate) struct TasksState {
@@ -175,6 +175,7 @@ async fn handler_tasks_nostream(
     if !bytes.is_empty() {
         if let Ok(json) = serde_json::from_slice::<Value>(&bytes) {
             let json = to_server_error(validate_and_decrypt(json).await)?;
+            monitor!((&parts, &json));
             trace!("Decrypted Msg: {:#?}", json);
             bytes = serde_json::to_vec(&json).unwrap().into();
             trace!(
@@ -213,7 +214,7 @@ async fn handler_tasks_stream(
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
     // Validate Query, forward to server, get response.
 
-    let mut resp = forward_request(req, &config, &sender, &client)
+    let resp = forward_request(req, &config, &sender, &client)
         .await
         .map_err(|err| (err.0, err.1.into()))?;
 
@@ -228,8 +229,8 @@ async fn handler_tasks_stream(
     }
 
     let outgoing = async_stream::stream! {
-        let incoming = resp
-            .body_mut()
+        let (resp_parts, body) = resp.into_parts();
+        let incoming = body
             .map(|result| result.map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, format!("IO Error: {error}"))))
             .into_async_read();
 
@@ -298,7 +299,10 @@ async fn handler_tasks_stream(
                             continue;
                         };
                         let json = match validate_and_decrypt(json).await {
-                            Ok(json) => json,
+                            Ok(json) => {
+                                monitor!((&resp_parts, &json));
+                                json
+                            },
                             Err(err) => {
                                 warn!("Got an error decrypting Broker's reply: {err}");
                                 continue;
@@ -486,6 +490,9 @@ async fn encrypt_request(
     if msg.get_from() != sender {
         return Err(ERR_FAKED_FROM);
     }
+
+    monitor!((&parts, &msg));
+
     let body = encrypt_msg(msg).await.map_err(|e| {
         warn!("Encryption failed with: {e}");
         ERR_INTERNALCRYPTO
