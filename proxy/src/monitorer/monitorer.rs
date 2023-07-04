@@ -20,7 +20,7 @@ use serde::{Serialize, Serializer};
 use serde_json::Value;
 use shared::{MsgId, MsgTaskRequest, config::CONFIG_PROXY, PlainMessage};
 use tokio::sync::broadcast::{self, Receiver, Sender};
-use tracing::{error, info};
+use tracing::{error, debug};
 
 pub fn router() -> Router {
     Router::new()
@@ -87,7 +87,7 @@ impl Monitorer {
             return;
         }
         if self.task_sender.send(update.into()).is_err() {
-            info!("Noone is listening");
+            debug!("Noone is listening");
             self.stop_recording();
         };
     }
