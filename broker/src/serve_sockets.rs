@@ -1,14 +1,14 @@
 use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref, time::Duration};
 
-use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response}};
+use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response}, headers::{ContentType, HeaderMapExt}};
 use bytes::BufMut;
 use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body, Request, Method, upgrade::{OnUpgrade, self}};
 use serde::{Serialize, Serializer, ser::SerializeSeq};
-use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}, expire_map::LazyExpireMap};
+use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}, expire_map::LazyExpireMap, serde_helpers::DerefSerializer};
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
 use tracing::{debug, log::error, warn};
 
-use crate::{serve_tasks::wait_get_statuscode, task_manager::{TaskManager, Task}};
+use crate::task_manager::{TaskManager, Task};
 
 
 #[derive(Clone)]
@@ -46,20 +46,12 @@ pub(crate) fn router() -> Router {
         .with_state(SocketState::default())
 }
 
-// Look into making a PR for Dashmap that makes its smartpointers serialize with the serde feature
-fn serialize_deref_iter<S: Serializer>(serializer: S, iter: impl Iterator<Item = impl Deref<Target = impl Serialize>>) -> Result<S::Ok, S::Error> {
-    let mut seq_ser = serializer.serialize_seq(iter.size_hint().1).map_err(serde::ser::Error::custom)?;
-    for item in iter {
-        seq_ser.serialize_element(item.deref())?;
-    }
-    seq_ser.end()
-}
 
 async fn get_socket_requests(
     mut block: HowLongToBlock,
     state: State<SocketState>,
     msg: MsgSigned<MsgEmpty>,
-) -> Result<Response, StatusCode> {
+) -> Result<DerefSerializer, StatusCode> {
     if block.wait_count.is_none() && block.wait_time.is_none() {
         block.wait_count = Some(1);
     }
@@ -67,20 +59,10 @@ async fn get_socket_requests(
     let filter = |req: &MsgSocketRequest<Encrypted>| req.to.contains(requester);
 
     let socket_reqs = state.task_manager.wait_for_tasks(&block, filter).await?;
-
-    let writer = bytes::BytesMut::new().writer(); 
-    let mut serializer = serde_json::Serializer::new(writer);
-    if let Err(e) = serialize_deref_iter(&mut serializer, socket_reqs) {
+    DerefSerializer::new(socket_reqs, block.wait_count).map_err(|e| {
         warn!("Failed to serialize socket tasks: {e}");
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-
-    Ok(Response::builder()
-        .header(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))
-        .body(Body::from(serializer.into_inner().into_inner().freeze()))
-        .expect("This is a proper Response")
-        .into_response()
-    )
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 async fn post_socket_request(

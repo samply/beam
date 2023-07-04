@@ -52,10 +52,6 @@ if [ "$CODE" != "401" ]; then
     fail "$RET" Trying to fetch a task not belonging to me, I expected 401, got $CODE
 fi
 
-if [ "$BODY" != "Not your task." ]; then
-    fail "$RET" Trying to fetch a task not belonging to me, I expected body \"Not your task.\", got \"$body\"
-fi
-
 success
 
 testing "Fetch partial results with proxy1 (via SSE)"

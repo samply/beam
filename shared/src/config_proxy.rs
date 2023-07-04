@@ -1,5 +1,6 @@
 use clap::Parser;
 use openssl::x509::X509;
+use regex::Regex;
 
 use std::{
     collections::HashMap,
@@ -13,7 +14,7 @@ use std::{
 use axum::http::HeaderValue;
 use hyper::Uri;
 use serde::Deserialize;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use beam_lib::{AppId, ProxyId};
 use crate::{
@@ -71,27 +72,27 @@ pub struct CliArgs {
 
 pub const APP_PREFIX: &str = "APP";
 
-/// Parses API-Keys from the environment, expecting:
-/// APP_0_ID=app1
-/// APP_0_KEY=App1Secret
-/// APP_1_ID=app2
-/// APP_1_KEY=App2Secret
+/// Parses API-Keys from the environment like:
+/// APP_app1_KEY=App1Secret
+/// APP_app2_KEY=App2Secret
 fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBeamError> {
-    let vars = std::env::vars().collect::<HashMap<String, ApiKey>>();
+    let env_vars = std::env::vars().collect::<HashMap<String, ApiKey>>();
     let mut api_keys = HashMap::new();
-    let mut i = 0;
-    while let Some(app_id) = vars.get(&format!("{APP_PREFIX}_{i}_ID")) {
-        if let Some(api_key) = vars.get(&format!("{APP_PREFIX}_{i}_KEY")) {
-            let app_id = AppId::new(&format!("{app_id}.{proxy_id}"))?;
-            if api_key.is_empty() {
+    let pattern = Regex::new(&format!("{APP_PREFIX}_([A-Za-z0-9-]+)_KEY")).expect("This is a valid regex");
+    for (env_var_name, secret) in env_vars {
+        if let Some(app_name) = pattern.captures_iter(&env_var_name).next().and_then(|cap| cap.get(1)) {
+            let Ok(app_id) = AppId::new(&format!("{}.{proxy_id}", app_name.as_str())) else {
+                // Only warn here as there might be other env vars that could match this pattern
+                warn!("Failed to create app id from env var: {env_var_name}. Skipping");
+                continue;
+            };
+            if secret.is_empty() {
                 return Err(SamplyBeamError::ConfigurationFailed(format!(
-                    "Unable to assign empty API key for client {}",
-                    app_id
+                    "Please supply a non empty API key for client {app_id}",
                 )));
             }
-            api_keys.insert(app_id, api_key.clone());
+            api_keys.insert(app_id, secret);
         }
-        i += 1;
     }
     Ok(api_keys)
 }
@@ -108,7 +109,7 @@ impl crate::config::Config for Config {
         })?;
         let api_keys = parse_apikeys(&proxy_id)?;
         if api_keys.is_empty() {
-            return Err(SamplyBeamError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {0}_0_ID=<clientname>, {0}_0_KEY=<key>", APP_PREFIX)));
+            return Err(SamplyBeamError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {0}_<clientname>_KEY=<key>", APP_PREFIX)));
         }
         let tls_ca_certificates = crate::crypto::load_certificates_from_dir(
             cli_args.tls_ca_certificates_dir,
@@ -155,17 +156,18 @@ mod tests {
     #[test]
     fn test_parse_apikeys() {
         let apps = [
-            ("app1", "App1Secret"),
+            ("app1-test", "App1Secret"),
             ("app2", "App2Secret"),
             ("app3", "App3Secret"),
         ];
         for (i, (app, key)) in apps.iter().enumerate() {
             std::env::set_var(format!("APP_{i}_ID"), app);
             std::env::set_var(format!("APP_{i}_KEY"), key);
+            std::env::set_var(format!("APP_{app}_KEY"), key);
         }
         const BROKER_ID: &str = "broker.samply.de";
         beam_lib::set_broker_id(BROKER_ID.to_string());
         let parsed = parse_apikeys(&ProxyId::new(&format!("proxy.{BROKER_ID}")).unwrap()).unwrap();
-        assert_eq!(parsed.len(), apps.len());
+        assert_eq!(parsed.len(), apps.len() * 2);
     }
 }
