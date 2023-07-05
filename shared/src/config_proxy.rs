@@ -17,7 +17,7 @@ use serde::Deserialize;
 use tracing::{debug, info, warn};
 
 use crate::{
-    beam_id::{self, AppId, BeamId, BrokerId, ProxyId},
+    beam_id::{self, AppId, BeamId, BrokerId, ProxyId, AppOrProxyId, BROKER_ID},
     errors::SamplyBeamError,
 };
 
@@ -29,6 +29,7 @@ pub struct Config {
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId, ApiKey>,
     pub tls_ca_certificates: Vec<X509>,
+    pub permission_manager: PermissionManager,
 }
 
 pub type ApiKey = String;
@@ -64,6 +65,22 @@ pub struct CliArgs {
     /// samply.pki: Path to CA Root certificate
     #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
     rootcert_file: PathBuf,
+    
+    /// A whitelist of apps or proxies that messages may be sent to, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
+    #[clap(long, env, value_parser)]
+    pub allowed_receivers: Option<String>,
+
+    /// A blacklist of apps or proxies that messages may not be sent to, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
+    #[clap(long, env, value_parser)]
+    pub blocked_receivers: Option<String>,
+
+    /// A whitelist of apps or proxies that may send messages to this proxy, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
+    #[clap(long, env, value_parser)]
+    pub allowed_remotes: Option<String>,
+
+    /// A blacklist of apps or proxies that may not send messages to this proxy, e.g. ["app1.proxy1.broker", "proxy2.broker", ...]
+    #[clap(long, env, value_parser)]
+    pub blocked_remotes: Option<String>,
 
     /// (included for technical reasons)
     #[clap(long, hide(true))]
@@ -97,6 +114,40 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBea
     Ok(api_keys)
 }
 
+#[derive(Debug, Clone)]
+pub struct PermissionManager {
+    pub recv_allow_list: Option<Vec<AppOrProxyId>>,
+    pub recv_block_list: Option<Vec<AppOrProxyId>>,
+    pub send_allow_list: Option<Vec<AppOrProxyId>>,
+    pub send_block_list: Option<Vec<AppOrProxyId>>,
+}
+
+impl PermissionManager {
+    pub fn allowed_to_recieve(&self, from: &AppOrProxyId) -> bool {
+        Self::check_permissions_with(&self.recv_allow_list,&self.recv_block_list, from)
+    }
+
+    pub fn allowed_to_send(&self, to: &AppOrProxyId) -> bool {
+        Self::check_permissions_with(&self.send_allow_list, &self.send_block_list, to)
+    }
+
+    fn check_permissions_with(allow: &Option<Vec<AppOrProxyId>>, deny: &Option<Vec<AppOrProxyId>>, beam_id: &AppOrProxyId) -> bool {
+        match (allow, deny) {
+            (None, None) => true,
+            (None, Some(block_list)) => !Self::contains(&block_list, beam_id),
+            (Some(allow_list), None) => Self::contains(&allow_list, beam_id),
+            (Some(allow_list), Some(block_list)) => !Self::contains(&block_list, beam_id) || Self::contains(&allow_list, beam_id)
+        }
+    }
+
+    fn contains(ids: &Vec<AppOrProxyId>, needle: &AppOrProxyId) -> bool {
+        ids.iter().find(|id| match id {
+            AppOrProxyId::AppId(app) => needle == app,
+            AppOrProxyId::ProxyId(proxy) => proxy == &needle.get_proxy_id(),
+        }).is_some()
+    }
+}
+
 impl crate::config::Config for Config {
     fn load() -> Result<Config, SamplyBeamError> {
         let cli_args = CliArgs::parse();
@@ -120,6 +171,7 @@ impl crate::config::Config for Config {
                 e
             ))
         })?;
+
         let config = Config {
             broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
             broker_uri: cli_args.broker_url,
@@ -127,9 +179,37 @@ impl crate::config::Config for Config {
             proxy_id,
             api_keys,
             tls_ca_certificates,
+            permission_manager: PermissionManager {
+                recv_allow_list: parse_to_list_of_ids(cli_args.allowed_remotes)?,
+                recv_block_list: parse_to_list_of_ids(cli_args.blocked_remotes)?,
+                send_allow_list: parse_to_list_of_ids(cli_args.allowed_receivers)?,
+                send_block_list: parse_to_list_of_ids(cli_args.blocked_receivers)?
+            }
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)
+    }
+}
+
+fn parse_to_list_of_ids(input: Option<String>) -> Result<Option<Vec<AppOrProxyId>>, SamplyBeamError> {
+    let broker_id = BROKER_ID.get().expect("Should be set before parsing beam ids");
+    if let Some(app_list_str) = input {
+        let Ok(strings): Result<Vec<String>, _> = serde_json::from_str(&app_list_str) else {
+            return Err(SamplyBeamError::ConfigurationFailed(format!("Failed to parse {app_list_str} as a json array.")));
+        };
+        Ok(Some(strings.into_iter()
+            .map(|mut id| {
+                id.push('.');
+                id.push_str(broker_id);
+                id.parse()
+            })
+            .collect::<Result<_, _>>()
+            .map_err(|e| SamplyBeamError::ConfigurationFailed(
+                format!("Failed to parse {app_list_str} to a list of beam ids: {e}")
+            ))?
+        ))
+    } else {
+        Ok(None)
     }
 }
 
@@ -170,4 +250,65 @@ mod tests {
         let parsed = parse_apikeys(&ProxyId::new(&format!("proxy.{BROKER_ID}")).unwrap()).unwrap();
         assert_eq!(parsed.len(), apps.len() * 2);
     }
+
+    #[test]
+    fn test_parse_app_list() {
+        const BROKER_ID: &str = "broker.samply.de";
+        BrokerId::set_broker_id(BROKER_ID.to_string());
+        assert_eq!(
+            parse_to_list_of_ids(Some(r#"["app1.proxy1", "proxy1"]"#.to_string())).unwrap(),
+            Some(vec![
+                AppOrProxyId::new(&format!("app1.proxy1.{BROKER_ID}")).unwrap(),
+                AppOrProxyId::new(&format!("proxy1.{BROKER_ID}")).unwrap()
+            ])
+        );
+        assert_eq!(parse_to_list_of_ids(None).unwrap(), None);
+    }
+
+    #[test]
+    fn test_contains() {
+        const BROKER_ID: &str = "broker.samply.de";
+        BrokerId::set_broker_id(BROKER_ID.to_string());
+        let app_ids = vec![AppOrProxyId::new(&format!("app1.proxy1.{BROKER_ID}")).unwrap()];
+        let proxy_id = vec![AppOrProxyId::new(&format!("proxy1.{BROKER_ID}")).unwrap()];
+        assert!(PermissionManager::contains(&app_ids, &AppOrProxyId::new(&format!("app1.proxy1.{BROKER_ID}")).unwrap()));
+        assert!(!PermissionManager::contains(&app_ids, &AppOrProxyId::new(&format!("proxy1.{BROKER_ID}")).unwrap()));
+        assert!(PermissionManager::contains(&proxy_id, &AppOrProxyId::new(&format!("app2.proxy1.{BROKER_ID}")).unwrap()));
+        assert!(PermissionManager::contains(&proxy_id, &AppOrProxyId::new(&format!("proxy1.{BROKER_ID}")).unwrap()));
+        assert!(!PermissionManager::contains(&proxy_id, &AppOrProxyId::new(&format!("proxy2.{BROKER_ID}")).unwrap()));
+    }
+
+    #[test]
+    fn test_check_permissions_with() {
+        const BROKER_ID: &str = "broker.samply.de";
+        BrokerId::set_broker_id(BROKER_ID.to_string());
+        let proxy1 = AppOrProxyId::new(&format!("proxy1.{BROKER_ID}")).unwrap();
+        let app_id1 = AppOrProxyId::new(&format!("app1.proxy1.{BROKER_ID}")).unwrap();
+        let app_id2 = AppOrProxyId::new(&format!("app2.proxy1.{BROKER_ID}")).unwrap();
+
+        // Both allow and deny lists empty
+        assert!(PermissionManager::check_permissions_with(&None, &None, &app_id1));
+        
+        // Deny list empty, allow list contains ID
+        let allow_list = vec![app_id1.clone()];
+        assert!(PermissionManager::check_permissions_with(&Some(allow_list.clone()), &None, &app_id1));
+        assert!(!PermissionManager::check_permissions_with(&Some(allow_list), &None, &app_id2));
+        
+        // Deny list contains ID, allow list empty
+        let block_list = vec![app_id1.clone()];
+        assert!(!PermissionManager::check_permissions_with(&None, &Some(block_list.clone()), &app_id1));
+        assert!(PermissionManager::check_permissions_with(&None, &Some(block_list), &app_id2));
+        
+        // Both lists contain ID
+        let allow_list = vec![app_id1.clone()];
+        let block_list = vec![app_id1.clone(), app_id2.clone()];
+        assert!(PermissionManager::check_permissions_with(&Some(allow_list.clone()), &Some(block_list.clone()), &app_id1));
+        assert!(!PermissionManager::check_permissions_with(&Some(allow_list), &Some(block_list), &app_id2));
+        
+        // Both lists with proxy
+        let allow_list = vec![app_id1.clone()];
+        assert!(PermissionManager::check_permissions_with(&Some(allow_list.clone()), &Some(vec![proxy1.clone()]), &app_id1));
+        assert!(!PermissionManager::check_permissions_with(&Some(allow_list), &Some(vec![proxy1]), &app_id2));
+    }
+
 }

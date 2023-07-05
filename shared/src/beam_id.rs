@@ -6,7 +6,7 @@ use serde::{de::Visitor, Deserialize, Serialize};
 
 use crate::{config, errors::SamplyBeamError};
 
-static BROKER_ID: OnceCell<String> = OnceCell::new();
+pub(crate) static BROKER_ID: OnceCell<String> = OnceCell::new();
 
 #[derive(PartialEq, Debug)]
 pub enum BeamIdType {
@@ -379,13 +379,19 @@ impl<'de> Visitor<'de> for AppOrProxyIdVisitor {
     where
         E: serde::de::Error,
     {
-        let t = AppId::str_has_type(v)
-            .map_err(|e| serde::de::Error::custom(format!("Invalid Beam ID \"{v}\": {e}")))?;
-        match t {
+        v.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl FromStr for AppOrProxyId {
+    type Err = SamplyBeamError;
+    
+    fn from_str(v: &str) -> Result<AppOrProxyId, Self::Err> {
+        match AppId::str_has_type(v)? {
             BeamIdType::AppId => Ok(AppOrProxyId::AppId(AppId::new(v).unwrap())),
             BeamIdType::ProxyId => Ok(AppOrProxyId::ProxyId(ProxyId::new(v).unwrap())),
-            BeamIdType::BrokerId => Err(serde::de::Error::custom(
-                "Expected AppOrProxyId, got BrokerId.",
+            BeamIdType::BrokerId => Err(SamplyBeamError::InvalidBeamId(
+                "Expected AppOrProxyId, got BrokerId.".to_string()
             )),
         }
     }

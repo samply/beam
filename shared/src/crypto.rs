@@ -213,7 +213,7 @@ impl CertificateCache {
     pub async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<CertificateCacheEntry> {
         // TODO: What if multiple certs are found?
         let mut result = get_all_certs_from_cache_by_cname(cname).await; // Drop Read Locks
-        if result.is_empty() {
+        if result.iter().filter(|cert| matches!(cert, CertificateCacheEntry::Valid(_))).count() == 0 {
             
             // requires write lock.
             Self::update_certificates().await.unwrap_or_else(|e| {
@@ -596,20 +596,22 @@ pub async fn get_cert_and_client_by_serial_as_pemstr(
 }
 
 pub async fn get_newest_certs_for_cnames_as_pemstr(
-    cnames: impl IntoIterator<Item = &ProxyId>,
-) -> Option<Vec<CryptoPublicPortion>> {
-    let mut result: Vec<CryptoPublicPortion> = Vec::new(); // No fancy map/iter, bc of async
+    cnames: Vec<ProxyId>,
+) -> Vec<Result<CryptoPublicPortion, ProxyId>> {
+    let mut result = Vec::with_capacity(cnames.len()); // No fancy map/iter, bc of async
     for id in cnames {
-        let certs = get_all_certs_and_clients_by_cname_as_pemstr(id)
+        let certs = get_all_certs_and_clients_by_cname_as_pemstr(&id)
             .await
             .into_iter()
             .flatten()
             .collect();
         if let Some(best_candidate) = get_best_other_certificate(&certs) {
-            result.push(best_candidate);
+            result.push(Ok(best_candidate));
+        } else {
+            result.push(Err(id))
         }
     }
-    (!result.is_empty()).then_some(result)
+    result
 }
 
 fn extract_x509(cert: &X509) -> Result<CryptoPublicPortion, CertificateInvalidReason> {
@@ -861,18 +863,19 @@ pub async fn get_proxy_public_keys(
         })
         .collect();
     let receivers_crypto_bundle =
-        crypto::get_newest_certs_for_cnames_as_pemstr(proxy_receivers.iter()).await;
-    let receivers_keys = match receivers_crypto_bundle {
-        Some(vec) => vec
-            .iter()
-            .map(|crypt_publ| {
-                rsa::RsaPublicKey::from_public_key_pem(&crypt_publ.pubkey)
-                    .expect("Cannot collect recipients' public keys")
-            })
-            .collect::<Vec<rsa::RsaPublicKey>>(), // TODO Expect
-        None => Vec::new(),
-    };
-    Ok(receivers_keys)
+        crypto::get_newest_certs_for_cnames_as_pemstr(proxy_receivers).await;
+    let (receivers_keys, proxies_with_invalid_certs): (Vec<_>, Vec<_>) = receivers_crypto_bundle
+        .into_iter()
+        .map(|crypt_publ_res| {
+            crypt_publ_res.and_then(|crypto|
+                rsa::RsaPublicKey::from_public_key_pem(&crypto.pubkey).map_err(|_| crypto.beam_id))
+        })
+        .partition_result();
+    if proxies_with_invalid_certs.is_empty() {
+        Ok(receivers_keys)
+    } else {
+        Err(SamplyBeamError::InvalidReceivers(proxies_with_invalid_certs))
+    }
 }
 
 #[tokio::test]
