@@ -346,6 +346,13 @@ impl TaskManagerError {
     }
 }
 
+impl From<TaskManagerError> for (StatusCode, &'static str) {
+    fn from(value: TaskManagerError) -> Self {
+        let err = value.error_msg();
+        (StatusCode::from(value), err)
+    }
+}
+
 impl From<TaskManagerError> for StatusCode {
     fn from(value: TaskManagerError) -> Self {
         match value {
