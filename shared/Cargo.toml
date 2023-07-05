@@ -61,6 +61,8 @@ regex = "1"
 # expire map dependencies
 dashmap =  { version = "5.4", optional = true}
 
+beam-lib = { workspace = true }
+
 [dev-dependencies]
 tokio-test = "0.4.2"
 

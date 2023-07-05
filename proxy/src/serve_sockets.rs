@@ -29,8 +29,8 @@ use hyper::{upgrade::{OnUpgrade, self}, Body, Request, StatusCode};
 use rsa::rand_core::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use beam_lib::AppOrProxyId;
 use shared::{
-    beam_id::AppOrProxyId,
     config,
     ct_codecs::{Base64UrlSafeNoPadding, Encoder as B64Encoder, Decoder as B64Decoder, self},
     http_client::SamplyHttpClient,
@@ -120,7 +120,7 @@ async fn create_socket_con(
     const TTL: Duration = Duration::from_secs(60);
     task_secret_map.insert_for(TTL, task_id.clone(), secret);
     let socket_req = MsgSocketRequest {
-        from: AppOrProxyId::AppId(sender.clone()),
+        from: AppOrProxyId::App(sender.clone()),
         to: vec![to],
         expire: SystemTime::now() + TTL,
         id: task_id,
@@ -156,14 +156,14 @@ async fn create_socket_con(
         );
         return (res.status(), "Failed to post MsgSocketRequest to broker").into_response();
     }
-    connect_socket(AuthenticatedApp(sender), state, Extension(task_secret_map), task_id, req).await
+    connect_socket(AuthenticatedApp(sender), state, Extension(task_secret_map), Path(task_id), req).await
 }
 
 async fn connect_socket(
     AuthenticatedApp(sender): AuthenticatedApp,
     state: State<TasksState>,
     Extension(task_secret_map): Extension<MsgSecretMap>,
-    task_id: MsgId,
+    Path(task_id): Path<MsgId>,
     req: Request<Body>,
 ) -> Response {
     if req.extensions().get::<OnUpgrade>().is_none() {
@@ -175,7 +175,7 @@ async fn connect_socket(
     };
 
     let msg_empty = MsgEmpty {
-        from: AppOrProxyId::AppId(sender.clone()),
+        from: AppOrProxyId::App(sender.clone()),
     };
     let Ok(body) = serde_json::to_vec(&msg_empty) else {
         warn!("Failed to serialize MsgEmpty");

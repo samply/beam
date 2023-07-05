@@ -1,11 +1,11 @@
+use beam_lib::{AppOrProxyId, ProxyId};
 use crate::{
-    beam_id::{AppOrProxyId, ProxyId},
     config,
     config_shared::ConfigCrypto,
     crypto::{self, CryptoPublicPortion},
     errors::{CertificateInvalidReason, SamplyBeamError},
     middleware::{LoggingInfo, ProxyLogger},
-    BeamId, Msg, MsgEmpty, MsgId, MsgSigned,
+    Msg, MsgEmpty, MsgId, MsgSigned,
 };
 use axum::{async_trait, body::HttpBody, extract::FromRequest, http::StatusCode, BoxError};
 use http::{request::Parts, uri::PathAndQuery, Request};
@@ -106,7 +106,7 @@ pub async fn extract_jwt<T: DeserializeOwned + Serialize>(
             warn!("Failed to decode {data:?} to JwtClaims<HeaderClaims>. Err: {e}");
             SamplyBeamError::RequestValidationFailed("Invalid JWT body in header".to_string())
         })?;
-        let proxy_id: ProxyId = json.custom.from.get_proxy_id();
+        let proxy_id: ProxyId = json.custom.from.proxy_id();
         let mut certs = crypto::get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
             .await
             .into_iter()

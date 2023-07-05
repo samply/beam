@@ -2,8 +2,8 @@ use axum::{async_trait, body::Bytes, http::request, response::Response, Json};
 use hyper::{client::HttpConnector, Client, Method, Request, StatusCode, Uri};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
+use beam_lib::AppOrProxyId;
 use shared::{
-    beam_id::AppOrProxyId,
     config,
     config_proxy::Config,
     config_shared::ConfigCrypto,
@@ -31,7 +31,7 @@ impl GetCertsFromBroker {
             .build()?;
 
         let body = EncryptedMessage::MsgEmpty(MsgEmpty {
-            from: AppOrProxyId::ProxyId(self.config.proxy_id.clone()),
+            from: AppOrProxyId::Proxy(self.config.proxy_id.clone()),
         });
         let (parts, body) = Request::builder()
             .method(Method::GET)

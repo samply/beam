@@ -11,13 +11,15 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
+use beam_lib::AppOrProxyId;
 use futures_core::{stream, Stream};
 use hyper::HeaderMap;
 use serde::Deserialize;
+use beam_lib::WorkStatus;
 use shared::{
-    beam_id::AppOrProxyId, config, errors::SamplyBeamError, sse_event::SseEventType,
+    config, errors::SamplyBeamError, sse_event::SseEventType,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg, MsgEmpty,
-    MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, WorkStatus, EMPTY_VEC_APPORPROXYID, serde_helpers::DerefSerializer,
+    MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, EMPTY_VEC_APPORPROXYID, serde_helpers::DerefSerializer,
 };
 use tokio::{
     sync::{
@@ -56,7 +58,7 @@ async fn get_results_for_task(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<TasksState>,
     block: HowLongToBlock,
-    task_id: MsgId,
+    Path(task_id): Path<MsgId>,
     headers: HeaderMap,
     msg: MsgSigned<MsgEmpty>,
 ) -> Response {

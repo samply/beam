@@ -18,7 +18,7 @@ use hyper::Body;
 use tokio::sync::{oneshot, Mutex};
 use tracing::{info, instrument, span, warn, Level};
 
-use crate::beam_id::AppOrProxyId;
+use beam_lib::AppOrProxyId;
 
 const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 

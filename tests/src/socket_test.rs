@@ -1,13 +1,15 @@
 
 use std::future::Future;
 
+use beam_lib::{SocketTask, MsgId, MsgEmpty, AddressingId};
 use http::{Request, header, Method, Response, StatusCode};
-use hyper::{Body, upgrade::Upgraded};
+use hyper::{Body, upgrade::Upgraded, client::HttpConnector};
 use rand::RngCore;
-use shared::{http_client::SamplyHttpClient, MsgId, MsgEmpty, beam_id::AppOrProxyId};
 use tokio::io::{AsyncWriteExt, AsyncReadExt};
 use anyhow::Result;
 use crate::*;
+
+type Client = hyper::client::Client<HttpConnector>;
 
 async fn upgrade(res: impl Future<Output = Response<Body>>) -> Upgraded {
     hyper::upgrade::on(res.await).await.expect("Upgrade successful")
@@ -30,7 +32,7 @@ async fn test_connections(r1: impl Future<Output = Response<Body>>, r2: impl Fut
 
 #[tokio::test]
 async fn test_full() -> Result<()> {
-    let client = shared::http_client::build(&Vec::new(), None, None)?;
+    let client = Client::new();
     let client2 = client.clone();
 
     let app1 = async {
@@ -54,33 +56,33 @@ async fn test_full() -> Result<()> {
     Ok(())
 }
 
-async fn create_connect_socket(client: SamplyHttpClient, app: &AppOrProxyId) -> Result<Response<Body>> {
+async fn create_connect_socket(client: Client, app: &AddressingId) -> Result<Response<Body>> {
     let req = Request::builder()
         .method(Method::POST)
         .uri(format!("{PROXY1}/v1/sockets/{app}"))
-        .header(header::AUTHORIZATION, format!("ApiKey {} {APP_KEY}", APP1.clone()))
+        .header(header::AUTHORIZATION, format!("ApiKey {} {APP_KEY}", *APP1))
         .header(header::UPGRADE, "tcp")
         .body(Body::empty())?;
     Ok(client.request(req).await?)
 }
 
-async fn connect_socket(client: SamplyHttpClient, task_id: &MsgId) -> Result<Response<Body>> {
+async fn connect_socket(client: Client, task_id: &MsgId) -> Result<Response<Body>> {
     let req = Request::builder()
         .method(Method::GET)
         .uri(format!("{PROXY2}/v1/sockets/{task_id}"))
-        .header(header::AUTHORIZATION, format!("ApiKey {} {APP_KEY}", APP2.clone()))
+        .header(header::AUTHORIZATION, format!("ApiKey {} {APP_KEY}", *APP2))
         .header(header::UPGRADE, "tcp")
         .body(Body::empty())?;
     Ok(client.request(req).await?)
 }
 
-async fn get_task(client: SamplyHttpClient) -> Result<Response<Body>> {
+async fn get_task(client: Client) -> Result<Response<Body>> {
     let msg = MsgEmpty {
         from: APP2.clone(),
     };
     let req = Request::builder()
         .uri(format!("{PROXY2}/v1/sockets?wait_count=1"))
-        .header(header::AUTHORIZATION, format!("ApiKey {} {APP_KEY}", APP2.clone()))
+        .header(header::AUTHORIZATION, format!("ApiKey {} {APP_KEY}", *APP2))
         .method(Method::GET)
         .body(hyper::Body::from(serde_json::to_vec(&msg)?))?;
     let resp = client.request(req).await?;

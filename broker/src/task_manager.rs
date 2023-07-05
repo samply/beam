@@ -11,8 +11,9 @@ use hyper::StatusCode;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde_json::json;
+use beam_lib::{AppOrProxyId, MsgEmpty, MsgId};
 use shared::{
-    beam_id::AppOrProxyId, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned,
+    HasWaitId, HowLongToBlock, Msg, MsgSigned,
     MsgState, MsgTaskRequest, MsgTaskResult, sse_event::SseEventType,
 };
 use tokio::{sync::broadcast, time::Instant};
