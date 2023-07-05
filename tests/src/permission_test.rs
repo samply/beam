@@ -1,13 +1,14 @@
 use std::time::{SystemTime, Duration};
 
 use http::{Request, StatusCode, Method};
-use shared::{MsgId, Plain, beam_id::{AppOrProxyId, BeamId}};
+use shared::{MsgId, Plain, beam_id::{AppOrProxyId, BeamId, BrokerId}};
 
 use crate::{BeamRequestBuilder, APP1, APP_KEY, CLIENT, PROXY1};
 
 
 #[tokio::test]
 async fn test_no_senders() {
+    BrokerId::set_broker_id("broker".to_string());
     let to = vec![AppOrProxyId::new("app1.proxy3.broker").unwrap()];
     let req = Request::builder()
         .uri(format!("{PROXY1}/v1/tasks"))
@@ -31,6 +32,7 @@ async fn test_no_senders() {
 
 #[tokio::test]
 async fn test_allowed_sender_but_invalid_proxy() {
+    BrokerId::set_broker_id("broker".to_string());
     let req = Request::builder()
         .uri(format!("{PROXY1}/v1/tasks"))
         .method(Method::POST)
