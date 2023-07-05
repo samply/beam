@@ -3,6 +3,7 @@ use std::{net::AddrParseError, str::Utf8Error, string::FromUtf8Error};
 use http::StatusCode;
 use openssl::error::ErrorStack;
 use tokio::time::error::Elapsed;
+use beam_lib::ProxyId;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SamplyBeamError {
@@ -50,6 +51,8 @@ pub enum SamplyBeamError {
     CertificateError(#[from] CertificateInvalidReason),
     #[error("Timeout executing HTTP request: {0}")]
     HttpTimeoutError(Elapsed),
+    #[error("Invalid receivers: {0:?}")]
+    InvalidReceivers(Vec<ProxyId>)
 }
 
 impl From<AddrParseError> for SamplyBeamError {

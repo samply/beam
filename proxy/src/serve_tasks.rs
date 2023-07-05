@@ -10,7 +10,7 @@ use axum::{
     http::{request::Parts, HeaderValue},
     response::{sse::Event, IntoResponse, Response, Sse},
     routing::{any, get, put},
-    Router,
+    Router, Json,
 };
 use futures::{
     stream::{StreamExt, TryStreamExt},
@@ -90,7 +90,7 @@ pub(crate) async fn forward_request(
     config: &config_proxy::Config,
     sender: &AppId,
     client: &SamplyHttpClient,
-) -> Result<hyper::Response<Body>, (StatusCode, &'static str)> {
+) -> Result<hyper::Response<Body>, Response> {
     // Create uri to contact broker
     let path = req.uri().path();
     let path_query = req
@@ -100,7 +100,7 @@ pub(crate) async fn forward_request(
         .unwrap_or(path);
     let target_uri =
         Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
-            .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried."))?;
+            .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried.").into_response())?;
     *req.uri_mut() = target_uri;
 
     req.headers_mut().append(
@@ -108,7 +108,7 @@ pub(crate) async fn forward_request(
         HeaderValue::from_static(env!("SAMPLY_USER_AGENT")),
     );
     let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
-    let req = sign_request(encrypted_msg, parts, &config, None).await?;
+    let req = sign_request(encrypted_msg, parts, &config, None).await.map_err(IntoResponse::into_response)?;
     trace!("Requesting: {:?}", req);
     let resp = client.request(req).await.map_err(|e| {
         if is_actually_hyper_timeout(&e) {
@@ -117,7 +117,7 @@ pub(crate) async fn forward_request(
         } else {
             warn!("Request to broker failed: {}", e.to_string());
             (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
-        }
+        }.into_response()
     })?;
     Ok(resp)
 }
@@ -128,7 +128,7 @@ pub(crate) async fn handler_task(
     AuthenticatedApp(sender): AuthenticatedApp,
     headers: HeaderMap,
     req: Request<Body>,
-) -> Result<Response, (StatusCode, String)> {
+) -> Response {
     let found = &headers
         .get(header::ACCEPT)
         .unwrap_or(&HeaderValue::from_static(""))
@@ -139,18 +139,15 @@ pub(crate) async fn handler_task(
         .find(|part| *part == "text/event-stream")
         .is_some();
 
-    let result = if *found {
+    if *found {
         handler_tasks_stream(client, config, sender, req)
-            .await?
+            .await
             .into_response()
     } else {
         handler_tasks_nostream(client, config, sender, req)
             .await
-            .map_err(|e| (e.0, e.1.to_string()))?
             .into_response()
-    };
-
-    return Ok(result);
+    }
 }
 
 async fn handler_tasks_nostream(
@@ -158,7 +155,7 @@ async fn handler_tasks_nostream(
     config: config_proxy::Config,
     sender: AppId,
     req: Request<Body>,
-) -> Result<Response<Body>, (StatusCode, &'static str)> {
+) -> Result<Response<Body>, Response> {
     // Validate Query, forward to server, get response.
 
     let resp = forward_request(req, &config, &sender, &client).await?;
@@ -168,7 +165,7 @@ async fn handler_tasks_nostream(
     let (mut parts, body) = resp.into_parts();
     let mut bytes = body::to_bytes(body).await.map_err(|e| {
         error!("Error receiving reply from the broker: {}", e);
-        ERR_UPSTREAM
+        ERR_UPSTREAM.into_response()
     })?;
 
     // TODO: Always return application/jwt from server.
@@ -210,12 +207,10 @@ async fn handler_tasks_stream(
     config: config_proxy::Config,
     sender: AppId,
     req: Request<Body>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, Response> {
     // Validate Query, forward to server, get response.
 
-    let mut resp = forward_request(req, &config, &sender, &client)
-        .await
-        .map_err(|err| (err.0, err.1.into()))?;
+    let mut resp = forward_request(req, &config, &sender, &client).await?;
 
     let code = resp.status();
     if !code.is_success() {
@@ -224,7 +219,7 @@ async fn handler_tasks_stream(
             .and_then(|v| String::from_utf8(v.into()).ok())
             .unwrap_or("(unable to parse reply)".into());
         warn!("Got unexpected response code from server: {code}. Returning error message as-is: \"{error_msg}\"");
-        return Err((code, error_msg));
+        return Err((code, error_msg).into_response());
     }
 
     let outgoing = async_stream::stream! {
@@ -325,7 +320,7 @@ async fn handler_tasks_stream(
     Ok(sse)
 }
 
-pub(crate) fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, (StatusCode, &'static str)> {
+pub(crate) fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, Response> {
     res.map_err(|e| match e {
         SamplyBeamError::JsonParseError(e) => {
             warn!("{e}");
@@ -340,7 +335,7 @@ pub(crate) fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, (
             warn!("Unhandled error {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "Unknown error")
         }
-    })
+    }.into_response())
 }
 
 // TODO: This could be a middleware
@@ -454,11 +449,11 @@ fn decrypt_msg<M: DecryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> 
 async fn encrypt_request(
     req: Request<Body>,
     sender: &AppId,
-) -> Result<(EncryptedMessage, Parts), (StatusCode, &'static str)> {
+) -> Result<(EncryptedMessage, Parts), Response> {
     let (parts, body) = req.into_parts();
     let body = body::to_bytes(body).await.map_err(|e| {
         warn!("Unable to read message body: {e}");
-        ERR_BODY
+        ERR_BODY.into_response()
     })?;
 
     let msg = if body.is_empty() {
@@ -478,17 +473,24 @@ async fn encrypt_request(
                     e,
                     std::str::from_utf8(&body).unwrap_or("(not valid UTF-8)")
                 );
-                return Err(ERR_BODY);
+                return Err(ERR_BODY.into_response());
             }
         }
     };
     // Sanity/security checks: From address sane?
     if msg.get_from() != sender {
-        return Err(ERR_FAKED_FROM);
+        return Err(ERR_FAKED_FROM.into_response());
     }
     let body = encrypt_msg(msg).await.map_err(|e| {
-        warn!("Encryption failed with: {e}");
-        ERR_INTERNALCRYPTO
+        match e {
+            SamplyBeamError::InvalidReceivers(proxies) => {
+                (StatusCode::FAILED_DEPENDENCY, Json(proxies)).into_response()
+            }
+            e => {
+                warn!("Encryption failed with: {e}");
+                ERR_INTERNALCRYPTO.into_response()
+            }
+        }
     })?;
     Ok((body, parts))
 }

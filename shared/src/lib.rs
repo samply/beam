@@ -314,7 +314,7 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
         let nonce = XChaCha20Poly1305::generate_nonce(&mut rng);
 
         // Encrypt symmetric key with receivers' public keys
-        let (encrypted_keys, err): (Vec<_>, Vec<_>) = receivers_public_keys
+        let Ok(encrypted_keys) = receivers_public_keys
             .iter()
             .map(|key| {
                 key.encrypt(
@@ -323,12 +323,12 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
                     symmetric_key.as_slice(),
                 )
             })
-            .partition_result();
-        if !err.is_empty() {
+            .collect()
+        else {
             return Err(SamplyBeamError::SignEncryptError(
                 "Encryption error: Cannot encrypt symmetric key".into(),
             ));
-        }
+        };
 
         // Encrypt fields content
         let cipher = XChaCha20Poly1305::new(&symmetric_key);

@@ -78,19 +78,23 @@ async fn get_tasks(
     state: State<TasksState>,
     Extension(task_secret_map): Extension<MsgSecretMap>,
     req: Request<Body>
-) -> Result<Json<Vec<MsgSocketRequest<Plain>>>, StatusCode> {
-    let mut res = forward_request(req, &state.config, &sender, &state.client).await.map_err(|e| e.0)?;
+) -> Result<Json<Vec<MsgSocketRequest<Plain>>>, Response> {
+    let mut res = forward_request(req, &state.config, &sender, &state.client).await?;
     if res.status() != StatusCode::OK {
-        return Err(res.status());
+        return Err(res.into_response());
     }
-    let body = hyper::body::to_bytes(res.body_mut()).await.map_err(|_| StatusCode::BAD_GATEWAY)?;
-    let enc_json = serde_json::from_slice(&body).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let plain_json = to_server_error(validate_and_decrypt(enc_json).await).map_err(|e| e.0)?;
-    let tasks: Vec<MessageType<Plain>> = serde_json::from_value(plain_json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let body = hyper::body::to_bytes(res.body_mut()).await.map_err(|_| StatusCode::BAD_GATEWAY.into_response())?;
+    let enc_json = serde_json::from_slice(&body).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
+    let plain_json = to_server_error(validate_and_decrypt(enc_json).await).map_err(IntoResponse::into_response)?;
+    let tasks: Vec<MessageType<Plain>> = serde_json::from_value(plain_json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
     let mut out = Vec::with_capacity(tasks.len());
     for task in tasks {
         if let MessageType::MsgSocketRequest(mut socket_task) = task {
-            let key = serde_json::from_value(Value::String(socket_task.secret.body.as_ref().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?.to_string())).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let key = serde_json::from_value(Value::String(socket_task.secret.body
+                .as_ref()
+                .ok_or(StatusCode::INTERNAL_SERVER_ERROR.into_response())?
+                .to_string()
+            )).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
             let Ok(ttl) = socket_task.expire.duration_since(SystemTime::now()) else {
                 continue;
             };
@@ -98,7 +102,7 @@ async fn get_tasks(
             socket_task.secret.body = None;
             out.push(socket_task);
         } else {
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
     }
 
