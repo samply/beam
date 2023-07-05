@@ -2,7 +2,6 @@
 
 mod banner;
 mod crypto;
-mod expire;
 mod health;
 mod serve;
 mod serve_health;

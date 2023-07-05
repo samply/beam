@@ -49,18 +49,3 @@ where
         }
     }
 }
-
-#[async_trait]
-impl<S> FromRequestParts<S> for MyUuid
-where
-    S: Send + Sync,
-{
-    type Rejection = (StatusCode, &'static str);
-
-    async fn from_request_parts(req: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        match req.extract::<Path<Uuid>>().await {
-            Ok(value) => Ok(Self(value.0)),
-            Err(_) => Err((StatusCode::BAD_REQUEST, "Invalid ID supplied.")),
-        }
-    }
-}

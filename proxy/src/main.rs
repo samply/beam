@@ -6,7 +6,7 @@ use backoff::{future::retry_notify, ExponentialBackoff};
 use hyper::{body, client::HttpConnector, Client, Method, Request, StatusCode, Uri};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use shared::beam_id::AppOrProxyId;
+use beam_lib::AppOrProxyId;
 use shared::{PlainMessage, MsgEmpty, EncryptedMessage, is_actually_hyper_timeout};
 use shared::crypto::CryptoPublicPortion;
 use shared::errors::SamplyBeamError;
@@ -175,7 +175,7 @@ fn spwan_controller_polling(client: SamplyHttpClient, config: Config) {
     tokio::spawn(async move {
         loop {
             let body = EncryptedMessage::MsgEmpty(MsgEmpty {
-                from: AppOrProxyId::ProxyId(config.proxy_id.clone()),
+                from: AppOrProxyId::Proxy(config.proxy_id.clone()),
             });
             let (parts, body) = Request::get(format!("{}v1/control", config.broker_uri))
                 .body(body)

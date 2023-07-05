@@ -45,7 +45,7 @@ pub enum SamplyBeamError {
     #[error("Problem with HTTP proxy: {0}")]
     HttpProxyProblem(std::io::Error),
     #[error("Invalid Beam ID: {0}")]
-    InvalidBeamId(String),
+    InvalidBeamId(#[from] beam_lib::BeamIdError),
     #[error("Unable to parse HTTP response: {0}")]
     HttpParseError(FromUtf8Error),
     #[error("X509 certificate invalid: {0}")]

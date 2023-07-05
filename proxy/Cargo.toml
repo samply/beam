@@ -1,6 +1,6 @@
 [package]
 name = "proxy"
-version = "0.6.2"
+version = "0.7.0"
 edition = "2021"
 license = "Apache-2.0"
 documentation = "https://github.com/samply/beam"
@@ -9,6 +9,7 @@ documentation = "https://github.com/samply/beam"
 
 [dependencies]
 shared = { path = "../shared", features = ["config-for-proxy"] }
+beam-lib = { workspace = true }
 
 tokio = { version = "1", features = ["full"] }
 async-recursion = "1.0.0"
@@ -46,6 +47,7 @@ async-stream = "0.3.4"
 chacha20poly1305 = { version = "0.10.1", features = ["stream"], optional = true }
 bytes = { version = "1.4", optional = true}
 dashmap =  { version = "5.4", optional = true}
+
 
 [features]
 sockets = ["dep:bytes", "dep:chacha20poly1305", "dep:dashmap", "tokio-util/codec", "tokio-util/compat", "shared/sockets", "shared/expire_map"]

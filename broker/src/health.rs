@@ -1,7 +1,7 @@
 use std::{fmt::Display, sync::Arc, time::{Duration, SystemTime}, collections::HashMap};
 
 use serde::{Serialize, Deserialize};
-use shared::beam_id::ProxyId;
+use beam_lib::ProxyId;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -42,11 +42,29 @@ pub struct Health {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyStatus {
-    last_active: SystemTime
+    last_active: SystemTime,
+    #[serde(skip)]
+    connections: u8,
 }
+
+impl ProxyStatus {
+    pub fn online(&self) -> bool {
+        self.connections > 0
+    }
+
+    pub fn disconnect(&mut self) {
+        self.connections -= 1;
+    }
+
+    pub fn connect(&mut self) {
+        self.connections += 1;
+        self.last_active = SystemTime::now();
+    }
+}
+
 impl ProxyStatus {
     pub fn new() -> ProxyStatus {
-        ProxyStatus { last_active: SystemTime::now() }
+        ProxyStatus { last_active: SystemTime::now(), connections: 1 }
     }
 }
 
