@@ -1,5 +1,5 @@
 [target.aarch64-unknown-linux-gnu]
-image = "ghcr.io/lablans/cross-test:aarch64-unknown-linux-gnu"
+pre-build = ["dpkg --add-architecture arm64 && apt-get update && apt-get install --assume-yes libssl-dev:arm64 && rm -rf /var/lib/apt/lists/*"]
 
 [target.x86_64-unknown-linux-gnu]
-image = "ghcr.io/lablans/cross-test:x86_64-unknown-linux-gnu"
+pre-build = ["dpkg --add-architecture amd64 && apt-get update && apt-get install --assume-yes libssl-dev:amd64 && rm -rf /var/lib/apt/lists/*"]
