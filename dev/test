@@ -33,7 +33,10 @@ case "$1" in
     start
     test
     shift
-    cargo test $@
+    for testbin in $SD/../testbinaries/*; do
+      chmod +x $testbin
+      $testbin
+    done
     ;;
   *)
     echo "Usage: $0 noci|ci"
