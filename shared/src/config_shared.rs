@@ -1,5 +1,5 @@
+use beam_lib::ProxyId;
 use crate::{
-    beam_id::{BeamId, BrokerId, ProxyId},
     config::CONFIG_SHARED_CRYPTO,
     crypto::{
         self, get_all_certs_and_clients_by_cname_as_pemstr, load_certificates_from_dir,
@@ -64,7 +64,7 @@ struct CliArgs {
 #[allow(dead_code)]
 pub struct Config {
     pub(crate) tls_ca_certificates_dir: Option<PathBuf>,
-    pub(crate) broker_domain: String,
+    pub broker_domain: String,
     pub root_cert: X509,
     pub tls_ca_certificates: Vec<X509>,
 }
@@ -79,7 +79,7 @@ pub struct ConfigCrypto {
 impl crate::config::Config for Config {
     fn load() -> Result<Self, SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
+        beam_lib::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
 
         let root_cert = crypto::load_certificates_from_file(cli_args.rootcert_file)?;
         let broker_domain = cli_args.broker_url.host();

@@ -1,7 +1,6 @@
 use std::{fs::read_to_string, net::SocketAddr, path::PathBuf};
 
 use crate::{
-    beam_id::{BeamId, BrokerId},
     errors::SamplyBeamError,
 };
 use axum::http::Uri;
@@ -50,6 +49,10 @@ struct CliArgs {
     #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
     rootcert_file: PathBuf,
 
+    /// The API key for accessing monitoring endpoints of the broker
+    #[clap(long, env, value_parser)]
+    monitoring_api_key: Option<String>,
+
     /// (included for technical reasons)
     #[clap(long, hide(true))]
     test_threads: Option<String>,
@@ -61,12 +64,13 @@ pub struct Config {
     pub pki_realm: String,
     pub pki_token: String,
     pub tls_ca_certificates_dir: Option<PathBuf>,
+    pub monitoring_api_key: Option<String>,
 }
 
 impl crate::config::Config for Config {
     fn load() -> Result<Self, SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
+        beam_lib::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
         let pki_token = read_to_string(&cli_args.pki_apikey_file)
             .map_err(|e| {
                 SamplyBeamError::ConfigurationFailed(format!(
@@ -85,6 +89,7 @@ impl crate::config::Config for Config {
             pki_realm: cli_args.pki_realm,
             pki_token,
             tls_ca_certificates_dir: cli_args.tls_ca_certificates_dir,
+            monitoring_api_key: cli_args.monitoring_api_key,
         };
         Ok(config)
     }

@@ -19,6 +19,7 @@ use tokio::sync::{oneshot, Mutex};
 use tracing::{info, instrument, span, warn, Level, error};
 
 use crate::{beam_id::AppOrProxyId, compare_client_server_version::{compare_version, Verdict::*}};
+use beam_lib::AppOrProxyId;
 
 const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 
@@ -64,7 +65,7 @@ impl LoggingInfo {
             "{} {} {} {}",
             from,
             self.status_code
-                .expect("Did not set Statuscode before loggin"),
+                .expect("Did not set Statuscode before logging"),
             self.method,
             self.uri
         )
@@ -115,7 +116,8 @@ pub async fn log(
         }
     }
 
-    if resp.status().is_success() {
+    // If we get a gateway timeout we won't log it with log level warn as this happens regularly with the long polling api
+    if resp.status().is_success() || resp.status().is_informational() || resp.status() == StatusCode::GATEWAY_TIMEOUT {
         info!(target: "in", "{}", line);
     } else {
         warn!(target: "in", "{}", line);

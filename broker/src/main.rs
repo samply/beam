@@ -2,12 +2,14 @@
 
 mod banner;
 mod crypto;
-mod expire;
 mod health;
 mod serve;
 mod serve_health;
 mod serve_pki;
 mod serve_tasks;
+#[cfg(feature = "sockets")]
+mod serve_sockets;
+mod task_manager;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 

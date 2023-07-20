@@ -6,11 +6,15 @@ use backoff::{future::retry_notify, ExponentialBackoff};
 use hyper::{body, client::HttpConnector, Client, Method, Request, StatusCode, Uri};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
+use beam_lib::AppOrProxyId;
+use shared::{PlainMessage, MsgEmpty, EncryptedMessage, is_actually_hyper_timeout};
 use shared::crypto::CryptoPublicPortion;
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
 use shared::{config, config_proxy::Config};
 use tracing::{debug, error, info, warn};
+
+use crate::serve_tasks::sign_request;
 
 mod auth;
 mod banner;
@@ -18,6 +22,10 @@ mod crypto;
 mod serve;
 mod serve_health;
 mod serve_tasks;
+#[cfg(feature = "sockets")]
+mod serve_sockets;
+
+pub(crate) const PROXY_TIMEOUT: u64 = 120;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
@@ -28,7 +36,7 @@ pub async fn main() -> anyhow::Result<()> {
     let config = config::CONFIG_PROXY.clone();
     let client = http_client::build(
         &config::CONFIG_SHARED.tls_ca_certificates,
-        Some(Duration::from_secs(120)),
+        Some(Duration::from_secs(PROXY_TIMEOUT)),
         Some(Duration::from_secs(20)),
     )
     .map_err(SamplyBeamError::HttpProxyProblem)?;
@@ -70,6 +78,7 @@ pub async fn main() -> anyhow::Result<()> {
     } else {
         debug!("Certificate chain successfully initialized and validated");
     }
+    spwan_controller_polling(client.clone(), config.clone());
 
     serve::serve(config, client).await?;
     Ok(())
@@ -159,4 +168,44 @@ async fn get_broker_health(
             resp.status()
         ))),
     }
+}
+
+fn spwan_controller_polling(client: SamplyHttpClient, config: Config) {
+    const RETRY_INTERVAL: Duration = Duration::from_secs(60);
+    tokio::spawn(async move {
+        loop {
+            let body = EncryptedMessage::MsgEmpty(MsgEmpty {
+                from: AppOrProxyId::Proxy(config.proxy_id.clone()),
+            });
+            let (parts, body) = Request::get(format!("{}v1/control", config.broker_uri))
+                .body(body)
+                .expect("To build request successfully")
+                .into_parts();
+
+            let req = sign_request(body, parts, &config, None).await.expect("Unable to sign request; this should always work");
+            // In the future this will poll actual control related tasks
+            match client.request(req).await {
+                Ok(res) => {
+                    match res.status() {
+                        StatusCode::OK => {
+                            // Process control task
+                        },
+                        other => {
+                            warn!("Got unexpected status getting control tasks from broker: {other}");
+                            tokio::time::sleep(RETRY_INTERVAL).await;
+                        }
+                    };
+                },
+                // For some reason e.is_timout() does not work
+                Err(e) if is_actually_hyper_timeout(&e) => {
+                    debug!("Connection to broker timed out retrying");
+                },
+                Err(e) => {
+                    warn!("Error getting control tasks from broker: {e}");
+                    warn!("Retring in {}s", RETRY_INTERVAL.as_secs());
+                    tokio::time::sleep(RETRY_INTERVAL).await;
+                }
+            };
+        }
+    });
 }

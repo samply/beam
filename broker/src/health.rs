@@ -1,6 +1,7 @@
-use std::{fmt::Display, sync::Arc, time::Duration};
+use std::{fmt::Display, sync::Arc, time::{Duration, SystemTime}, collections::HashMap};
 
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
+use beam_lib::ProxyId;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
@@ -36,6 +37,35 @@ impl Default for VaultStatus {
 
 pub struct Health {
     pub vault: VaultStatus,
+    pub proxies: HashMap<ProxyId, ProxyStatus>
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProxyStatus {
+    last_active: SystemTime,
+    #[serde(skip)]
+    connections: u8,
+}
+
+impl ProxyStatus {
+    pub fn online(&self) -> bool {
+        self.connections > 0
+    }
+
+    pub fn disconnect(&mut self) {
+        self.connections -= 1;
+    }
+
+    pub fn connect(&mut self) {
+        self.connections += 1;
+        self.last_active = SystemTime::now();
+    }
+}
+
+impl ProxyStatus {
+    pub fn new() -> ProxyStatus {
+        ProxyStatus { last_active: SystemTime::now(), connections: 1 }
+    }
 }
 
 pub struct Senders {
@@ -46,6 +76,7 @@ impl Health {
     pub fn make() -> (Senders, Arc<RwLock<Self>>) {
         let health = Health {
             vault: VaultStatus::default(),
+            proxies: HashMap::default()
         };
         let (vault_tx, mut vault_rx) = tokio::sync::watch::channel(VaultStatus::default());
         let health = Arc::new(RwLock::new(health));
