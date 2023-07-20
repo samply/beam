@@ -18,8 +18,9 @@ use hyper::Body;
 use tokio::sync::{oneshot, Mutex};
 use tracing::{info, instrument, span, warn, Level, error};
 
-use crate::{beam_id::AppOrProxyId, compare_client_server_version::{compare_version, Verdict::*}};
 use beam_lib::AppOrProxyId;
+
+use crate::compare_client_server_version::{compare_version, Verdict};
 
 const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 
@@ -100,14 +101,14 @@ pub async fn log(
 
     if let Some(their_version_header) = user_agent {
         let warn = match compare_version(&their_version_header) {
-            BeamWithMatchingVersion | NotBeam => {
+            Verdict::BeamWithMatchingVersion | Verdict::NotBeam => {
                 // we're happy
                 None
             },
-            BeamWithMismatchingVersion(their_ver) => {
+            Verdict::BeamWithMismatchingVersion(their_ver) => {
                 Some(format!(" WARNING: Client had mismatching version \"{their_ver}\""))
             },
-            BeamWithInvalidVersion(their_ver) => {
+            Verdict::BeamWithInvalidVersion(their_ver) => {
                 Some(format!(" WARNING: Client had INVALID version \"{their_ver}\""))
             },
         };
