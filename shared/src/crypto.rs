@@ -502,7 +502,7 @@ pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
 
 #[dynamic(lazy)]
 pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
-    let (tx_refresh, mut rx_refresh) = mpsc::channel::<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>(1);
+    let (tx_refresh, mut rx_refresh) = mpsc::channel::<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>(16);
     let (tx_newcerts, mut rx_newcerts) = mpsc::channel::<()>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx_refresh).unwrap()));
     let cc2 = cc.clone();
