@@ -19,6 +19,7 @@ pub(crate) fn router(health: Arc<RwLock<Health>>) -> Router {
     Router::new()
         .route("/v1/health", get(handler))
         .route("/v1/health/proxies/:proxy_id", get(proxy_health))
+        .route("/v1/health/proxies", get(get_all_proxies))
         .route("/v1/control", get(get_control_tasks))
         .with_state(health)
 }
@@ -43,6 +44,9 @@ async fn handler(
     (statuscode, Json(health_as_json))
 }
 
+async fn get_all_proxies(State(state): State<Arc<RwLock<Health>>>) -> Json<Vec<ProxyId>> {
+    Json(state.read().await.proxies.keys().cloned().collect())
+}
 
 async fn proxy_health(
     State(state): State<Arc<RwLock<Health>>>,
