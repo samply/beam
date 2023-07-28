@@ -6,17 +6,13 @@ use serde::{Serialize, Deserialize};
 use shared::{crypto_jwt::Authorized, Msg, config::CONFIG_CENTRAL};
 use tokio::sync::RwLock;
 
-use crate::health::{Health, VaultStatus, Verdict, ProxyStatus};
+use crate::health::{Health, VaultStatus, Verdict, ProxyStatus, InitStatus};
 
 #[derive(Serialize)]
-struct HealthOutput<'a> {
+struct HealthOutput {
     summary: Verdict,
-    vault: HealthOutputVault<'a>,
-}
-
-#[derive(Serialize)]
-struct HealthOutputVault<'a> {
-    status: &'a str,
+    vault: VaultStatus,
+    init_status: InitStatus
 }
 
 pub(crate) fn router(health: Arc<RwLock<Health>>) -> Router {
@@ -28,28 +24,21 @@ pub(crate) fn router(health: Arc<RwLock<Health>>) -> Router {
 }
 
 // GET /v1/health
-async fn handler<'a>(
+async fn handler(
     State(state): State<Arc<RwLock<Health>>>,
-) -> (StatusCode, Json<HealthOutput<'a>>) {
+) -> (StatusCode, Json<HealthOutput>) {
     let state = state.read().await;
-    let (statuscode, summary, status_vault) = match state.vault {
-        VaultStatus::Ok => (StatusCode::OK, Verdict::Healthy, "ok"),
-        VaultStatus::LockedOrSealed => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Verdict::Unhealthy,
-            "sealed",
-        ),
+    let (statuscode, summary) = match (state.initstatus, state.vault) {
+        (InitStatus::Done, VaultStatus::Ok) => (StatusCode::OK, Verdict::Healthy),
         _ => (
             StatusCode::SERVICE_UNAVAILABLE,
             Verdict::Unhealthy,
-            "unavailable",
         ),
     };
     let health_as_json = HealthOutput {
         summary,
-        vault: HealthOutputVault {
-            status: status_vault,
-        },
+        vault: state.vault,
+        init_status: state.initstatus
     };
     (statuscode, Json(health_as_json))
 }
