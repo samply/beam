@@ -185,7 +185,7 @@ impl CertificateCache {
             _ = abort_trigger.recv() => true
         };
         if aborted { 
-            debug!("Aborted waiting for expirey of {oldest_cert:?}");
+            debug!("Aborted waiting for expiry of {oldest_cert:?}");
             return; 
         }
         info!("Invalidating old cert now: {:?}", oldest_cert);
