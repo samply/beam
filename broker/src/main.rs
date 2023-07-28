@@ -13,10 +13,6 @@ mod task_manager;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use backoff::{
-    future::{retry, retry_notify},
-    Error, ExponentialBackoff, ExponentialBackoffBuilder,
-};
 use shared::{config::CONFIG_CENTRAL, *};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
@@ -31,21 +27,8 @@ pub async fn main() -> anyhow::Result<()> {
     let cert_getter = crypto::build_cert_getter(senders.vault)?;
 
     shared::crypto::init_cert_getter(cert_getter);
-    tokio::task::spawn(retry_notify(
-        ExponentialBackoff::default(),
-        || async {
-            shared::crypto::init_ca_chain()
-                .await
-                .map_err(|e| backoff::Error::transient(e))
-        },
-        |err: _, dur: Duration| {
-            warn!(
-                "Still trying to initialize CA chain: {}. Retrying in {}s",
-                err,
-                dur.as_secs()
-            )
-        },
-    ));
+    shared::crypto::init_ca_chain().await?;
+
     #[cfg(debug_assertions)]
     if shared::examples::print_example_objects() {
         return Ok(());

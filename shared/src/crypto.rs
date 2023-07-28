@@ -1,7 +1,7 @@
 use axum::{async_trait, body::Body, http::Request, Json};
 
 use itertools::Itertools;
-use once_cell::sync::OnceCell;
+use once_cell::sync::{OnceCell, Lazy};
 use openssl::{
     asn1::{Asn1Time, Asn1TimeRef},
     error::ErrorStack,
@@ -13,7 +13,6 @@ use rsa::{
     pkcs1::DecodeRsaPublicKey, pkcs8::DecodePublicKey, RsaPrivateKey, RsaPublicKey, traits::PublicKeyParts,
 };
 use sha2::{Digest, Sha256};
-use static_init::dynamic;
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
@@ -429,7 +428,7 @@ async fn get_all_certs_from_cache_by_cname(cname: &ProxyId) -> Vec<CertificateCa
     let mut invalid = 0;
     {
         // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
-        let cache = CERT_CACHE.read().await;
+        let cache = CERT_CACHE.read().await; // blocks forever
         if let Some(serials) = cache.cn_to_serial.get(cname) {
             debug!(
                 "Considering {} certificates with matching CN: {:?}",
@@ -500,8 +499,7 @@ pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
     CERT_GETTER.get().unwrap().im_certificate_as_pem().await
 }
 
-#[dynamic(lazy)]
-pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
+pub(crate) static CERT_CACHE: Lazy<Arc<RwLock<CertificateCache>>> = Lazy::new(|| {
     let (tx_refresh, mut rx_refresh) = mpsc::channel::<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>(1);
     let (tx_newcerts, mut rx_newcerts) = mpsc::channel::<()>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx_refresh).unwrap()));
@@ -555,7 +553,7 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
         }
     });
     cc
-};
+});
 
 async fn get_cert_by_serial(serial: &str) -> Option<CertificateCacheEntry> {
     CertificateCache::get_by_serial(serial).await
