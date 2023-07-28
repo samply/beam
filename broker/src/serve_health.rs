@@ -6,7 +6,7 @@ use serde::{Serialize, Deserialize};
 use shared::{crypto_jwt::Authorized, Msg, config::CONFIG_CENTRAL};
 use tokio::sync::RwLock;
 
-use crate::health::{Health, VaultStatus, Verdict, ProxyStatus};
+use crate::health::{Health, VaultStatus, Verdict, ProxyStatus, InitStatus};
 
 #[derive(Serialize)]
 struct HealthOutput<'a> {
@@ -32,9 +32,14 @@ async fn handler<'a>(
     State(state): State<Arc<RwLock<Health>>>,
 ) -> (StatusCode, Json<HealthOutput<'a>>) {
     let state = state.read().await;
-    let (statuscode, summary, status_vault) = match state.vault {
-        VaultStatus::Ok => (StatusCode::OK, Verdict::Healthy, "ok"),
-        VaultStatus::LockedOrSealed => (
+    let (statuscode, summary, status_vault) = match (state.initstatus, state.vault) {
+        (InitStatus::Done, VaultStatus::Ok) => (StatusCode::OK, Verdict::Healthy, "ok"),
+        (InitStatus::FetchingIntermediateCert, _) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Verdict::Unhealthy,
+            "initialzing"
+        ),
+        (_, VaultStatus::LockedOrSealed) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Verdict::Unhealthy,
             "sealed",

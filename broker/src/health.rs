@@ -19,7 +19,7 @@ impl Default for Verdict {
     }
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum VaultStatus {
     Ok,
@@ -35,7 +35,7 @@ impl Default for VaultStatus {
     }
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum InitStatus {
     Unknown,
