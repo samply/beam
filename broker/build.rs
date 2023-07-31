@@ -22,16 +22,8 @@ fn get_version() -> String {
 
 fn get_pkg_name() -> String {
     let pkg_name_raw = env!("CARGO_PKG_NAME");
-    let mut pkg_name = String::with_capacity(pkg_name_raw.len());
-    let mut first = true;
-    for char in pkg_name_raw.chars() {
-        if first {
-            first = false;
-            pkg_name.push(char.to_ascii_uppercase())
-        } else {
-            pkg_name.push(char.to_ascii_lowercase())
-        }
-    }
+    let mut pkg_name = pkg_name_raw.to_owned();
+    pkg_name.replace_range(0..1, &pkg_name_raw[0..1].to_uppercase());
     pkg_name
 }
 
