@@ -290,19 +290,22 @@ impl CertificateCache {
         let certificate_list = CERT_GETTER.get().unwrap().certificate_list_via_network().await?;
         let certificate_revocation_list = CERT_GETTER.get().unwrap().get_crl().await?;
         // Check if any of the certs in the cache have been revoked
+        let mut revoked_certs = 0;
         if let Some(ref crl) = certificate_revocation_list {
             self.serial_to_x509.values_mut().for_each(|cert_entry| {
                 if let CertificateCacheEntry::Valid(ref cert) = cert_entry {
                     if is_revoked(crl.get_by_cert(cert)) {
                         *cert_entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked);
+                        revoked_certs += 1;
                     }
                 }
             })
         };
+        debug!("Revoked {revoked_certs} certificates from cache.");
         let new_certificate_serials: Vec<&String> = certificate_list
             .iter()
             .filter(|serial| !self.serial_to_x509.contains_key(*serial))
-            .collect() ;
+            .collect();
         debug!(
             "Received {} certificates ({} of which were new).",
             certificate_list.len(),
@@ -827,7 +830,7 @@ fn is_revoked(status: CrlStatus<'_>) -> bool {
         CrlStatus::NotRevoked => false,
         CrlStatus::Revoked(..) => true,
         CrlStatus::RemoveFromCrl(..) => {
-            debug!("Saw a `remove from crl` status");
+            warn!("Saw a `remove from crl` status");
             false
         },
     }
