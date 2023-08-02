@@ -3,11 +3,11 @@ use axum::{async_trait, body::Body, http::Request, Json};
 use itertools::Itertools;
 use once_cell::sync::OnceCell;
 use openssl::{
-    asn1::{Asn1Time, Asn1TimeRef},
+    asn1::{Asn1Time, Asn1TimeRef, Asn1Integer},
     error::ErrorStack,
     rand::rand_bytes,
     string::OpensslString,
-    x509::X509,
+    x509::{X509, X509Crl, CrlStatus},
 };
 use rsa::{
     pkcs1::DecodeRsaPublicKey, pkcs8::DecodePublicKey, RsaPrivateKey, RsaPublicKey, traits::PublicKeyParts,
@@ -130,6 +130,7 @@ pub trait GetCerts: Sync + Send {
     /// A callback that runs on a timer and returns if the cache changed
     async fn on_timer(&self, _cache: &mut CertificateCache) -> CertificateCacheUpdate { CertificateCacheUpdate::UnChanged }
     async fn on_cert_expired(&self, _expired_cert: X509) {}
+    async fn get_crl(&self) -> Result<Option<X509Crl>, SamplyBeamError> { Ok(None) }
 }
 
 impl CertificateCache {
@@ -287,12 +288,21 @@ impl CertificateCache {
     pub async fn update_certificates_mut(&mut self) -> Result<CertificateCacheUpdate, SamplyBeamError> {
         debug!("Updating certificates via network ...");
         let certificate_list = CERT_GETTER.get().unwrap().certificate_list_via_network().await?;
-        let new_certificate_serials: Vec<&String> = {
-            certificate_list
-                .iter()
-                .filter(|serial| !self.serial_to_x509.contains_key(*serial))
-                .collect()
+        let certificate_revocation_list = CERT_GETTER.get().unwrap().get_crl().await?;
+        // Check if any of the certs in the cache have been revoked
+        if let Some(ref crl) = certificate_revocation_list {
+            self.serial_to_x509.values_mut().for_each(|cert_entry| {
+                if let CertificateCacheEntry::Valid(ref cert) = cert_entry {
+                    if is_revoked(crl.get_by_cert(cert)) {
+                        *cert_entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked);
+                    }
+                }
+            })
         };
+        let new_certificate_serials: Vec<&String> = certificate_list
+            .iter()
+            .filter(|serial| !self.serial_to_x509.contains_key(*serial))
+            .collect() ;
         debug!(
             "Received {} certificates ({} of which were new).",
             certificate_list.len(),
@@ -332,6 +342,11 @@ impl CertificateCache {
                     error!("Skipping unparsable certificate {serial}: {err}");
                     continue;
                 }
+            };
+            // Check if the new cert is already revoked
+            if certificate_revocation_list.as_ref().is_some_and(|list| is_revoked(list.get_by_cert(&opensslcert))) {
+                self.serial_to_x509.insert(serial.clone(), CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked));
+                continue;
             };
             let commonnames: Vec<ProxyId> = opensslcert
                 .subject_name()
@@ -801,6 +816,21 @@ pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool, Er
         };
     }
     return Ok(is_equal);
+}
+
+pub fn parse_crl(der: &[u8]) -> Result<openssl::x509::X509Crl, SamplyBeamError> {
+    Ok(openssl::x509::X509Crl::from_der(der)?)
+}
+
+fn is_revoked(status: CrlStatus<'_>) -> bool {
+    match status {
+        CrlStatus::NotRevoked => false,
+        CrlStatus::Revoked(..) => true,
+        CrlStatus::RemoveFromCrl(..) => {
+            debug!("Saw a `remove from crl` status");
+            false
+        },
+    }
 }
 
 /// Selects the newest certificate from a vector of certs by comparing the `not_before` time
