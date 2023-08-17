@@ -95,16 +95,6 @@ pub enum CertificateCacheUpdate {
     UnChanged,
 }
 
-impl From<usize> for CertificateCacheUpdate {
-    fn from(value: usize) -> Self {
-        if value > 0 {
-            Self::Updated(value as u32)
-        } else {
-            Self::UnChanged
-        }
-    }
-}
-
 impl AsRef<u32> for CertificateCacheUpdate {
     fn as_ref(&self) -> &u32 {
         match self {
@@ -285,22 +275,28 @@ impl CertificateCache {
         }
     }
 
+    fn invalidate_revoked_certs(&mut self, crl: &X509Crl) -> usize {
+        let mut revoked_certs = 0;
+        self.serial_to_x509.values_mut().for_each(|cert_entry| {
+            if let CertificateCacheEntry::Valid(ref cert) = cert_entry {
+                if is_revoked(crl.get_by_cert(cert)) {
+                    *cert_entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked);
+                    revoked_certs += 1;
+                }
+            }
+        });
+        revoked_certs
+    }
+
     pub async fn update_certificates_mut(&mut self) -> Result<CertificateCacheUpdate, SamplyBeamError> {
         debug!("Updating certificates via network ...");
         let certificate_list = CERT_GETTER.get().unwrap().certificate_list_via_network().await?;
         let certificate_revocation_list = CERT_GETTER.get().unwrap().get_crl().await?;
         // Check if any of the certs in the cache have been revoked
-        let mut revoked_certs = 0;
-        if let Some(ref crl) = certificate_revocation_list {
-            self.serial_to_x509.values_mut().for_each(|cert_entry| {
-                if let CertificateCacheEntry::Valid(ref cert) = cert_entry {
-                    if is_revoked(crl.get_by_cert(cert)) {
-                        *cert_entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked);
-                        revoked_certs += 1;
-                    }
-                }
-            })
-        };
+        let mut revoked_certs = certificate_revocation_list
+            .as_ref()
+            .map(|crl| self.invalidate_revoked_certs(crl))
+            .unwrap_or_default();
         debug!("Revoked {revoked_certs} certificates from cache.");
         let new_certificate_serials: Vec<&String> = certificate_list
             .iter()
@@ -349,6 +345,7 @@ impl CertificateCache {
             // Check if the new cert is already revoked
             if certificate_revocation_list.as_ref().is_some_and(|list| is_revoked(list.get_by_cert(&opensslcert))) {
                 self.serial_to_x509.insert(serial.clone(), CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked));
+                revoked_certs += 1;
                 continue;
             };
             let commonnames: Vec<ProxyId> = opensslcert
@@ -401,7 +398,11 @@ impl CertificateCache {
                 new_count += 1;
             }
         }
-        Ok(CertificateCacheUpdate::from(new_count))
+        if revoked_certs == 0 && new_count == 0 {
+            Ok(CertificateCacheUpdate::UnChanged)
+        } else {
+            Ok(CertificateCacheUpdate::Updated(new_count))
+        }
     }
 
     /*
