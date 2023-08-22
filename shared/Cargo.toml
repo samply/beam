@@ -53,7 +53,7 @@ anyhow = "1.0.58"
 clap = { version = "4.0.12", features = ["env", "derive"] }
 
 http = "0.2.8"
-fundu = "1.0.0"
+fundu = "2.0.0"
 regex = "1"
 
 # expire map dependencies
