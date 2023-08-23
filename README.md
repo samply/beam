@@ -458,8 +458,8 @@ HTTP/1.1 503
 
 Additionally, the broker health endpoint publishes the connection status of the proxies:
 
-Method: `GET`
-URL: `/v1/health/proxies/<proxy-id>`
+Method: `GET`  
+URL: `/v1/health/proxies/<proxy-id>`  
 Authorization:
 
  - Basic Auth with an empty user and the configured `MONITORING_API_KEY` as a password, so the header looks like `Authorization: Basic <base64 of ':<MONITORING_API_KEY>'>`.
@@ -478,8 +478,8 @@ HTTP/1.1 404
 
 Querying the endpoint without specifying a ProxyId returns a JSON array of all proxies, that have ever connected to this broker:
 
-Method: `GET`
-URL: `/v1/health/proxies`
+Method: `GET`  
+URL: `/v1/health/proxies`  
 Authorization:
 
  - Basic Auth with an empty user and the configured `MONITORING_API_KEY` as a password, so the header looks like `Authorization: Basic <base64 of ':<MONITORING_API_KEY>'>`.
