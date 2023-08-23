@@ -5,7 +5,7 @@ This version, Samply.Beam 0.7.0, has long been in the making and introduces mult
 We hope these updates improve your experience with Samply.Beam and look forward to your feedback.
 
 ## Breaking changes
-* *Streamlined Configuration:* To reduce configuration redundancy, the CLI-flag and environment variable schema of the Beam.Proxies for AppIDs and related App-API Keys has changed. Both parameters are now consolidated in the form: `APP_<AppId>_KEY=<API-Key>`.
+* *Streamlined Configuration:* To reduce configuration redundancy, the environment variable schema of the Beam.Proxies for AppIDs and related App-API Keys has changed. Both parameters are now consolidated in the form: `APP_<AppId>_KEY=<API-Key>`.
 * *Task Creation Bugfix:* A previous bug, where messages where the recipient list includes recipients with invalid/expired certificates was not handled properly, is now fixed. We decided to let the task creation in those cases fail to notify the client application of the issue by sending a status code `424 Failed Dependency`, instead of dropping the offending recipient quietly. 
 * *Time Units for Parameters:* Both, a Task's `ttl` field and the `wait_time` long polling parameter now expects not only an integer, but a specified time unit as well, e.g., `24h`, `5m`, `25ms`, etc.
 
