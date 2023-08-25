@@ -17,4 +17,4 @@ rand = "0.8.5"
 serde = { version = "1.0.163", features = ["derive"] }
 
 [features]
-sockets = []
+sockets = ["beam-lib/sockets"]
