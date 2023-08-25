@@ -4,7 +4,9 @@ use reqwest::{Client, header::{self, HeaderValue}, Url, StatusCode};
 use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
-use crate::{AddressingId, TaskRequest, MsgId, TaskResult, SocketTask};
+use crate::{AddressingId, TaskRequest, MsgId, TaskResult};
+#[cfg(feature = "sockets")]
+use crate::SocketTask;
 
 /// A client used for communicating with the beam network
 #[derive(Debug, Clone)]
