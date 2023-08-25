@@ -8,7 +8,7 @@ use beam_lib::{AddressingId, set_broker_id, AppOrProxyId, BeamClient};
 mod socket_test;
 
 #[cfg(test)]
-mod tasts_test;
+mod task_test;
 
 pub static APP1: Lazy<AddressingId> = Lazy::new(|| {
     set_broker_id("broker".into());
