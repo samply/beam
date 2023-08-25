@@ -2,10 +2,13 @@
 use http::{Request, header, StatusCode};
 use hyper::{Client, Body};
 use once_cell::sync::Lazy;
-use beam_lib::{AddressingId, set_broker_id, AppOrProxyId};
+use beam_lib::{AddressingId, set_broker_id, AppOrProxyId, BeamClient};
 
 #[cfg(all(feature = "sockets", test))]
 mod socket_test;
+
+#[cfg(test)]
+mod tasts_test;
 
 pub static APP1: Lazy<AddressingId> = Lazy::new(|| {
     set_broker_id("broker".into());
@@ -31,7 +34,8 @@ pub const APP_KEY: &str = match option_env!("APP_KEY") {
     None => "App1Secret"
 };
 
-
+pub static CLIENT1: Lazy<BeamClient> = Lazy::new(|| BeamClient::new(&APP1, APP_KEY, PROXY1.parse().unwrap()));
+pub static CLIENT2: Lazy<BeamClient> = Lazy::new(|| BeamClient::new(&APP2, APP_KEY, PROXY2.parse().unwrap()));
 
 #[tokio::test]
 async fn test_time_out() {

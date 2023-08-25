@@ -16,7 +16,7 @@ pub struct BeamClient {
 pub enum BeamError {
     #[error("Communication with beam proxy failed: {0}")]
     ReqwestError(#[from] reqwest::Error),
-    #[error("unexpected status code {0}")]
+    #[error("Unexpected status code {0}")]
     UnexpectedStatus(StatusCode)
 }
 
@@ -91,7 +91,7 @@ impl BeamClient {
 
     pub async fn poll_results<T: DeserializeOwned>(&self, msg_id: &MsgId, blocking: &BlockingOptions) -> Result<Vec<TaskResult<T>>> {
         let url = self.beam_proxy_url
-            .join(&format!("/v1/tasks/{msg_id}/results/?{}", blocking.to_query()))
+            .join(&format!("/v1/tasks/{msg_id}/results?{}", blocking.to_query()))
             .expect("The proxy url is valid");
         let response_result = self.client
             .get(url)
