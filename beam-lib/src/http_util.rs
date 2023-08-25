@@ -4,7 +4,7 @@ use reqwest::{Client, header::{self, HeaderValue}, Url, StatusCode};
 use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
-use crate::{AddressingId, TaskRequest, MsgId, TaskResult};
+use crate::{AddressingId, TaskRequest, MsgId, TaskResult, SocketTask};
 
 /// A client used for communicating with the beam network
 #[derive(Debug, Clone)]
@@ -133,12 +133,12 @@ impl BeamClient {
         let url = self.beam_proxy_url
             .join("/v1/tasks")
             .expect("The proxy url is valid");
-        let response_result = self.client
+        let response = self.client
             .post(url)
             .json(task)
             .send()
-            .await;
-        match response_result?.status() {
+            .await?;
+        match response.status() {
             // TODO: Add more status codes here
             StatusCode::CREATED => Ok(()),
             status => Err(BeamError::UnexpectedStatus(status))
@@ -159,6 +159,84 @@ impl BeamClient {
             // TODO: Add more status codes here
             StatusCode::CREATED => Ok(()),
             status => Err(BeamError::UnexpectedStatus(status))
+        }
+    }
+
+    /// For low level beam request where full control of the request is required.
+    /// This will return a [`reqwest::RequestBuilder`] with a url relative to the given path.
+    pub fn raw_beam_request(&self, method: reqwest::Method, relative_path: &str) -> reqwest::RequestBuilder {
+        let url = self.beam_proxy_url
+            .join(relative_path)
+            .expect("The proxy url is valid");
+        self.client.request(method, url)
+    }
+
+    /// Create a socket task for some other application to connect to
+    /// For this to work both the beam proxy and beam broker need to have the sockets feature enabled.
+    #[cfg(feature = "sockets")]
+    pub async fn create_socket(&self, destination: &AddressingId) -> Result<reqwest::Upgraded> {
+        let url = self.beam_proxy_url
+            .join(&format!("/v1/sockets/{destination}"))
+            .expect("The proxy url is valid");
+        let response = self.client
+            .post(url)
+            .header(header::UPGRADE, "tcp")
+            .send()
+            .await?;
+        if response.status() != StatusCode::SWITCHING_PROTOCOLS {
+            Err(BeamError::UnexpectedStatus(response.status()))
+        } else {
+            response
+                .upgrade()
+                .await
+                .map_err(Into::into)
+        }
+    }
+
+    /// Poll for socket tasks
+    #[cfg(feature = "sockets")]
+    pub async fn get_socket_tasks(&self, blocking: &BlockingOptions) -> Result<Vec<SocketTask>> {
+        let url = self.beam_proxy_url
+            .join(&format!("/v1/sockets?{}", blocking.to_query()))
+            .expect("The proxy url is valid");
+        let response_result = self.client
+            .get(url)
+            .send()
+            .await;
+        let response = match response_result {
+            Ok(res) => res,
+            Err(e) => return if e.is_timeout() {
+                Ok(Vec::with_capacity(0))
+            } else {
+                Err(e.into())
+            },
+        };
+        match response.status() {
+            // TODO: Add more status codes here
+            StatusCode::GATEWAY_TIMEOUT => Ok(Vec::with_capacity(0)),
+            StatusCode::OK | StatusCode::PARTIAL_CONTENT => Ok(response.json().await?),
+            status => Err(BeamError::UnexpectedStatus(status))
+        }
+    }
+
+    /// Connect to a socket by its socket task id
+    #[cfg(feature = "sockets")]
+    pub async fn connect_socket(&self, socket_task_id: &MsgId) -> Result<reqwest::Upgraded> {
+        let url = self.beam_proxy_url
+            .join(&format!("/v1/sockets/{socket_task_id}"))
+            .expect("The proxy url is valid");
+        let response = self.client
+            .get(url)
+            .header(header::UPGRADE, "tcp")
+            .send()
+            .await?;
+        if response.status() != StatusCode::SWITCHING_PROTOCOLS {
+            Err(BeamError::UnexpectedStatus(response.status()))
+        } else {
+            response
+                .upgrade()
+                .await
+                .map_err(Into::into)
         }
     }
 }
