@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::{AddressingId, TaskRequest, MsgId, TaskResult};
 
+/// A client used for communicating with the beam network
 #[derive(Debug, Clone)]
 pub struct BeamClient {
     client: Client,
@@ -22,9 +23,18 @@ pub enum BeamError {
 
 pub type Result<T> = std::result::Result<T, BeamError>;
 
+/// Long polling blocking options
+/// 
+/// The behavior works as follows:
+/// - `wait_count` and `wait_time` are unset => Don't wait
+/// - `wait_count` is set and `wait_time` is unset => Wait for this many items to be ready
+/// - `wait_count` is unset and `wait_time` is set => Wait for the given duration
+/// - `wait_count` is set and `wait_time` is set => Stop waiting after either of the conditions is fulfilled
 #[derive(Debug)]
 pub struct BlockingOptions {
+    /// How long to poll for
     pub wait_time: Option<Duration>,
+    /// The number of elements to wait for
     pub wait_count: Option<u16>,
 }
 
@@ -60,12 +70,15 @@ impl BeamClient {
     }
 
     /// Construct a beam client from a [`reqwest::Client`]
-    /// Note: This expects the user to have set the default headers for authorization accordingly
-    /// If you don't need any special client configuration use [`BeamClient::new`]
+    /// # Note:
+    /// This expects the user to have set the default headers for authorization accordingly.
+    /// If you don't need any special client configuration use [`BeamClient::new`].
     pub fn from_client(client: Client, beam_proxy_url: Url) -> Self {
         Self { client, beam_proxy_url }
     }
 
+    /// Poll beam tasks using the `filter=todo` option and the given blocking options.
+    /// The generic Parameter T represents the task body type that the requests are expected to have.
     pub async fn poll_pending_tasks<T: DeserializeOwned>(&self, blocking: &BlockingOptions) -> Result<Vec<TaskRequest<T>>> {
         let url = self.beam_proxy_url
             .join(&format!("/v1/tasks?filter=todo&{}", blocking.to_query()))
@@ -89,9 +102,11 @@ impl BeamClient {
         }
     }
 
-    pub async fn poll_results<T: DeserializeOwned>(&self, msg_id: &MsgId, blocking: &BlockingOptions) -> Result<Vec<TaskResult<T>>> {
+    /// Poll beam results for a given task id using the given blocking options.
+    /// The generic Parameter T represents the result body type that the requests are expected to have.
+    pub async fn poll_results<T: DeserializeOwned>(&self, task_id: &MsgId, blocking: &BlockingOptions) -> Result<Vec<TaskResult<T>>> {
         let url = self.beam_proxy_url
-            .join(&format!("/v1/tasks/{msg_id}/results?{}", blocking.to_query()))
+            .join(&format!("/v1/tasks/{task_id}/results?{}", blocking.to_query()))
             .expect("The proxy url is valid");
         let response_result = self.client
             .get(url)
@@ -113,6 +128,7 @@ impl BeamClient {
         }
     }
 
+    /// Post a beam task with a serializeable body.
     pub async fn post_task<T: Serialize>(&self, task: &TaskRequest<T>) -> Result<()> {
         let url = self.beam_proxy_url
             .join("/v1/tasks")
@@ -129,6 +145,7 @@ impl BeamClient {
         }
     }
 
+    /// Put a beam task result with a serializeable body.
     pub async fn put_result<T: Serialize>(&self, result: &TaskResult<T>, for_task_id: &MsgId) -> Result<()> {
         let url = self.beam_proxy_url
             .join(&format!("/v1/tasks/{for_task_id}/results/{}", result.from))
