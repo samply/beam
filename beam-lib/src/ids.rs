@@ -254,9 +254,9 @@ impl std::error::Error for BeamIdError {}
 impl Display for BeamIdError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let text = match self {
-            BeamIdError::InvalidIdFragment => "Id fragment may only countain alphanumeric values.",
-            BeamIdError::InvalidNumberOfIdFragments => "Id had an unexpected amout of fragments.",
-            BeamIdError::InvalidIdKind => "Id parsed as a diffrent kind of id then specified.",
+            BeamIdError::InvalidIdFragment => "Id fragment may only contain alphanumeric values.",
+            BeamIdError::InvalidNumberOfIdFragments => "Id had an unexpected amount of fragments.",
+            BeamIdError::InvalidIdKind => "Id parsed as a different kind of id then specified.",
             #[cfg(feature = "strict-ids")]
             BeamIdError::WrongBrokerId => {
                 "The broker id part of the id did not match the global broker id."

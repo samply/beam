@@ -66,7 +66,7 @@ tokio-test = "0.4.2"
 
 [features]
 expire_map = ["dep:dashmap"]
-sockets = ["expire_map"]
+sockets = ["expire_map", "beam-lib/sockets"]
 default = []
 config-for-proxy = []
 config-for-central = []
