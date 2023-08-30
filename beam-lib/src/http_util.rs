@@ -148,7 +148,8 @@ impl BeamClient {
     }
 
     /// Put a beam task result with a serializeable body.
-    pub async fn put_result<T: Serialize>(&self, result: &TaskResult<T>, for_task_id: &MsgId) -> Result<()> {
+    /// Returns true if the result was newly created or false if it was updated.
+    pub async fn put_result<T: Serialize>(&self, result: &TaskResult<T>, for_task_id: &MsgId) -> Result<bool> {
         let url = self.beam_proxy_url
             .join(&format!("/v1/tasks/{for_task_id}/results/{}", result.from))
             .expect("The proxy url is valid");
@@ -158,8 +159,8 @@ impl BeamClient {
             .send()
             .await;
         match response_result?.status() {
-            // TODO: Add more status codes here
-            StatusCode::CREATED => Ok(()),
+            StatusCode::NO_CONTENT => Ok(false),
+            StatusCode::CREATED => Ok(true),
             status => Err(BeamError::UnexpectedStatus(status))
         }
     }
