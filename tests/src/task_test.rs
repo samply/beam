@@ -55,5 +55,6 @@ pub async fn put_result<T: Serialize>(task_id: MsgId, body: T) -> Result<()> {
         status: beam_lib::WorkStatus::Succeeded,
         body,
         metadata: serde_json::Value::Null,
-    }, &task_id).await.map_err(Into::into)
+    }, &task_id).await?;
+    Ok(())
 }
