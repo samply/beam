@@ -3,11 +3,11 @@ use axum::{async_trait, body::Body, http::Request, Json};
 use itertools::Itertools;
 use once_cell::sync::OnceCell;
 use openssl::{
-    asn1::{Asn1Time, Asn1TimeRef},
+    asn1::{Asn1Time, Asn1TimeRef, Asn1Integer},
     error::ErrorStack,
     rand::rand_bytes,
     string::OpensslString,
-    x509::X509,
+    x509::{X509, X509Crl, CrlStatus},
 };
 use rsa::{
     pkcs1::DecodeRsaPublicKey, pkcs8::DecodePublicKey, RsaPrivateKey, RsaPublicKey, traits::PublicKeyParts,
@@ -95,16 +95,6 @@ pub enum CertificateCacheUpdate {
     UnChanged,
 }
 
-impl From<usize> for CertificateCacheUpdate {
-    fn from(value: usize) -> Self {
-        if value > 0 {
-            Self::Updated(value as u32)
-        } else {
-            Self::UnChanged
-        }
-    }
-}
-
 impl AsRef<u32> for CertificateCacheUpdate {
     fn as_ref(&self) -> &u32 {
         match self {
@@ -130,19 +120,20 @@ pub trait GetCerts: Sync + Send {
     /// A callback that runs on a timer and returns if the cache changed
     async fn on_timer(&self, _cache: &mut CertificateCache) -> CertificateCacheUpdate { CertificateCacheUpdate::UnChanged }
     async fn on_cert_expired(&self, _expired_cert: X509) {}
+    async fn get_crl(&self) -> Result<Option<X509Crl>, SamplyBeamError> { Ok(None) }
 }
 
 impl CertificateCache {
     pub fn new(
         update_trigger: mpsc::Sender<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>,
-    ) -> Result<CertificateCache, SamplyBeamError> {
-        Ok(Self {
+    ) -> CertificateCache {
+        Self {
             serial_to_x509: HashMap::new(),
             cn_to_serial: HashMap::new(),
             update_trigger,
             root_cert: None,
             im_cert: None,
-        })
+        }
     }
 
     pub async fn wait_and_remove_oldest_cert(cache: Arc<RwLock<Self>>, abort_trigger: &mut mpsc::Receiver<()>) {
@@ -284,15 +275,33 @@ impl CertificateCache {
         }
     }
 
+    fn invalidate_revoked_certs(&mut self, crl: &X509Crl) -> usize {
+        let mut revoked_certs = 0;
+        self.serial_to_x509.values_mut().for_each(|cert_entry| {
+            if let CertificateCacheEntry::Valid(ref cert) = cert_entry {
+                if is_revoked(crl.get_by_cert(cert)) {
+                    *cert_entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked);
+                    revoked_certs += 1;
+                }
+            }
+        });
+        revoked_certs
+    }
+
     pub async fn update_certificates_mut(&mut self) -> Result<CertificateCacheUpdate, SamplyBeamError> {
         debug!("Updating certificates via network ...");
         let certificate_list = CERT_GETTER.get().unwrap().certificate_list_via_network().await?;
-        let new_certificate_serials: Vec<&String> = {
-            certificate_list
-                .iter()
-                .filter(|serial| !self.serial_to_x509.contains_key(*serial))
-                .collect()
-        };
+        let certificate_revocation_list = CERT_GETTER.get().unwrap().get_crl().await?;
+        // Check if any of the certs in the cache have been revoked
+        let mut revoked_certs = certificate_revocation_list
+            .as_ref()
+            .map(|crl| self.invalidate_revoked_certs(crl))
+            .unwrap_or_default();
+        debug!("Revoked {revoked_certs} certificates from cache.");
+        let new_certificate_serials: Vec<&String> = certificate_list
+            .iter()
+            .filter(|serial| !self.serial_to_x509.contains_key(*serial))
+            .collect();
         debug!(
             "Received {} certificates ({} of which were new).",
             certificate_list.len(),
@@ -332,6 +341,12 @@ impl CertificateCache {
                     error!("Skipping unparsable certificate {serial}: {err}");
                     continue;
                 }
+            };
+            // Check if the new cert is already revoked
+            if certificate_revocation_list.as_ref().is_some_and(|list| is_revoked(list.get_by_cert(&opensslcert))) {
+                self.serial_to_x509.insert(serial.clone(), CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked));
+                revoked_certs += 1;
+                continue;
             };
             let commonnames: Vec<ProxyId> = opensslcert
                 .subject_name()
@@ -383,7 +398,11 @@ impl CertificateCache {
                 new_count += 1;
             }
         }
-        Ok(CertificateCacheUpdate::from(new_count))
+        if revoked_certs == 0 && new_count == 0 {
+            Ok(CertificateCacheUpdate::UnChanged)
+        } else {
+            Ok(CertificateCacheUpdate::Updated(new_count))
+        }
     }
 
     /*
@@ -504,7 +523,7 @@ pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
 pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
     let (tx_refresh, mut rx_refresh) = mpsc::channel::<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>(16);
     let (tx_newcerts, mut rx_newcerts) = mpsc::channel::<()>(1);
-    let cc = Arc::new(RwLock::new(CertificateCache::new(tx_refresh).unwrap()));
+    let cc = Arc::new(RwLock::new(CertificateCache::new(tx_refresh)));
     let cc2 = cc.clone();
     let cc3: Arc<RwLock<CertificateCache>> = cc.clone();
     tokio::task::spawn(async move {
@@ -803,6 +822,21 @@ pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool, Er
     return Ok(is_equal);
 }
 
+pub fn parse_crl(der: &[u8]) -> Result<openssl::x509::X509Crl, SamplyBeamError> {
+    Ok(openssl::x509::X509Crl::from_der(der)?)
+}
+
+fn is_revoked(status: CrlStatus<'_>) -> bool {
+    match status {
+        CrlStatus::NotRevoked => false,
+        CrlStatus::Revoked(..) => true,
+        CrlStatus::RemoveFromCrl(..) => {
+            warn!("Saw a `remove from crl` status");
+            false
+        },
+    }
+}
+
 /// Selects the newest certificate from a vector of certs by comparing the `not_before` time
 pub fn get_newest_cert(certs: &mut Vec<CryptoPublicPortion>) -> Option<CryptoPublicPortion> {
     certs.sort_by(|a, b| {
@@ -875,23 +909,12 @@ pub async fn get_proxy_public_keys(
     }
 }
 
-#[tokio::test]
-async fn test_invalidation() {
-    // Setup fake CertGetter that does nothing
-    struct DummyCertGetter;
-    #[async_trait]
-    impl GetCerts for DummyCertGetter {
-        async fn certificate_list_via_network(&self) ->  Result<Vec<String>, SamplyBeamError> {
-            todo!()
-        }
-        async fn certificate_by_serial_as_pem(&self, _serial: &str) ->  Result<String, SamplyBeamError> {
-            todo!()
-        }
-        async fn im_certificate_as_pem(&self) ->  Result<String,SamplyBeamError> {
-            todo!()
-        }
-    }
-    CERT_GETTER.set(Box::new(DummyCertGetter)).unwrap_or_else(|_| panic!("Could not set cert"));
+#[cfg(test)]
+mod tests {
+    use openssl::{x509::{X509NameBuilder, extension::{BasicConstraints, KeyUsage, SubjectKeyIdentifier}}, bn::{BigNum, MsbOption}, pkey::PKey, rsa::Rsa, hash::MessageDigest};
+
+    use super::*;
+
     fn build_x509(ttl: Duration) -> X509 {
         let mut builder = X509::builder().unwrap();
         let duration = SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap() + ttl;
@@ -899,28 +922,66 @@ async fn test_invalidation() {
         builder.set_not_after(&not_after).unwrap();
         builder.build()
     }
-    let certs: HashMap<Serial, CertificateCacheEntry> = [1, 5, 10].into_iter()
-        .map(Duration::from_secs)
-        .map(build_x509)
-        .map(CertificateCacheEntry::Valid)
-        .enumerate()
-        .map(|(a, b)| (a.to_string(), b))
-        .collect();
-    let n = certs.len();
 
-    let (tx, rx) = mpsc::channel(1);
-    let cert_cache = CertificateCache { 
-        serial_to_x509: certs,
-        update_trigger: tx,
-        cn_to_serial: Default::default(),
-        im_cert: None,
-        root_cert: None,
-    };
-    let cache = Arc::new(RwLock::new(cert_cache));
-    let (tx, mut rx) = mpsc::channel(1);
-
-    for _ in 0..n {
-        CertificateCache::wait_and_remove_oldest_cert(cache.clone(), &mut rx).await;
+    #[tokio::test]
+    async fn test_invalidation() {
+        // Setup fake CertGetter that does nothing
+        struct DummyCertGetter;
+        #[async_trait]
+        impl GetCerts for DummyCertGetter {
+            async fn certificate_list_via_network(&self) ->  Result<Vec<String>, SamplyBeamError> {
+                todo!()
+            }
+            async fn certificate_by_serial_as_pem(&self, _serial: &str) ->  Result<String, SamplyBeamError> {
+                todo!()
+            }
+            async fn im_certificate_as_pem(&self) ->  Result<String,SamplyBeamError> {
+                todo!()
+            }
+        }
+        CERT_GETTER.set(Box::new(DummyCertGetter)).unwrap_or_else(|_| panic!("Could not set cert"));
+        let certs: HashMap<Serial, CertificateCacheEntry> = [1, 5, 10].into_iter()
+            .map(Duration::from_secs)
+            .map(build_x509)
+            .map(CertificateCacheEntry::Valid)
+            .enumerate()
+            .map(|(a, b)| (a.to_string(), b))
+            .collect();
+        let n = certs.len();
+    
+        let (tx, rx) = mpsc::channel(1);
+        let cert_cache = CertificateCache { 
+            serial_to_x509: certs,
+            update_trigger: tx,
+            cn_to_serial: Default::default(),
+            im_cert: None,
+            root_cert: None,
+        };
+        let cache = Arc::new(RwLock::new(cert_cache));
+        let (_tx, mut rx) = mpsc::channel(1);
+    
+        for _ in 0..n {
+            CertificateCache::wait_and_remove_oldest_cert(cache.clone(), &mut rx).await;
+        }
+        assert!(cache.read().await.serial_to_x509.values().all(|cert| matches!(cert, CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate))));
     }
-    assert!(cache.read().await.serial_to_x509.values().all(|cert| matches!(cert, CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate))));
+
+    const CERT_TO_REVOKE: &[u8] = b"-----BEGIN CERTIFICATE-----\nMIIDLjCCAhYCFCNuyAi2zfAyORDDiwsJnfJojBk8MA0GCSqGSIb3DQEBCwUAMFQx\nCzAJBgNVBAYTAkRFMRMwEQYDVQQIDApIZWlkZWxiZXJnMSEwHwYDVQQKDBhJbnRl\ncm5ldCBXaWRnaXRzIFB0eSBMdGQxDTALBgNVBAMMBHRlc3QwHhcNMjMwODI0MDc1\nMjM1WhcNMjMwOTIzMDc1MjM1WjBTMQswCQYDVQQGEwJERTETMBEGA1UECAwKU29t\nZS1TdGF0ZTEhMB8GA1UECgwYSW50ZXJuZXQgV2lkZ2l0cyBQdHkgTHRkMQwwCgYD\nVQQDDANmb28wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDd2aLmn3EX\nkSMIxdMWXe8oQNyWBktyBoNK+gSyYBO3SkIcRKM41Ama4GgeIJnDRbL2XLC3Gkhv\nHyvBocVYeP/kWtw8Zvmmi/9Ztv04pVn6LzX2Yaqtm9X78Jo3n2ug2cC8IEoMaYbF\nTcUuV7IX1oSF4Fo3KRRoAUki6yok3uEFVH5cl/UPYyYRJ+CKvoras4c9arZ3Nk3G\na9ImlniBPZ3qQwnkJX5pKcKFzYka7xrNbCpInF/v68R9Hiy4YwUQbGeTfTM+W3i9\nn5ZnSWuwY5lew3WSnpcfYKJQCLhJ9iAXq13+oYbDFSA12pSBIEz0xve3/zR5Cg81\nLGKtvpllzfGVAgMBAAEwDQYJKoZIhvcNAQELBQADggEBAGk2Zii31WPqXwzAUNc0\nS6GjTkHMP5gzdTjYspdBOm8bdJROEp9O/vjAc2Oci4waI9FT6oZPhwX/a6TDtUGs\nAZeQYt9vlS4LPgs6RTF4sFXy+pl7EA/wYqb7e0LSVsx7feTpeRRCIbFXenTKa7m+\nMXsDRCR9weplJdFeyBodFBsNMpShOe3WbnQ7Gi3jLYCUb7acX4I4H4VA7HdakZJr\nEJzP0TQzt/vrSwA2GsNWgO5sOXYkYvjieqzfi89fqY6ZT2jWQ+v+wc7kDiBRbkVU\nGooK1Vo2TJYeaPPmyNomRZtlpgXBGztYyJTfPY0A0M1Fky8Y8QLObtxG0/fkWOft\nHyU=\n-----END CERTIFICATE-----";
+    const CRL: &[u8] = b"-----BEGIN X509 CRL-----\nMIIB1zCBwAIBATANBgkqhkiG9w0BAQsFADBUMQswCQYDVQQGEwJERTETMBEGA1UE\nCAwKSGVpZGVsYmVyZzEhMB8GA1UECgwYSW50ZXJuZXQgV2lkZ2l0cyBQdHkgTHRk\nMQ0wCwYDVQQDDAR0ZXN0Fw0yMzA4MjQwODM3MTRaFw0yMzA5MjMwODM3MTRaMCcw\nJQIUI27ICLbN8DI5EMOLCwmd8miMGTwXDTIzMDgyNDA4MzQxNlqgDzANMAsGA1Ud\nFAQEAgIQADANBgkqhkiG9w0BAQsFAAOCAQEAJCLrxzeDdgRIqfGEPjBff21Tefir\n3mbxZtrCa232zJLmurX1zQ5S9pa/QvGQ/Fj91FUbNezomh1NTmJkscj3Mh8Ph/Mv\nIbburXhPG5ypHeOXAGQqpKADZyBPMRwIWaTqmtsMg5kdHzYScvvHFZRcy8KCKx6e\niFdqNc9qZkyvCazpzjWK+JpK6TPCpI68LO/DxhWPirclhjZLs3z6iAuxmW8TM71T\nC7YzZ0Z17xCttNW7155LpFWUo1YOQk1Cy9W2d3EIBMmZhn6yBUExusXzcj4BnXZ7\nzCqIhPnMU4nLrarkzgmy+v1ysdo1lFGQ4fC3XFY+oWxUsImFP9JKHKEbBA==\n-----END X509 CRL-----";
+
+    #[test]
+    fn test_revokation() {
+        let mut cache = CertificateCache::new(mpsc::channel(1).0);
+        let mut certs: Vec<_> = [1, 5, 10].into_iter()
+            .map(Duration::from_secs)
+            .map(build_x509)
+            .collect();
+        certs.push(X509::from_pem(CERT_TO_REVOKE).unwrap());
+        cache.serial_to_x509 = certs.into_iter().enumerate().map(|(i, cert)| (i.to_string(), CertificateCacheEntry::Valid(cert))).collect();
+        let crl = X509Crl::from_pem(CRL).unwrap();
+        cache.invalidate_revoked_certs(&crl);
+        
+        assert!(matches!(cache.serial_to_x509.get("3"), Some(&CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked))), "Certificate was not revoked");
+        assert_eq!(cache.serial_to_x509.values().filter(|cert| matches!(cert, CertificateCacheEntry::Valid(..))).count(), 3, "No other certs have been invalidated");
+    }
 }
