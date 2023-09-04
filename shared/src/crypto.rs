@@ -351,15 +351,8 @@ impl CertificateCache {
             let commonnames: Vec<ProxyId> = opensslcert
                 .subject_name()
                 .entries()
-                .map(|x| x.data().as_utf8().unwrap()) // TODO: Remove unwrap, e.g. by supplying empty _or-string
-                .collect::<Vec<OpensslString>>()
-                .iter()
-                .map(|x| {
-                    ProxyId::new(&x.to_string()).expect(&format!(
-                        "Internal error: Vault returned certificate with invalid common name: {}",
-                        x
-                    ))
-                })
+                .map(|x| x.data().as_utf8().as_ref().map(OpensslString::to_string).unwrap_or(String::new()))
+                .flat_map(|x| ProxyId::new(x).map_err(|e| warn!("Internal error: Vault returned certificate with invalid common name: {e}")))
                 .collect();
 
             let err = {
