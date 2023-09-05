@@ -97,6 +97,8 @@ pub enum CertificateInvalidReason {
     InternalError(String),
     #[error("Not disclosed: Broker considers this certificate invalid")]
     NotDisclosedByBroker,
+    #[error("Certificate has been revoked")]
+    Revoked,
     #[error("Other problem: {0}")]
     Other(String),
 }

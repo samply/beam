@@ -53,7 +53,7 @@ anyhow = "1.0.58"
 clap = { version = "4.0.12", features = ["env", "derive"] }
 
 http = "0.2.8"
-fundu = "1.0.0"
+fundu = "2.0.0"
 regex = "1"
 
 # expire map dependencies
@@ -66,7 +66,7 @@ tokio-test = "0.4.2"
 
 [features]
 expire_map = ["dep:dashmap"]
-sockets = ["expire_map"]
+sockets = ["expire_map", "beam-lib/sockets"]
 default = []
 config-for-proxy = []
 config-for-central = []

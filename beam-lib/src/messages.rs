@@ -41,6 +41,7 @@ pub struct TaskResult<T> {
     pub metadata: Value,
 }
 
+#[cfg(feature = "sockets")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SocketTask {
     pub from: AddressingId,

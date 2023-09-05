@@ -78,7 +78,7 @@ pub async fn main() -> anyhow::Result<()> {
     } else {
         debug!("Certificate chain successfully initialized and validated");
     }
-    spwan_controller_polling(client.clone(), config.clone());
+    spawn_controller_polling(client.clone(), config.clone());
 
     serve::serve(config, client).await?;
     Ok(())
@@ -170,7 +170,7 @@ async fn get_broker_health(
     }
 }
 
-fn spwan_controller_polling(client: SamplyHttpClient, config: Config) {
+fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
     const RETRY_INTERVAL: Duration = Duration::from_secs(60);
     tokio::spawn(async move {
         loop {
@@ -198,11 +198,10 @@ fn spwan_controller_polling(client: SamplyHttpClient, config: Config) {
                 },
                 // For some reason e.is_timout() does not work
                 Err(e) if is_actually_hyper_timeout(&e) => {
-                    debug!("Connection to broker timed out retrying");
+                    debug!("Connection to broker timed out; retrying: {e}");
                 },
                 Err(e) => {
-                    warn!("Error getting control tasks from broker: {e}");
-                    warn!("Retring in {}s", RETRY_INTERVAL.as_secs());
+                    warn!("Error getting control tasks from broker; retrying in {}s: {e}", RETRY_INTERVAL.as_secs());
                     tokio::time::sleep(RETRY_INTERVAL).await;
                 }
             };

@@ -4,9 +4,9 @@
 
 Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. It provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation on top of an easy to use REST API.
 
-## Latest version: Samply.Beam 0.6.1 &ndash; 2023-04-11
+## Latest version: Samply.Beam 0.7.0 &ndash; 2023-08-23
 
-This minor easter update is just a maintenance release. We updated our time-parsing dependency [fundu](https://crates.io/crates/fundu) to the next major version and fixed a bug in our CI/CD pipeline. With this fix, the project description is now correctly sent to Docker Hub. Internally, we improved the formatting of the source code.
+This new version has long been in the making and introduces many new features, such as direct socket connectsion. As indicated by the [major version change](https://semver.org/), some breaking changes have been introduced. Pleasecheck the [Changelog](CHANGELOG.md) for details.
 
 Find info on all previous versions in the [Changelog](CHANGELOG.md).
 
@@ -46,7 +46,7 @@ Although all IDs may look like fully-qualified domain names:
 
 - Only the *BrokerId* has to be a DNS-resolvable FQDN reachable via the network (Proxies will communicate with `https://broker1.samply.de/...`)
 - The *ProxyId* (`proxy2...`) is not represented in DNS but via the Proxy's certificate, which states `CN=proxy2.broker2.samply.de`
-- Finally, the *AppId* (`app3...`) results from using the correct API key in communication with the Proxy (Header `Authorization: app3.broker2.samply.de <app3's API key>`)
+- Finally, the *AppId* (`app3...`) results from using the correct API key in communication with the Proxy (Header `Authorization: ApiKey app3.broker2.samply.de <app3's API key>`)
 
 In practice,
 
@@ -432,7 +432,7 @@ Content-Length: 0
 Date: Mon, 27 Jun 2022 14:26:45 GMT
 ```
 
-The Beam.Broker implements a more informative health endpoint and returns a haalth summary and additional system details:
+The Beam.Broker implements a more informative health endpoint and returns a health summary and additional system details:
 
 ```
 HTTP/1.1 200
@@ -454,6 +454,46 @@ HTTP/1.1 503
     "status": "unavailable"
   }
 }
+```
+
+Additionally, the broker health endpoint publishes the connection status of the proxies:
+
+Method: `GET`  
+URL: `/v1/health/proxies/<proxy-id>`  
+Authorization:
+
+ - Basic Auth with an empty user and the configured `MONITORING_API_KEY` as a password, so the header looks like `Authorization: Basic <base64 of ':<MONITORING_API_KEY>'>`.
+
+In case of a successful connection between proxy and broker, the call returns
+
+```
+HTTP/1.1 200
+```
+
+otherwise
+
+```
+HTTP/1.1 404
+```
+
+Querying the endpoint without specifying a ProxyId returns a JSON array of all proxies, that have ever connected to this broker:
+
+Method: `GET`  
+URL: `/v1/health/proxies`  
+Authorization:
+
+ - Basic Auth with an empty user and the configured `MONITORING_API_KEY` as a password, so the header looks like `Authorization: Basic <base64 of ':<MONITORING_API_KEY>'>`.
+
+yields, for example,
+
+```
+HTTP/1.1 200
+[
+  "proxy1.broker.example",
+  "proxy2.broker.example",
+  "proxy3.broker.example",
+  "proxy4.broker.example"
+]
 ```
 
 ### Socket connections
@@ -538,7 +578,7 @@ Beam.Broker and Beam.Proxy expect the private key as well as the CA root certifi
 We created a [certificate enrollment companion tool](https://github.com/samply/beam-enroll), assisting the enrollment process. Please run the docker image via:
 
 ```bash
-docker run --rm -ti -v <output-directory>:/pki samply/beam-enroll:latest --output-file /pki/<proxy_name>.priv.pem --proxy-id <full_proxy_id>
+docker run --rm -v <output-directory>:/pki samply/beam-enroll:latest --output-file /pki/<proxy_name>.priv.pem --proxy-id <full_proxy_id>
 ```
 
 and follow the instructions on the screen. The tool generates the private key file in the given directory and prints the CSR to the console -- ready to be copied into an email to the central CA's administrator without the risk of accidentally sending the wrong, i.e. private, file.
@@ -577,15 +617,16 @@ The data is symmetrically encrypted using the Authenticated Encryption with Auth
 - [X] End-to-End signatures
 - [X] End-to-End encryption
 - [X] Docker deployment packages: CI/CD
-- [ ] Docker deployment packages: Documentation
 - [X] Broker-side filtering using pre-defined criteria
-- [ ] Broker-side filtering of the unencrypted metadata fields with JSON queries
-- [ ] Integration of OAuth2 (in discussion)
-- [ ] In addition to messages and tasks, also facilitate direct socket connections (https://github.com/samply/beam/pull/131)
-- [ ] Deliver usage metrics
 - [x] Helpful dev environment
 - [x] Expiration of tasks and results
 - [x] Support TLS-terminating proxies
+- [x] Direct-Socket connections
+- [x] Crate to support the development of Rust Beam client applications
+- [ ] Docker deployment packages: Documentation
+- [ ] Broker-side filtering of the unencrypted metadata fields with JSON queries
+- [ ] Integration of OAuth2 (in discussion)
+- [ ] Deliver usage metrics
 
 ## Cryptography Notice
 

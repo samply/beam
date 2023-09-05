@@ -19,7 +19,7 @@ impl Default for Verdict {
     }
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "lowercase")]
 pub enum VaultStatus {
     Ok,
@@ -35,8 +35,23 @@ impl Default for VaultStatus {
     }
 }
 
+#[derive(Serialize, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum InitStatus {
+    Unknown,
+    FetchingIntermediateCert,
+    Done
+}
+
+impl Default for InitStatus {
+    fn default() -> Self {
+        InitStatus::Unknown
+    }
+}
+
 pub struct Health {
     pub vault: VaultStatus,
+    pub initstatus: InitStatus,
     pub proxies: HashMap<ProxyId, ProxyStatus>
 }
 
@@ -70,35 +85,58 @@ impl ProxyStatus {
 
 pub struct Senders {
     pub vault: tokio::sync::watch::Sender<VaultStatus>,
+    pub init: tokio::sync::watch::Sender<InitStatus>,
 }
 
 impl Health {
     pub fn make() -> (Senders, Arc<RwLock<Self>>) {
         let health = Health {
             vault: VaultStatus::default(),
+            initstatus: InitStatus::default(),
             proxies: HashMap::default()
         };
         let (vault_tx, mut vault_rx) = tokio::sync::watch::channel(VaultStatus::default());
+        let (init_tx, mut init_rx) = tokio::sync::watch::channel(InitStatus::default());
         let health = Arc::new(RwLock::new(health));
         let health2 = health.clone();
+        let health3 = health.clone();
 
         let vault_watcher = async move {
             while vault_rx.changed().await.is_ok() {
                 let new_val = vault_rx.borrow().clone();
                 let mut health = health2.write().await;
-                match &new_val {
+                health.vault = new_val;
+                match &health.vault {
                     VaultStatus::Ok => info!("Vault connection is now healthy"),
                     x => warn!(
                         "Vault connection is degraded: {}",
                         serde_json::to_string(x).unwrap_or_default()
                     ),
                 }
-                health.vault = new_val;
             }
         };
-        tokio::task::spawn(vault_watcher);
 
-        let senders = Senders { vault: vault_tx };
+        tokio::task::spawn(vault_watcher);
+        let initstatus_watcher = async move {
+            while init_rx.changed().await.is_ok() {
+                let new_val = init_rx.borrow().clone();
+                let mut health = health3.write().await;
+                health.initstatus = new_val;
+                match &health.initstatus {
+                    InitStatus::Done => {
+                        info!("Initialization is now complete");
+                        return;
+                    },
+                    x => warn!(
+                        "Still initializing: {}",
+                        serde_json::to_string(x).unwrap_or_default()
+                    ),
+                }
+            }
+        };
+        tokio::task::spawn(initstatus_watcher);
+
+        let senders = Senders { vault: vault_tx, init: init_tx };
         (senders, health)
     }
 }

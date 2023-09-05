@@ -14,9 +14,9 @@ use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use shared::{
     config,
-    crypto::{GetCerts, CertificateCache, CertificateCacheUpdate},
+    crypto::{GetCerts, CertificateCache, CertificateCacheUpdate, parse_crl},
     errors::SamplyBeamError,
-    http_client::{self, SamplyHttpClient},
+    http_client::{self, SamplyHttpClient}, openssl::x509::X509Crl,
 };
 use std::time::Duration;
 use tokio::time::timeout;
@@ -284,6 +284,20 @@ impl GetCerts for GetCertsFromPki {
             }
             Ok(update) => update
         }
+    }
+
+    async fn get_crl(&self) -> Result<Option<X509Crl>, SamplyBeamError> {
+        debug!("Getting crl");
+        let resp = self.resilient_vault_request(
+            &Method::GET,
+            &format!("{}/crl", self.pki_realm),
+            Some(100),
+        )
+        .await?;
+        let body_bytes = body::to_bytes(resp.into_body()).await.map_err(|e| {
+            SamplyBeamError::VaultOtherError(format!("Cannot retrieve crl: {}", e))
+        })?;
+        parse_crl(&body_bytes).map(Some)
     }
 }
 

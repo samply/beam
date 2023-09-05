@@ -77,24 +77,40 @@ jobs:
         with:
           key: ${{ matrix.arch }}-${{ env.PROFILE }}
           prefix-key: v1-rust-${{ matrix.features && format('features_{0}', matrix.features) || 'nofeatures' }} # Increase to invalidate old caches.
-      - name: Build (${{ matrix.arch }})
+      - name: Build (cross to ${{ matrix.arch }})
+        if: env.is_cross == 'true'
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ env.is_cross }}
           command: build
           args: --target ${{ env.rustarch }} ${{ matrix.features && format('--features {0}', matrix.features) }} ${{ env.profilestr }}
-      - name: Upload Artifact
+      - name: Build (native)
+        if: env.is_cross == 'false'
+        run: |
+          BINS=$(cargo build --tests --bins --message-format=json --target ${{ env.rustarch }} ${{ matrix.features && format('--features {0}', matrix.features) }} ${{ env.profilestr }} | jq -r 'select(.profile.test == true) | .executable | select(. != null)')
+          mkdir -p testbinaries/
+          for testbin in $BINS; do
+            mv -v $testbin testbinaries/
+          done
+      - name: Upload (bins)
         uses: actions/upload-artifact@v3
         with:
           name: binaries-${{ matrix.arch }}-${{ matrix.features }}
           path: |
             target/${{ env.rustarch }}/${{ env.PROFILE }}/proxy
             target/${{ env.rustarch }}/${{ env.PROFILE }}/broker
+      - name: Upload (test, native only)
+        if: matrix.arch == 'amd64'
+        uses: actions/upload-artifact@v3
+        with:
+          name: testbinaries-${{ matrix.arch }}-${{ matrix.features }}
+          path: |
+            testbinaries/*
 
   test:
     name: Run tests
     needs: [ build-rust ]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
 
     strategy:
       matrix:
@@ -104,14 +120,24 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/download-artifact@v3
+      - name: Download bins
+        uses: actions/download-artifact@v3
         with:
           name: binaries-amd64-${{ matrix.features }}
           path: artifacts/binaries-amd64/
+      - name: Download tests
+        uses: actions/download-artifact@v3
+        with:
+          name: testbinaries-amd64-${{ matrix.features }}
+          path: testbinaries/
+      - name: Get newer curl version
+        run: |
+          curl -L https://github.com/stunnel/static-curl/releases/download/8.2.0/curl-static-amd64-8.2.0.tar.xz | sudo tar xJ -C /usr/local/bin/
       - run: ./dev/test ci ${{ matrix.features && format('--features {0}', matrix.features) }}
 
   docker:
     needs: [ build-rust, pre-check, test ]
+    if: github.ref_protected == true
 
     strategy:
       matrix:
