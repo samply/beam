@@ -44,7 +44,6 @@ pub mod crypto_jwt;
 pub mod errors;
 pub mod serde_helpers;
 pub mod logger;
-pub mod compare_client_server_version;
 mod traits;
 #[cfg(test)]
 mod serializing_compatability_test;

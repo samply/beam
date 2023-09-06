@@ -20,8 +20,6 @@ use tracing::{info, instrument, span, warn, Level, error};
 
 use beam_lib::AppOrProxyId;
 
-use crate::compare_client_server_version::{compare_version, Verdict};
-
 const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 
 pub struct LoggingInfo {
@@ -83,7 +81,6 @@ pub async fn log(
     let method = req.method().clone();
     let uri = req.uri().clone();
     let ip = get_ip(&req, &info);
-    let user_agent = req.headers().get(header::USER_AGENT).cloned();
 
     let mut info = LoggingInfo::new(method, uri, ip);
     // This channel may or may not receive an AppOrProxyId from verify_with_extended_header
@@ -97,26 +94,7 @@ pub async fn log(
         info.set_proxy_name(proxy);
     }
 
-    let mut line = info.get_log();
-
-    if let Some(their_version_header) = user_agent {
-        let warn = match compare_version(&their_version_header) {
-            Verdict::BeamWithMatchingVersion | Verdict::NotBeam => {
-                // we're happy
-                None
-            },
-            Verdict::BeamWithMismatchingVersion(their_ver) => {
-                Some(format!(" WARNING: Client had mismatching version \"{their_ver}\""))
-            },
-            Verdict::BeamWithInvalidVersion(their_ver) => {
-                Some(format!(" WARNING: Client had INVALID version \"{their_ver}\""))
-            },
-        };
-        if let Some(warn) = warn {
-            line.push_str(&warn);
-        }
-    }
-
+    let line = info.get_log();
     // If we get a gateway timeout we won't log it with log level warn as this happens regularly with the long polling api
     if resp.status().is_success() || resp.status().is_informational() || resp.status() == StatusCode::GATEWAY_TIMEOUT {
         info!(target: "in", "{}", line);
