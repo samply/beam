@@ -7,10 +7,10 @@ use axum::{
 };
 use beam_lib::{AppId, AppOrProxyId};
 use shared::{
-    config, config_proxy, middleware::ProxyLogger,
+    config, config_proxy
 };
 
-use tracing::debug;
+use tracing::{debug, Span};
 
 pub(crate) struct AuthenticatedApp(pub(crate) AppId);
 
@@ -41,9 +41,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedApp {
                 return Err(UNAUTH_ERR);
             }
             debug!("Request authenticated (ClientID {})", client_id);
-            _ = parts.extensions.remove::<ProxyLogger>()
-                .expect("Added by middleware")
-                .send(AppOrProxyId::App(client_id.clone()));
+            Span::current().record("from", AppOrProxyId::App(client_id.clone()).hide_broker());
             Ok(Self(client_id))
         } else {
             Err(UNAUTH_ERR)

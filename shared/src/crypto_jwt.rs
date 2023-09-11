@@ -4,7 +4,6 @@ use crate::{
     config_shared::ConfigCrypto,
     crypto::{self, CryptoPublicPortion},
     errors::{CertificateInvalidReason, SamplyBeamError},
-    middleware::{LoggingInfo, ProxyLogger},
     Msg, MsgEmpty, MsgId, MsgSigned,
 };
 use axum::{async_trait, body::HttpBody, extract::{FromRequest, Request}, http::{header, request::Parts, uri::PathAndQuery, HeaderMap, HeaderName, Method, StatusCode, Uri}, BoxError, RequestExt};
@@ -20,7 +19,7 @@ use once_cell::unsync::Lazy;
 use openssl::base64;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, warn, Span};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -126,7 +125,6 @@ pub const JWT_VERIFICATION_OPTIONS: Lazy<VerificationOptions> = Lazy::new(|| Ver
     ..Default::default()
 });
 
-#[tracing::instrument(skip(token_without_extended_signature))]
 /// This verifys a Msg from sent to the Broker
 /// The Message is encoded in the JWT Claims of the body which is a JWT.
 /// There is never really a [`MsgSigned`] involved in Deserializing the message as the signature is just copied from the body JWT.
@@ -165,12 +163,7 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
                 ERR_SIG
             })?;
 
-    req.extensions
-        .remove::<ProxyLogger>()
-        .expect("Should be set by middleware")
-        .send(header_claims.custom.from.clone())
-        .await
-        .expect("Receiver still lives in middleware");
+    Span::current().record("from", header_claims.custom.from.hide_broker());
 
     // Check extra digest
 
