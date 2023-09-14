@@ -1,3 +1,5 @@
+use std::net::{SocketAddr, IpAddr};
+
 use beam_lib::{AppOrProxyId, ProxyId};
 use crate::{
     config,
@@ -6,7 +8,7 @@ use crate::{
     errors::{CertificateInvalidReason, SamplyBeamError},
     Msg, MsgEmpty, MsgId, MsgSigned,
 };
-use axum::{async_trait, body::HttpBody, extract::{FromRequest, Request}, http::{header, request::Parts, uri::PathAndQuery, HeaderMap, HeaderName, Method, StatusCode, Uri}, BoxError, RequestExt};
+use axum::{async_trait, body::HttpBody, extract::{{FromRequest, ConnectInfo, FromRequestParts}, Request}, http::{header, request::Parts, uri::PathAndQuery, HeaderMap, HeaderName, Method, StatusCode, Uri}, BoxError, RequestExt};
 use jwt_simple::{
     claims::JWTClaims,
     prelude::{
@@ -19,7 +21,7 @@ use once_cell::unsync::Lazy;
 use openssl::base64;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
-use tracing::{debug, error, warn, Span};
+use tracing::{debug, error, warn, Span, info_span};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -133,17 +135,20 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
     req: &mut Parts,
     token_without_extended_signature: &str,
 ) -> Result<MsgSigned<M>, (StatusCode, &'static str)> {
+    let ip = get_ip(req).await;
+    // let a = _span.entered();
     let token_with_extended_signature = std::str::from_utf8(
         req.headers
             .get(header::AUTHORIZATION)
             .ok_or_else(|| {
-                warn!("Missing Authorization header (in verify_with_extended_header)");
+                warn!(%ip, "Missing Authorization header (in verify_with_extended_header)");
                 ERR_SIG
             })?
             .as_bytes(),
     )
     .map_err(|e| {
         warn!(
+            %ip,
             "Unable to parse existing Authorization header (in verify_with_extended_header): {}",
             e
         );
@@ -157,6 +162,7 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
             .await
             .map_err(|e| {
                 warn!(
+                    %ip,
                     "Unable to extract header JWT: {}. The full JWT was: {}. The header was: {:?}",
                     e, token_with_extended_signature, req
                 );
@@ -305,4 +311,15 @@ pub fn make_extra_fields_digest(
         sig: digest,
         from: from.to_owned(),
     })
+}
+
+async fn get_ip(parts: &mut Parts) -> IpAddr {
+    let source_ip = ConnectInfo::<SocketAddr>::from_request_parts(parts, &()).await.expect("The server is configured to keep connect info").0.ip();
+    const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
+    parts.headers
+        .get(X_FORWARDED_FOR)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(source_ip)
 }
