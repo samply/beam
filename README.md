@@ -60,33 +60,39 @@ The Proxies have to fetch certificates from the central Certificate Authority, h
 
 ## Getting started
 
+Using Docker, you can run a small demo beam network by checking out the git repository (use `main` or `develop` branch) and running the following command:
+```bash
+./dev/beamdev demo
+```
+This will launch your own beam demo network, which consists of one broker (listening on `localhost:8080`) and two connected proxies (listening on `localhost:8081` and `localhost:8082`).
+
 The following paragraph simulates the creation and the completion of a task
 using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
-connected via a central broker. Each party runs an application, called `app`.
-We will simulate this application.
+connected via a central broker. Each party has one registered application.
+In the next section we will simulate the communcation between these applications over the beam network.
 
-Note: cURL versions before 7.82 do not support the `--json` option. In this case, please use `--data` instead.
+> Note: cURL versions before 7.82 do not support the `--json` option. In this case, please use `--data` instead.
 
 The used BeamIds are the following:
 
 | System             | BeamID                       |
 |--------------------|------------------------------|
-| Broker             | broker.example.de            |
-| Proxy1             | proxy1.broker.example.de     |
-| App behind Proxy 1 | app.proxy1.broker.example.de |
-| Proxy2             | proxy2.broker.example.de     |
-| App behind Proxy 2 | app.proxy2.broker.example.de |
+| Broker             | broker                       |
+| Proxy1             | proxy1.broker                |
+| App behind Proxy 1 | app1.proxy1.broker           |
+| Proxy2             | proxy2.broker                |
+| App behind Proxy 2 | app2.proxy2.broker           |
 
-In this example, we use the same ApiKey `AppKey` for both parties.
+To simplify this example, we use the same ApiKey `App1Secret` for both apps. Also, the Broker has a short name (`broker`) where in a real setup, it would be required to have a fully-qualified domain name as `broker1.samply.de` (see [System Architecture](#system-architecture)).
 
 ### Creating a task
 
-`app` at party 1 has some important work to distribute. It knows, that `app`
-at party 2 is capable of solving it, so it asks `proxy1.broker.example.de` to
+`app1` at party 1 has some important work to distribute. It knows, that `app2`
+at party 2 is capable of solving it, so it asks `proxy1.broker` to
 create that new task:
 
-```
-curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"],"ttl":"60s"}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
+```sh
+curl -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app1.proxy1.broker","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app2.proxy2.broker"],"ttl":"60s"}' -H "Authorization: ApiKey app1.proxy1.broker App1Secret" http://localhost:8081/v1/tasks
 ```
 
 `Proxy1` replies:
@@ -103,36 +109,36 @@ the task is registered and will be distributed to the appropriate locations.
 
 ### Listening for relevant tasks
 
-`app` at Party 2 is now able to fetch all tasks addressed to them, especially the task created before:
+`app2` at Party 2 is now able to fetch all tasks addressed to them, especially the task created before:
 
-```
-curl -k -X GET -v -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks?filter=todo
+```sh
+curl -X GET -v -H "Authorization: ApiKey app2.proxy2.broker App1Secret" http://localhost:8082/v1/tasks?filter=todo
 ```
 
 The `filter=todo` parameter instructs the Broker to only send unfinished tasks
 addressed to the querying party.
-The query returns the task, and as `app` at Proxy 2, we inform the broker that
+The query returns the task, and as `app2` at Proxy 2, we inform the broker that
 we are working on this important task by creating a preliminary "result" with
 `"status": "claimed"`:
 
-```
-curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":"claimed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/app.proxy2.broker.example.de
+```sh
+curl -X PUT -v --json '{"from":"app2.proxy2.broker","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":"claimed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app1.proxy1.broker"]}' -H "Authorization: ApiKey app2.proxy2.broker App1Secret" http://localhost:8082/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/app2.proxy2.broker
 ```
 
 ### Returning a Result
 
-Party 2 processes the received task. After succeeding, `app` at party 2 returns the result to party 1:
+Party 2 processes the received task. After succeeding, `app2` returns the result to party 1:
 
-```
-curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","metadata":["Arbitrary","types","are","possible"],"status":"succeeded","body":"The answer is 42","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/app.proxy2.broker.example.de
+```sh
+curl -X PUT -v --json '{"from":"app2.proxy2.broker","metadata":["Arbitrary","types","are","possible"],"status":"succeeded","body":"The answer is 42","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app1.proxy1.broker"]}' -H "Authorization: ApiKey app2.proxy2.broker App1Secret" http://localhost:8082/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/app2.proxy2.broker
 ```
 
 ### Waiting for tasks to complete
 
-Meanwhile, `app` at party 1 waits on the completion of its task. But not wanting to check for results every couple seconds, it asks Proxy 1 to be informed if the expected number of `1` result is present:
+Meanwhile, `app1` waits on the completion of its task. But not wanting to check for results every couple seconds, it asks Proxy 1 to be informed if the expected number of `1` result is present:
 
-```
-curl -k -X GET -v -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results?wait_count=1
+```sh
+curl -X GET -v -H "Authorization: ApiKey app1.proxy1.broker App1Secret" http://localhost:8081/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results?wait_count=1
 ```
 
 This *long polling* opens the connection and sleeps until a reply is received. For more information, see the API documentation.

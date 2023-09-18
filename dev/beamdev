@@ -126,6 +126,19 @@ function start {
     docker-compose up --no-build --no-recreate --abort-on-container-exit
 }
 
+function demo {
+    if [ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]; then
+        export TAG=main
+    else
+        echo "You have checked out a non-main branch of beam. We will launch the latest develop version of beam. Your working copy remains untouched. In case of any problems, please switch to a clean develop branch."
+        export TAG=develop
+    fi
+    clean
+    pki/pki devsetup
+    echo "$VAULT_TOKEN" > ./pki/pki.secret
+    docker-compose up --no-build --no-recreate --abort-on-container-exit
+}
+
 function start_bg {
     clean
     pki/pki devsetup
@@ -285,6 +298,10 @@ case "$1" in
     stop
     ;;
   noop)
+    ;;
+  demo)
+    shift
+    demo $@
     ;;
   defaults)
     defaults
