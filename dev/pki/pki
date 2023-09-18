@@ -109,6 +109,22 @@ function request() {
      echo "Success: PEM files stored to ${application}*.pem"
 }
 
+function setup() {
+    clean
+    touch ${PROXY1_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
+    touch ${PROXY2_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
+    touch test1.priv.pem # see https://github.com/docker/compose/issues/8305
+    touch test2.priv.pem # see https://github.com/docker/compose/issues/8305
+    #touch root.crt.pem # see https://github.com/docker/compose/issues/8305
+    start
+    while ! [ "$(curl -s $VAULT_ADDR/v1/sys/health | jq -r .sealed)" == "false" ]; do echo "Waiting ..."; sleep 0.1; done
+    docker compose exec -T vault sh -c "https_proxy=$http_proxy apk add --no-cache bash curl jq"
+    docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki init"
+    docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY1_ID_SHORT" "24h"
+    docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY2_ID_SHORT" "24h"
+    docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy dummy" "24h"
+}
+
 function init() {
      echo "Creating Root CA"
      create_root_ca
@@ -136,19 +152,7 @@ case "$1" in
           revoke_proxy "$2"
           ;;
      devsetup)
-          clean
-          touch ${PROXY1_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
-          touch ${PROXY2_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
-          touch test1.priv.pem # see https://github.com/docker/compose/issues/8305
-          touch test2.priv.pem # see https://github.com/docker/compose/issues/8305
-          #touch root.crt.pem # see https://github.com/docker/compose/issues/8305
-          start
-          while ! [ "$(curl -s $VAULT_ADDR/v1/sys/health | jq -r .sealed)" == "false" ]; do echo "Waiting ..."; sleep 0.1; done
-          docker compose exec -T vault sh -c "https_proxy=$http_proxy apk add --no-cache bash curl jq"
-          docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki init"
-          docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY1_ID_SHORT" "24h"
-          docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY2_ID_SHORT" "24h"
-          docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy dummy" "24h"
+          setup
           docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY2_ID_SHORT" "24h" # Duplicate certificate for testing
           docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy test1 2s" # Expired certificate for testing
           docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy test2 2s" # Expired certificate for testing
@@ -158,7 +162,10 @@ case "$1" in
           $SCRIPT_DIR/pki revoke_proxy test3 # Revokation testing
 
           ;;
+     setup)
+          setup
+          ;;
      *)
-          echo "Usage: $0 start|init|(request [AppName])"
+          echo "Usage: $0 start|setup|devsetup|init|(request [AppName])"
           ;;
 esac
