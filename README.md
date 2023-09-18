@@ -64,7 +64,7 @@ Using Docker, you can run a small demo beam network by checking out the git repo
 ```bash
 ./dev/beamdev demo
 ```
-This will launch your own beam demo network, which consists of one broker (listening on `localhost:8080`) and two connected proxies (listening on `localhost:8081` and `localhost:8082`).
+This will launch your own beam demo network, which consists of one broker (listening on `localhost:8080`) and two connected proxies (listening on `localhost:8081` and `localhost:8082`) as well as a MITM proxy (listening on `localhost:9090`) for debugging.
 
 The following paragraph simulates the creation and the completion of a task
 using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
