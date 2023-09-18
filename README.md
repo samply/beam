@@ -60,11 +60,11 @@ The Proxies have to fetch certificates from the central Certificate Authority, h
 
 ## Getting started
 
-If you have docker installed and cloned our repository you can run a demo beam network using the following command:
+Using Docker, you can run a small demo beam network by checking out the git repository (use `main` or `develop` branch) and running the following command:
 ```bash
 ./dev/beamdev demo
 ```
-This will launch a beam network consisting of two proxies (Proxy1 localhost:8081 and Proxy2 localhost:8082) and a broker (localhost:8080)
+This will launch your own beam demo network, which consists of one broker (listening on `localhost:8080`) and two connected proxies (listening on `localhost:8081` and `localhost:8082`).
 
 The following paragraph simulates the creation and the completion of a task
 using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
@@ -83,7 +83,7 @@ The used BeamIds are the following:
 | Proxy2             | proxy2.broker                |
 | App behind Proxy 2 | app2.proxy2.broker           |
 
-In this example, we use the same ApiKey `App1Secret` for both parties.
+To simplify this example, we use the same ApiKey `App1Secret` for both apps. Also, the Broker has a short name (`broker`) where in a real setup, it would be required to have a fully-qualified domain name as `broker1.samply.de` (see [System Architecture](#system-architecture)).
 
 ### Creating a task
 

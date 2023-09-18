@@ -130,7 +130,7 @@ function demo {
     if [ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]; then
         export TAG=main
     else
-        echo "You are checked out to a non main branch of beam. We will launch the latest develop version of beam."
+        echo "You have checked out a non-main branch of beam. We will launch the latest develop version of beam. Your working copy remains untouched. In case of any problems, please switch to a clean develop branch."
         export TAG=develop
     fi
     clean
