@@ -6,8 +6,6 @@ cd $SD
 
 source beamdev noop
 
-unset IMGNAME
-
 function start() {
   trap "echo; echo; clean" EXIT
   start_bg
