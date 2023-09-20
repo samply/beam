@@ -119,7 +119,7 @@ function demo {
         export TAG=develop
     fi
     clean
-    pki/pki devsetup
+    pki/pki setup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     docker-compose up --no-build --no-recreate --abort-on-container-exit
 }
@@ -297,6 +297,6 @@ case "$1" in
     defaults
     ;;
   *)
-    echo "Usage: $0 [--tag SOMETAG, e.g. develop, to use an existing image] build|start|start_bg|restart|stop|clean|defaults|noop"
+    echo "Usage: $0 [--tag SOMETAG, e.g. develop, to use an existing image] build|start|start_bg|restart|stop|clean|defaults|demo|noop"
     ;;
 esac
