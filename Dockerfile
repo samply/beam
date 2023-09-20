@@ -1,6 +1,6 @@
 # This assumes binaries are present, see COPY directive.
 
-ARG IMGNAME=gcr.io/distroless/cc
+ARG IMGNAME=gcr.io/distroless/cc-debian12
 
 FROM alpine AS chmodder
 ARG FEATURE
