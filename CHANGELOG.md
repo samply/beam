@@ -1,4 +1,4 @@
-# Samply.Beam 0.7.0 -- 2023-08-23
+# Samply.Beam 0.7.0 – 2023-09-xx
 
 This version, Samply.Beam 0.7.0, has long been in the making and introduces multiple improvements, new features, and bug fixes. In particular, we are thrilled to introduce the possibility, to use Samply.Beam for secure and easy direct socket connections. This opens Samply.Beam for many additional use cases, where a message-passing approach is not suitable, e.g. applications with high bandwidth demands.
 
@@ -19,7 +19,7 @@ We hope these updates improve your experience with Samply.Beam and look forward 
 
 ## Minor improvements
 * *Improved Wire Format:* The serialization of the Tasks and Results have been improved. The tasks should now require around a third less communication.
-* *Refineld Logging and Error Handling:* Many improvements in logging, error handling, and the expressiveness of the return values have been implemented.
+* *Refined Logging and Error Handling:* Many improvements in logging, error handling, and the expressiveness of the return values have been implemented.
 * *Enhanced Beam.Broker Efficiency:* By using more efficient concurrent data structures, the efficiency of the Beam.Broker operation has been improved.
 * *Streamlined CI/CD Pipeline:* The CI/CD Pipeline has been tweaked to allow faster compile and testing cycles.
 * *Verbose User-Agent for Development Builds:* For non-`main` builds of Samply.Beam, the User-Agent identifies the git commit hash of the component for debugging purposes.

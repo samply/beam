@@ -40,18 +40,6 @@ export P2="http://localhost:8082" # for scripts
 
 export ARCH=$(docker version --format "{{.Server.Arch}}")
 
-function image_for_docker() {
-     # Pick the correct Ubuntu version for the Docker image,
-     # so the locally-built rust binary works regarding libssl
-     if [[ "$(pkg-config --modversion libssl)" =~ ^3.* ]]; then
-          echo "ubuntu:latest" # Use libssl3
-     else
-          echo -n "" # Don't change (uses libssl1.1)
-     fi
-}
-
-export IMGNAME="$(image_for_docker)"
-
 function check_prereqs() {
      set +e
      if [[ "$(curl --version)" != *" libcurl/"* ]]; then
@@ -105,11 +93,7 @@ function build() {
 function build_docker() {
     BACK2=$(pwd)
     cd $SD
-    if [ -z "$IMGNAME" ]; then
-        docker-compose build --build-arg TARGETARCH=$ARCH
-    else
-        docker-compose build --build-arg TARGETARCH=$ARCH --build-arg IMGNAME=$IMGNAME
-    fi
+    docker-compose build --build-arg TARGETARCH=$ARCH
     cd $BACK2
 }
 
@@ -123,6 +107,20 @@ function start {
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
     build $@
+    docker compose up --no-build --no-recreate -d
+    docker compose logs -f
+}
+
+function demo {
+    if [ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]; then
+        export TAG=main
+    else
+        echo "You have checked out a non-main branch of beam. We will launch the latest develop version of beam. Your working copy remains untouched. In case of any problems, please switch to a clean develop branch."
+        export TAG=develop
+    fi
+    clean
+    pki/pki setup
+    echo "$VAULT_TOKEN" > ./pki/pki.secret
     docker-compose up --no-build --no-recreate --abort-on-container-exit
 }
 
@@ -278,6 +276,11 @@ case "$1" in
     shift
     start_bg $@
     ;;
+  restart)
+    shift
+    build $@
+    docker compose up --no-deps --no-build proxy1 proxy2 broker
+    ;;
   clean)
     clean
     ;;
@@ -286,10 +289,14 @@ case "$1" in
     ;;
   noop)
     ;;
+  demo)
+    shift
+    demo $@
+    ;;
   defaults)
     defaults
     ;;
   *)
-    echo "Usage: $0 [--tag SOMETAG, e.g. develop, to use an existing image] build|start|start_bg|stop|clean|defaults|noop"
+    echo "Usage: $0 [--tag SOMETAG, e.g. develop, to use an existing image] build|start|start_bg|restart|stop|clean|defaults|demo|noop"
     ;;
 esac
