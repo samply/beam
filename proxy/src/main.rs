@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use backoff::{future::retry_notify, ExponentialBackoff};
+use hyper::header;
 use hyper::{body, client::HttpConnector, Client, Method, Request, StatusCode, Uri};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
@@ -178,6 +179,7 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
                 from: AppOrProxyId::Proxy(config.proxy_id.clone()),
             });
             let (parts, body) = Request::get(format!("{}v1/control", config.broker_uri))
+                .header(header::USER_AGENT, env!("SAMPLY_USER_AGENT"))
                 .body(body)
                 .expect("To build request successfully")
                 .into_parts();

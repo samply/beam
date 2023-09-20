@@ -16,7 +16,7 @@ use http::{
 };
 use hyper::Body;
 use tokio::sync::{oneshot, Mutex};
-use tracing::{info, instrument, span, warn, Level};
+use tracing::{info, instrument, span, warn, Level, error};
 
 use beam_lib::AppOrProxyId;
 

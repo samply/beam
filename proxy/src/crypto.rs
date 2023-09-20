@@ -1,5 +1,5 @@
 use axum::{async_trait, body::Bytes, http::request, response::Response, Json};
-use hyper::{client::HttpConnector, Client, Method, Request, StatusCode, Uri};
+use hyper::{client::HttpConnector, Client, Method, Request, StatusCode, Uri, header};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
 use beam_lib::AppOrProxyId;
@@ -36,6 +36,7 @@ impl GetCertsFromBroker {
         let (parts, body) = Request::builder()
             .method(Method::GET)
             .uri(&uri)
+            .header(header::USER_AGENT, env!("SAMPLY_USER_AGENT"))
             .body(body)
             .expect("To build request successfully")
             .into_parts();

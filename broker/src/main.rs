@@ -10,6 +10,7 @@ mod serve_tasks;
 #[cfg(feature = "sockets")]
 mod serve_sockets;
 mod task_manager;
+mod compare_client_server_version;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 

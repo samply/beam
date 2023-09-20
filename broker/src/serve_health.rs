@@ -6,7 +6,7 @@ use serde::{Serialize, Deserialize};
 use shared::{crypto_jwt::Authorized, Msg, config::CONFIG_CENTRAL};
 use tokio::sync::RwLock;
 
-use crate::health::{Health, VaultStatus, Verdict, ProxyStatus, InitStatus};
+use crate::{health::{Health, VaultStatus, Verdict, ProxyStatus, InitStatus}, compare_client_server_version::log_version_mismatch};
 
 #[derive(Serialize)]
 struct HealthOutput {
@@ -20,7 +20,7 @@ pub(crate) fn router(health: Arc<RwLock<Health>>) -> Router {
         .route("/v1/health", get(handler))
         .route("/v1/health/proxies/:proxy_id", get(proxy_health))
         .route("/v1/health/proxies", get(get_all_proxies))
-        .route("/v1/control", get(get_control_tasks))
+        .route("/v1/control", get(get_control_tasks).layer(axum::middleware::from_fn(log_version_mismatch)))
         .with_state(health)
 }
 
