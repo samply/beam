@@ -1,5 +1,6 @@
 [workspace]
 members = ["proxy", "broker", "shared", "tests", "beam-lib"]
+resolver = "2"
 
 [workspace.dependencies]
 beam-lib = { path = "./beam-lib", features = [ "strict-ids" ] }
