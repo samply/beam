@@ -28,7 +28,7 @@ pub trait Task {
     fn is_expired(&self) -> bool;
 }
 
-pub trait SatusResult {
+pub trait HasStatus {
     fn get_status(&self) -> WorkStatus;
 }
 
@@ -67,13 +67,13 @@ impl<State: MsgState> Task for shared::MsgSocketRequest<State> {
     }
 }
 
-impl<T: MsgState> SatusResult for MsgTaskResult<T> {
+impl<T: MsgState> HasStatus for MsgTaskResult<T> {
     fn get_status(&self) -> WorkStatus {
         self.status
     }
 }
 
-impl<T: SatusResult + Msg> SatusResult for MsgSigned<T> {
+impl<T: HasStatus + Msg> HasStatus for MsgSigned<T> {
     fn get_status(&self) -> WorkStatus {
         self.msg.get_status()
     }
@@ -203,7 +203,7 @@ fn decide_blocking_conditions(block: &HowLongToBlock) -> (usize, Instant) {
 
 impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T>
 where
-    T::Result: Msg + SatusResult,
+    T::Result: Msg + HasStatus,
 {
     /// This does not check if the requester was the creator of the Task
     pub async fn wait_for_results(
