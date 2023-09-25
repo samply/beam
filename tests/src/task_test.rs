@@ -1,20 +1,23 @@
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use beam_lib::{MsgId, TaskRequest, TaskResult, WorkStatus, BlockingOptions};
 use serde::{de::DeserializeOwned, Serialize};
+use tokio::sync::oneshot;
 
 use crate::{CLIENT1, APP1, APP2, CLIENT2};
 
 #[tokio::test]
 async fn test_full_task_cycle() -> Result<()> {
+    let (id_tx, id_rx) = oneshot::channel();
     let client = async {
         let id = post_task(()).await?;
+        id_tx.send(id).expect("Sender dropped");
         assert_eq!(poll_result::<()>(id, &BlockingOptions::from_count(1)).await?.body, ());
         Ok(())
     };
     let server = async {
-        let task = poll_task::<()>().await?;
+        let task = poll_task::<()>(id_rx.await?).await?;
         put_result(task.id, task.body, None).await
     };
     tokio::try_join!(client, server)?;
@@ -29,7 +32,7 @@ async fn test_task_claiming() -> Result<()> {
     let block = BlockingOptions::from_count(1);
     tokio::select! {
         _ = poll_result::<()>(id, &block) => {
-            panic!("Got claimed result although we wanted to wait for a finished result");
+            bail!("Got claimed result although we wanted to wait for a finished result");
         }
         _ = tokio::time::sleep(Duration::from_secs(2)) => ()
     };
@@ -38,7 +41,7 @@ async fn test_task_claiming() -> Result<()> {
         res = poll_result::<()>(id, &block) => {
             assert_eq!(res?.status, WorkStatus::Claimed, "Workstatus did not match")
         }
-        _ = tokio::time::sleep(Duration::from_secs(2)) => panic!("This took longer than 2s when it should have returned the claimed result!")
+        _ = tokio::time::sleep(Duration::from_secs(2)) => bail!("This took longer than 2s when it should have returned the claimed result!")
     };
     put_result(id, (), None).await?;
     assert_eq!(poll_result::<()>(id, &BlockingOptions::from_count(1)).await?.status, WorkStatus::Succeeded);
@@ -59,11 +62,12 @@ pub async fn post_task<T: Serialize>(body: T) -> Result<MsgId> {
     Ok(id)
 }
 
-pub async fn poll_task<T: DeserializeOwned>() -> Result<TaskRequest<T>> {
-    CLIENT2.poll_pending_tasks(&BlockingOptions::from_count(1))
+pub async fn poll_task<T: DeserializeOwned>(expected_id: MsgId) -> Result<TaskRequest<T>> {
+    CLIENT2.poll_pending_tasks(&BlockingOptions::from_time(Duration::from_secs(5)))
         .await?
-        .pop()
-        .ok_or(anyhow::anyhow!("Got no task"))
+        .into_iter()
+        .find(|t| t.id == expected_id)
+        .ok_or(anyhow::anyhow!("Did not find expected task"))
 }
 
 pub async fn poll_result<T: DeserializeOwned>(task_id: MsgId, block: &BlockingOptions) -> Result<TaskResult<T>> {
