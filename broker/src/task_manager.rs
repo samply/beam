@@ -11,7 +11,7 @@ use hyper::StatusCode;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde_json::json;
-use beam_lib::{AppOrProxyId, MsgEmpty, MsgId};
+use beam_lib::{AppOrProxyId, MsgEmpty, MsgId, WorkStatus};
 use shared::{
     HasWaitId, HowLongToBlock, Msg, MsgSigned,
     MsgState, MsgTaskRequest, MsgTaskResult, sse_event::SseEventType,
@@ -26,6 +26,10 @@ pub trait Task {
     /// Returns true if the value as been updated and false if it was a result from a new app
     fn insert_result(&mut self, result: Self::Result) -> bool;
     fn is_expired(&self) -> bool;
+}
+
+pub trait SatusResult {
+    fn get_status(&self) -> WorkStatus;
 }
 
 impl<State: MsgState> Task for MsgTaskRequest<State> {
@@ -60,6 +64,18 @@ impl<State: MsgState> Task for shared::MsgSocketRequest<State> {
 
     fn is_expired(&self) -> bool {
         self.expire < SystemTime::now()
+    }
+}
+
+impl<T: MsgState> SatusResult for MsgTaskResult<T> {
+    fn get_status(&self) -> WorkStatus {
+        self.status
+    }
+}
+
+impl<T: SatusResult + Msg> SatusResult for MsgSigned<T> {
+    fn get_status(&self) -> WorkStatus {
+        self.msg.get_status()
     }
 }
 
@@ -187,7 +203,7 @@ fn decide_blocking_conditions(block: &HowLongToBlock) -> (usize, Instant) {
 
 impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T>
 where
-    T::Result: Msg,
+    T::Result: Msg + SatusResult,
 {
     /// This does not check if the requester was the creator of the Task
     pub async fn wait_for_results(
@@ -202,7 +218,7 @@ where
             .msg
             .get_results()
             .values()
-            .filter(|result| filter(result))
+            .filter(|result| filter(result) && result.get_status() != WorkStatus::Claimed)
             .count();
         let mut new_results = self
             .new_results
@@ -218,7 +234,8 @@ where
                     match result {
                         Ok(key) => {
                             if let Ok(task) = self.get(task_id) {
-                                if filter(&task.msg.get_results()[&key]) {
+                                let result = &task.msg.get_results()[&key];
+                                if filter(result) && result.get_status() != WorkStatus::Claimed {
                                     num_of_results += 1;
                                 }
                             } else {
@@ -260,10 +277,12 @@ where
                 .filter(|result| filter(result));
             let mut num_of_results = 0;
             for res in ready_results {
+                if res.get_status() != WorkStatus::Claimed {
+                    num_of_results += 1;
+                }
                 yield Ok(to_event(res, SseEventType::NewResult));
-                num_of_results += 1;
                 // Only break when wait_count was actually set otherwise we want all the tasks that are present
-                if num_of_results >= max_elements && max_elements!=0 {
+                if num_of_results >= max_elements && max_elements != 0 {
                     break;
                 }
             }
@@ -284,7 +303,9 @@ where
                                 if let Ok(task) = self.get(task_id) {
                                     let new_result = &task.msg.get_results()[&key];
                                     if filter(new_result) {
-                                        num_of_results += 1;
+                                        if new_result.get_status() != WorkStatus::Claimed {
+                                            num_of_results += 1;
+                                        }
                                         yield Ok(to_event(new_result, SseEventType::NewResult));
                                     };
                                 } else {
