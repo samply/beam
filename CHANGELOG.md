@@ -1,8 +1,6 @@
 # Samply.Beam 0.7.0 – 2023-09-xx
 
-This version, Samply.Beam 0.7.0, has long been in the making and introduces multiple improvements, new features, and bug fixes. In particular, we are thrilled to introduce the possibility, to use Samply.Beam for secure and easy direct socket connections. This opens Samply.Beam for many additional use cases, where a message-passing approach is not suitable, e.g. applications with high bandwidth demands.
-
-We hope these updates improve your experience with Samply.Beam and look forward to your feedback.
+This version, Samply.Beam 0.7.0, has long been in the making and introduces multiple improvements, new features, and bug fixes. In particular, we are thrilled to introduce the possibility to use Samply.Beam for secure and easy *direct socket connections*. This opens Samply.Beam for many additional use cases, where a message-passing approach is not suitable, e.g. applications with high bandwidth demands.
 
 ## Breaking changes
 * *Streamlined Configuration:* To reduce configuration redundancy, the environment variable schema of the Beam.Proxies for AppIDs and related App-API Keys has changed. Both parameters are now consolidated in the form: `APP_<AppId>_KEY=<API-Key>`.
@@ -12,12 +10,13 @@ We hope these updates improve your experience with Samply.Beam and look forward 
 ## Major changes
 * *Direct Socket Connection:* Samply.Beam can now securely transport direct socket connections. For many applications the message/task-based communication model is not a great fit, e.g. if many, many very small packages must be transmitted or if network bandwidth utilization is paramount. For those cases, Samply.Beam can now establish socket connections. As this feature might not be compatible with every data protection concept, it is only enabled if the corresponding `sockets` feature flag is set during compilation. Similarly, in addition to the usual `main` and `develop` docker image tags, the tags `main-sockets` and `develop-sockets` are published as well.
 * *Improved Certificate Caching and Management:* The certificate caching and management in the Beam.Proxy components have been vastly improved. This greatly reduces the communication overhead between proxy and broker. Note: If the proxy's own certificate changes, the proxy exits to restart with the new certificate.
-* *Permanent Control Connection:* In parallel to the task/result transmitting connection between proxies and broker, a permanent control connection is established. Currently, this connection is only used to determine the online status of the proxies and monitor for unexpected connection interuptions, however, in the future additional signaling can utilize this channel.
-* *Revamped Internal Event Handling:* The internal message queue of the broker has been completely refactored. The broker now employs a much more elegant event manager to handle tasks, expirations, and other events. Not only does this improve the efficiency, the new system is better maintainable and easily extensible in the future.
+* *Health monitoring:* In parallel to the task/result transmitting connection between proxies and broker, a *permanent control connection* is established. Currently, this connection is only used to determine the online status of the proxies and monitor for unexpected connection interuptions, however, in the future additional signaling can utilize this channel.
 * *Introducing `beam-lib` Crate:* The project now contains a separate crate, `beam-lib`, exposing many data structures such as BeamIds and Task/Result structs. This crate can be used by application developers to easily interface with a beam proxy in the Rust programming language.
 * *Enhanced Broker Health Monitoring:* The Broker `health` Endpoint is much more verbose and can -- thanks to the control connection -- return information regarding the proxy connection status. This makes monitoring in a highly federated system much simpler.
+* *Certificate Management:* Support for revocation of Beam certificates. Enhanced cert management companion tools.
 
 ## Minor improvements
+* *Revamped Internal Event Handling:* The internal message queue of the broker has been completely refactored. The broker now employs a much more elegant event manager to handle tasks, expirations, and other events. Not only does this improve the efficiency, the new system is better maintainable and easily extensible in the future.
 * *Improved Wire Format:* The serialization of the Tasks and Results have been improved. The tasks should now require around a third less communication.
 * *Refined Logging and Error Handling:* Many improvements in logging, error handling, and the expressiveness of the return values have been implemented.
 * *Enhanced Beam.Broker Efficiency:* By using more efficient concurrent data structures, the efficiency of the Beam.Broker operation has been improved.
