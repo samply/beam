@@ -523,7 +523,7 @@ This endpoint also supports the [long polling](#long-polling-api-access) query s
 Method: `GET`  
 URL: `/v1/sockets`
 Parameters:
- * The same parameters as for long-polling, i.e. to, from, filter=todo, wait_count, and wait_time are supported.
+ * The same parameters as for long-polling, i.e. `to`, `from`, `filter=todo`, `wait_count` and `wait_time` are supported.
 
 Returns an array of JSON objects:
 ``` json
