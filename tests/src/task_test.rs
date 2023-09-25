@@ -1,5 +1,7 @@
+use std::time::Duration;
+
 use anyhow::Result;
-use beam_lib::{MsgId, TaskRequest, TaskResult};
+use beam_lib::{MsgId, TaskRequest, TaskResult, WorkStatus, BlockingOptions};
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{CLIENT1, APP1, APP2, CLIENT2};
@@ -8,14 +10,38 @@ use crate::{CLIENT1, APP1, APP2, CLIENT2};
 async fn test_full_task_cycle() -> Result<()> {
     let client = async {
         let id = post_task(()).await?;
-        assert_eq!(poll_result::<()>(id).await?.body, ());
+        assert_eq!(poll_result::<()>(id, &BlockingOptions::from_count(1)).await?.body, ());
         Ok(())
     };
     let server = async {
         let task = poll_task::<()>().await?;
-        put_result(task.id, task.body).await
+        put_result(task.id, task.body, None).await
     };
     tokio::try_join!(client, server)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_task_claiming() -> Result<()> {
+    let id = post_task(()).await?;
+    put_result(id, (), Some(WorkStatus::Claimed)).await?;
+    // Test waiting for 1 ready result which is not there yet
+    let block = BlockingOptions::from_count(1);
+    tokio::select! {
+        _ = poll_result::<()>(id, &block) => {
+            panic!("Got claimed result although we wanted to wait for a finished result");
+        }
+        _ = tokio::time::sleep(Duration::from_secs(2)) => ()
+    };
+    let block = BlockingOptions { wait_time: Some(Duration::from_secs(1)), wait_count: Some(1) };
+    tokio::select! {
+        res = poll_result::<()>(id, &block) => {
+            assert_eq!(res?.status, WorkStatus::Claimed, "Workstatus did not match")
+        }
+        _ = tokio::time::sleep(Duration::from_secs(2)) => panic!("This took longer than 2s when it should have returned the claimed result!")
+    };
+    put_result(id, (), None).await?;
+    assert_eq!(poll_result::<()>(id, &BlockingOptions::from_count(1)).await?.status, WorkStatus::Succeeded);
     Ok(())
 }
 
@@ -34,25 +60,25 @@ pub async fn post_task<T: Serialize>(body: T) -> Result<MsgId> {
 }
 
 pub async fn poll_task<T: DeserializeOwned>() -> Result<TaskRequest<T>> {
-    CLIENT2.poll_pending_tasks(&beam_lib::BlockingOptions::from_count(1))
+    CLIENT2.poll_pending_tasks(&BlockingOptions::from_count(1))
         .await?
         .pop()
         .ok_or(anyhow::anyhow!("Got no task"))
 }
 
-pub async fn poll_result<T: DeserializeOwned>(task_id: MsgId) -> Result<TaskResult<T>> {
-    CLIENT1.poll_results(&task_id, &beam_lib::BlockingOptions::from_count(1))
+pub async fn poll_result<T: DeserializeOwned>(task_id: MsgId, block: &BlockingOptions) -> Result<TaskResult<T>> {
+    CLIENT1.poll_results(&task_id, block)
         .await?
         .pop()
         .ok_or(anyhow::anyhow!("Got no task"))
 }
 
-pub async fn put_result<T: Serialize>(task_id: MsgId, body: T) -> Result<()> {
+pub async fn put_result<T: Serialize>(task_id: MsgId, body: T, status: Option<beam_lib::WorkStatus>) -> Result<()> {
     CLIENT2.put_result(&TaskResult {
         from: APP2.clone(),
         to: vec![APP1.clone()],
         task: task_id,
-        status: beam_lib::WorkStatus::Succeeded,
+        status: status.unwrap_or(beam_lib::WorkStatus::Succeeded),
         body,
         metadata: serde_json::Value::Null,
     }, &task_id).await?;
