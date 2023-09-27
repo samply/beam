@@ -46,7 +46,7 @@ pub mod serde_helpers;
 pub mod logger;
 mod traits;
 #[cfg(test)]
-mod serializing_compatability_test;
+mod serializing_compatibility_test;
 
 pub mod config;
 pub mod config_shared;
