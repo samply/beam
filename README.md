@@ -2,7 +2,7 @@
 
 [![Build with rust and docker](https://github.com/samply/beam/actions/workflows/rust.yml/badge.svg)](https://github.com/samply/beam/actions/workflows/rust.yml)
 
-Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. It provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation on top of an easy to use REST API.
+Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. It provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation on top of an easy to use REST API. For especially low-level or demanding applications, Samply.Beam can provide encrypted Direct-Socket connections.
 
 ## Latest version: Samply.Beam 0.7.0 – 2023-09-xx
 
@@ -143,8 +143,13 @@ curl -X GET -v -H "Authorization: ApiKey app1.proxy1.broker App1Secret" http://l
 
 This *long polling* opens the connection and sleeps until a reply is received. For more information, see the API documentation.
 
-### Using sockets
+### Using direct socket connections
 > Only available on builds of beam with the `sockets` feature 
+
+The establishing of Direct-Sockets via beam requires a negotiation phase prior to using the sockets. One application sends a socket request to the other application via their respective Beam.Proxies. The receiving application can polls or wait for incoming socket requests. Once they are accepted, the connection is upgraded to a TCP-based, encrypted socket connection.
+
+While possible to show the usage of Samply.Beam-Sockets similarly to the task-based usage above, that is making use of command line tools, such as curl, netcat, or socat, the intended usage is programmatically by the applications' code. Thus, we show the usage in the following short python application exemplifying both applications, the initiating and the receiving one. Both sides of the communication run concurrently.
+
 ```python
 import requests
 import threading
@@ -266,6 +271,8 @@ A failed task:
 ### Socket Task
 > Only available on builds of beam with the `sockets` feature 
 
+While "regular" Beam Tasks are transmitting application data, Socket Tasks are intended to facilitate direct socket connections between two Beam.Proxies.
+
 ```json
 {
     "from": "app1.proxy1.broker",
@@ -275,10 +282,10 @@ A failed task:
 }
 ```
 
-- `from`: BeamID of the client who requested the socket connection
+- `from`: BeamID of the client requesting the socket connection
 - `to`: BeamIDs of the intended recipients. For this type of Task this is guaranteed to be be exactly one.
 - `id`: A UUID v4 which identifies the socket connection and is used by the recipient to connect to this socket (see [here](#connecting-to-a-socket-request)).
-- `ttl`: The time too live of this socket task. After this time has elapsed the recipient can no longer connect to the socket. (Already established connections are not effected)
+- `ttl`: The time-to-live of this socket task. After this time has elapsed the recipient can no longer connect to the socket. (Already established connections are not affected)
 ## API
 
 ### Create task
@@ -300,6 +307,17 @@ Date: Mon, 27 Jun 2022 13:58:35 GMT
 ```
 
 In subsequent requests, use the URL defined in the `location` header to refer to the task (NOT the one you supplied in your POST body).
+
+If the task contains recipients (`to` field, see [Beam Task](#task)) with invalid certificates (i.e. not certificate exists or it expired), Beam *does not* create the task but returns HTTP status code `424 Failed Dependency` with a JSON array of the "offending" BeamIDs in the body, e.g.:
+
+```
+HTTP/1.1 424 Failed Dependency
+Content-Length: 17
+Server: Samply.Beam.Proxy/0.7.0-b1ca2ed-SNAPSHOT
+Date: Thu, 28 Sep 2023 07:16:24 GMT
+
+["proxy4.broker"]
+```
 
 ### Retrieve tasks
 
@@ -470,17 +488,7 @@ Authorization:
 
  - Basic Auth with an empty user and the configured `MONITORING_API_KEY` as a password, so the header looks like `Authorization: Basic <base64 of ':<MONITORING_API_KEY>'>`.
 
-In case of a successful connection between proxy and broker, the call returns
-
-```
-HTTP/1.1 200
-```
-
-otherwise
-
-```
-HTTP/1.1 404
-```
+In case of a successful connection between proxy and broker, the call returns HTTP status code `200 OK`, otherwise `404 Not Found`.
 
 Querying the endpoint without specifying a ProxyId returns a JSON array of all proxies, that have ever connected to this broker:
 
@@ -503,7 +511,7 @@ HTTP/1.1 200
 ```
 
 ### Socket connections
-> Note: Only available on builds with the feature `sockets` enabled. Both proxy and broker need to be built with this flag. There are also prebuild docker images available with this feature.
+> Note: Only available on builds with the feature `sockets` enabled. Both proxy and broker need to be built with this flag. There are also prebuilt docker images available with this feature.
 
 All API requests require the usual authentication header (see [getting started section](#getting-started)).
 
@@ -512,7 +520,7 @@ Initialize a socket connection with an Beam application, e.g. with AppId `app2.p
 
 Method: `POST`  
 URL: `/v1/sockets/<app_id>`  
-Header: `Upgrade` is required
+Header `Upgrade` is required, e.g. 'Upgrade: tls'
 
 This request will automatically lead to a connection to the other app, after it answers this request.
 
@@ -629,7 +637,7 @@ The data is symmetrically encrypted using the Authenticated Encryption with Auth
 - [x] Support TLS-terminating proxies
 - [x] Direct-Socket connections
 - [x] Crate to support the development of Rust Beam client applications
-- [ ] Docker deployment packages: Documentation
+- [ ] Efficient file transfer for large data
 - [ ] Broker-side filtering of the unencrypted metadata fields with JSON queries
 - [ ] Integration of OAuth2 (in discussion)
 - [ ] Deliver usage metrics
