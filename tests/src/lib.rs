@@ -10,6 +10,9 @@ mod socket_test;
 #[cfg(test)]
 mod task_test;
 
+#[cfg(test)]
+mod test_sse;
+
 pub static APP1: Lazy<AddressingId> = Lazy::new(|| {
     set_broker_id("broker".into());
     AppOrProxyId::new(option_env!("APP1_P1").unwrap_or("app1.proxy1.broker")).unwrap()
