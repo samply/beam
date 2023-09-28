@@ -73,7 +73,7 @@ pub mod sse_event;
 pub use openssl;
 
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct HowLongToBlock {
     pub wait_time: Option<Duration>,
     pub wait_count: Option<u16>,
