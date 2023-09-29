@@ -146,7 +146,7 @@ This *long polling* opens the connection and sleeps until a reply is received. F
 ### Using direct socket connections
 > Only available on builds of beam with the `sockets` feature 
 
-The establishing of Direct-Sockets via beam requires a negotiation phase prior to using the sockets. One application sends a socket request to the other application via their respective Beam.Proxies. The receiving application can polls or wait for incoming socket requests. Once they are accepted, the connection is upgraded to a TCP-based, encrypted socket connection.
+Establishing direct socket connections via Beam requires a negotiation phase prior to using the sockets. One application sends a socket request to the other application via their respective Beam.Proxy. The receiving application, upon receipt of the request, upgrades the connection to an encrypted TCP socket connection.
 
 While possible to show the usage of Samply.Beam-Sockets similarly to the task-based usage above, that is making use of command line tools, such as curl, netcat, or socat, the intended usage is programmatically by the applications' code. Thus, we show the usage in the following short python application exemplifying both applications, the initiating and the receiving one. Both sides of the communication run concurrently.
 
