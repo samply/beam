@@ -27,6 +27,7 @@ This version, Samply.Beam 0.7.0, has long been in the making and introduces mult
 
 ## Bugfixes
 * In addition to the "recipient with invalid certificate" bug described under [Breaking changes](#breaking-changes), many small bugs dealing with certificate retrieval and concurrency have been fixed in this release.
+* Under some circumstances, the Beam.Broker would deadlock when using the SSE interface. This is now fixed.
 
 # Samply.Beam 0.6.1 -- 2023-04-11
 
