@@ -211,7 +211,7 @@ async fn handler_tasks_stream(
     // Validate Query, forward to server, get response.
 
     let mut resp = forward_request(req, &config, &sender, &client).await?;
-
+    
     let code = resp.status();
     if !code.is_success() {
         let bytes = body::to_bytes(resp.into_body()).await.ok();
@@ -273,9 +273,12 @@ async fn handler_tasks_stream(
                         SseEventType::Unknown(s) => {
                             error!("SSE: Got unknown event type: {s} -- discarding.");
                             continue;
+                        },
+                        SseEventType::NewResult => {
+                            debug!("SSE: Got new result");
                         }
                         other => {
-                            warn!("Got \"{other}\" event -- parsing.");
+                            info!("Got \"{other}\" event -- parsing.");
                         }
                     }
 

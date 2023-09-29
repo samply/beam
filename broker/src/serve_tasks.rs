@@ -102,7 +102,7 @@ async fn get_results_for_task_nostream(
     }
     let filter_for_me = MsgFilterNoTask {
         from: None,
-        to: Some(msg.get_from()),
+        to: Some(msg.get_from().clone()),
         mode: MsgFilterMode::Or,
     };
     let task_with_results = state.task_manager.wait_for_results(&task_id, &block, |m| filter_for_me.matches(&m.msg)).await?;
@@ -132,18 +132,12 @@ async fn get_results_for_task_stream(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // There must be a way to just use the stream of stream_results directly but I could not get it to work as the stream returned has a lifetime bound and this one somehow does not
-    let stream = async_stream::stream! {
-        let filter = MsgFilterNoTask { from: None, to: Some(&from), mode: MsgFilterMode::Or };
-        let stream = state.task_manager.stream_results(
-            &task_id,
-            &block,
-            move |m| filter.matches(&m.msg)
-        );
-        for await event in stream {
-            yield event;
-        }
-    };
+    let filter = MsgFilterNoTask { from: None, to: Some(from), mode: MsgFilterMode::Or };
+    let stream = state.task_manager.stream_results(
+        task_id,
+        block,
+        move |m| filter.matches(&m.msg)
+    );
 
     Ok(Sse::new(stream))
 }
@@ -198,8 +192,8 @@ async fn get_tasks(
     }
     // Step 1: Get initial vector fill from HashMap + receiver for new elements
     let filter = MsgFilterNoTask {
-        from: from.as_ref(),
-        to: to.as_ref(),
+        from,
+        to,
         mode: MsgFilterMode::Or,
     };
     let filter = MsgFilterForTask {
@@ -274,14 +268,14 @@ enum MsgFilterMode {
     Or,
     And,
 }
-struct MsgFilterNoTask<'a> {
-    from: Option<&'a AppOrProxyId>,
-    to: Option<&'a AppOrProxyId>,
+struct MsgFilterNoTask {
+    from: Option<AppOrProxyId>,
+    to: Option<AppOrProxyId>,
     mode: MsgFilterMode,
 }
 
 struct MsgFilterForTask<'a> {
-    normal: MsgFilterNoTask<'a>,
+    normal: MsgFilterNoTask,
     unanswered_by: Option<&'a AppOrProxyId>,
     workstatus_is_not: Vec<Discriminant<WorkStatus>>,
 }
@@ -310,11 +304,11 @@ impl<'a> MsgFilterForTask<'a> {
 
 impl<'a> MsgFilterTrait<EncryptedMsgTaskRequest> for MsgFilterForTask<'a> {
     fn from(&self) -> Option<&AppOrProxyId> {
-        self.normal.from
+        self.normal.from.as_ref()
     }
 
     fn to(&self) -> Option<&AppOrProxyId> {
-        self.normal.to
+        self.normal.to.as_ref()
     }
 
     fn matches(&self, msg: &EncryptedMsgTaskRequest) -> bool {
@@ -326,13 +320,13 @@ impl<'a> MsgFilterTrait<EncryptedMsgTaskRequest> for MsgFilterForTask<'a> {
     }
 }
 
-impl<'a, M: Msg> MsgFilterTrait<M> for MsgFilterNoTask<'a> {
+impl<'a, M: Msg> MsgFilterTrait<M> for MsgFilterNoTask {
     fn from(&self) -> Option<&AppOrProxyId> {
-        self.from
+        self.from.as_ref()
     }
 
     fn to(&self) -> Option<&AppOrProxyId> {
-        self.to
+        self.to.as_ref()
     }
 
     fn mode(&self) -> &MsgFilterMode {
@@ -346,7 +340,7 @@ async fn post_task(
     State(state): State<TasksState>,
     msg: MsgSigned<EncryptedMsgTaskRequest>,
 ) -> Result<(StatusCode, impl IntoResponse), StatusCode> {
-    // let id = MsgId::new();
+        // let id = MsgId::new();
     // msg.id = id;
     // TODO: Check if ID is taken
     trace!(
