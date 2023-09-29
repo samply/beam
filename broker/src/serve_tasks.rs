@@ -73,7 +73,7 @@ async fn get_results_for_task(
         .is_some();
 
     if *found {
-                get_results_for_task_stream(addr, state, block, task_id, msg)
+        get_results_for_task_stream(addr, state, block, task_id, msg)
             .await
             .into_response()
     } else {
@@ -132,7 +132,6 @@ async fn get_results_for_task_stream(
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // There must be a way to just use the stream of stream_results directly but I could not get it to work as the stream returned has a lifetime bound and this one somehow does not
     let filter = MsgFilterNoTask { from: None, to: Some(from), mode: MsgFilterMode::Or };
     let stream = state.task_manager.stream_results(
         task_id,

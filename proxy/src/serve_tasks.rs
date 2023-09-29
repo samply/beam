@@ -140,11 +140,11 @@ pub(crate) async fn handler_task(
         .is_some();
 
     if *found {
-                handler_tasks_stream(client, config, sender, req)
+        handler_tasks_stream(client, config, sender, req)
             .await
             .into_response()
     } else {
-                handler_tasks_nostream(client, config, sender, req)
+        handler_tasks_nostream(client, config, sender, req)
             .await
             .into_response()
     }
