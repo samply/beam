@@ -64,7 +64,7 @@ Using Docker, you can run a small demo beam network by checking out the git repo
 ```bash
 ./dev/beamdev demo
 ```
-This will launch your own beam demo network, which consists of one broker (listening on `localhost:8080`) and two connected proxies (listening on `localhost:8081` and `localhost:8082`) as well as a MITM proxy (listening on `localhost:9090`) for debugging.
+This will launch your own beam demo network, which consists of one broker (listening on `localhost:8080`) and two connected proxies (listening on `localhost:8081` and `localhost:8082`).
 
 The following paragraph simulates the creation and the completion of a task
 using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
@@ -554,7 +554,7 @@ URL: `/v1/sockets/<socket_uuid>`
 
 ## Development Environment
 
-A dev environment is provided consisting of one broker and two proxies.
+A dev environment is provided consisting of one broker and two proxies as well as an optional MITM proxy (listening on `localhost:9090`) for debugging. As the MITM proxy interferes with SSE, it is commented out per default in `dev/docker-compose.yml`. To use it, remove the comment signs for the MITM service and the `ALL_PROXY` environment variables.
 
 > NOTE: The commands in this section will build the beam proxy and broker locally. To build beam, you need to install libssl-dev.
 
