@@ -23,7 +23,7 @@ This version, Samply.Beam 0.7.0, has long been in the making and introduces mult
 * *Streamlined CI/CD Pipeline:* The CI/CD Pipeline has been tweaked to allow faster compile and testing cycles.
 * *Verbose User-Agent for Development Builds:* For non-`main` builds of Samply.Beam, the User-Agent identifies the git commit hash of the component for debugging purposes.
 * *Expanded Testing:* Additional tests have been added and refactoring efforts to include all integration tests fully into the Rust testing framework have been started.
-* *Dependency Maintainance:* All used dependencies of Samply.Beam have been pruned and updated.
+* *Dependency Maintenance:* All used dependencies of Samply.Beam have been pruned and updated.
 * *Made Debug MITM Proxy optional:* The MITM proxy for debugging, introduced in version 0.6.0 has been commented out in dev/docker-compose.yml, as it interferes with SSE, and hence, beamdev demo.
 
 ## Bugfixes

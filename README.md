@@ -69,7 +69,7 @@ This will launch your own beam demo network, which consists of one broker (liste
 The following paragraph simulates the creation and the completion of a task
 using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
 connected via a central broker. Each party has one registered application.
-In the next section we will simulate the communcation between these applications over the beam network.
+In the next section we will simulate the communication between these applications over the beam network.
 
 > Note: cURL versions before 7.82 do not support the `--json` option. In this case, please use `--data` instead.
 

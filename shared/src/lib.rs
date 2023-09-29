@@ -841,8 +841,8 @@ pub fn is_actually_hyper_timeout(err: &hyper::Error) -> bool {
         return true;
     }
     // This is exactly the way hyper looks for timeout errors except it only looks for its internal TimedOut error
-    // and not for any std::io::Error with the kind TimedOut as used by hyper_timout.
-    // hyper_timout won't be able to fix this though as *all* of hypers Error types are private except hyper::Error.
+    // and not for any std::io::Error with the kind TimedOut as used by hyper_timeout.
+    // hyper_timeout won't be able to fix this though as *all* of hypers Error types are private except hyper::Error.
     let mut source = err.source();
     while let Some(err) = source {
         if let Some(io_err) = err.downcast_ref::<std::io::Error>() {

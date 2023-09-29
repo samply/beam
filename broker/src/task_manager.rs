@@ -360,7 +360,7 @@ impl TaskManagerError {
         match self {
             TaskManagerError::NotFound => "Task not found",
             TaskManagerError::Conflict => "Task already exists",
-            TaskManagerError::Unauthorized => "Unautherized to access this task",
+            TaskManagerError::Unauthorized => "Unauthorized to access this task",
             TaskManagerError::Gone => "Task expired while waiting on it",
             TaskManagerError::BroadcastBufferOverflow => "Internal server error",
         }
