@@ -198,7 +198,7 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
                         }
                     };
                 },
-                // For some reason e.is_timout() does not work
+                // For some reason e.is_timeout() does not work
                 Err(e) if is_actually_hyper_timeout(&e) => {
                     debug!("Connection to broker timed out; retrying: {e}");
                 },

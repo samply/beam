@@ -15,7 +15,7 @@ This version, Samply.Beam 0.7.0, has long been in the making and introduces mult
 * *Enhanced Broker Health Monitoring:* The Broker `health` Endpoint is much more verbose and can -- thanks to the control connection -- return information regarding the proxy connection status. This makes monitoring in a highly federated system much simpler.
 * *Certificate Management:* Support for revocation of Beam certificates. Enhanced cert management companion tools.
 
-## Minor improvements
+## Minor changes
 * *Revamped Internal Event Handling:* The internal message queue of the broker has been completely refactored. The broker now employs a much more elegant event manager to handle tasks, expirations, and other events. Not only does this improve the efficiency, the new system is better maintainable and easily extensible in the future.
 * *Improved Wire Format:* The serialization of the Tasks and Results have been improved. The tasks should now require around a third less communication.
 * *Refined Logging and Error Handling:* Many improvements in logging, error handling, and the expressiveness of the return values have been implemented.
@@ -23,10 +23,12 @@ This version, Samply.Beam 0.7.0, has long been in the making and introduces mult
 * *Streamlined CI/CD Pipeline:* The CI/CD Pipeline has been tweaked to allow faster compile and testing cycles.
 * *Verbose User-Agent for Development Builds:* For non-`main` builds of Samply.Beam, the User-Agent identifies the git commit hash of the component for debugging purposes.
 * *Expanded Testing:* Additional tests have been added and refactoring efforts to include all integration tests fully into the Rust testing framework have been started.
-* *Dependency Maintainance:* All used dependencies of Samply.Beam have been pruned and updated.
+* *Dependency Maintenance:* All used dependencies of Samply.Beam have been pruned and updated.
+* *Made Debug MITM Proxy optional:* The MITM proxy for debugging, introduced in version 0.6.0 has been commented out in dev/docker-compose.yml, as it interferes with SSE, and hence, beamdev demo.
 
 ## Bugfixes
 * In addition to the "recipient with invalid certificate" bug described under [Breaking changes](#breaking-changes), many small bugs dealing with certificate retrieval and concurrency have been fixed in this release.
+* Under some circumstances, the Beam.Broker would deadlock when using the SSE interface. This is now fixed.
 
 # Samply.Beam 0.6.1 -- 2023-04-11
 
