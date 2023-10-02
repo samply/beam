@@ -271,7 +271,7 @@ A failed task:
 ### Socket Task
 > Only available on builds of beam with the `sockets` feature 
 
-While "regular" Beam Tasks are transmitting application data, Socket Tasks are intended to facilitate direct socket connections between two Beam.Proxies.
+While "regular" Beam Tasks transport application data, Socket Task initiate direct socket connections between two Beam.Proxies.
 
 ```json
 {
@@ -283,9 +283,9 @@ While "regular" Beam Tasks are transmitting application data, Socket Tasks are i
 ```
 
 - `from`: BeamID of the client requesting the socket connection
-- `to`: BeamIDs of the intended recipients. For this type of Task this is guaranteed to be be exactly one.
+- `to`: BeamIDs of the intended recipients. Due to the nature of socket connections, the array has to be of exact length 1.
 - `id`: A UUID v4 which identifies the socket connection and is used by the recipient to connect to this socket (see [here](#connecting-to-a-socket-request)).
-- `ttl`: The time-to-live of this socket task. After this time has elapsed the recipient can no longer connect to the socket. (Already established connections are not affected)
+- `ttl`: The time-to-live of this socket task. After this time has elapsed the recipient can no longer connect to the socket. Already established connections are not affected.
 ## API
 
 ### Create task
@@ -554,7 +554,7 @@ URL: `/v1/sockets/<socket_uuid>`
 
 ## Development Environment
 
-A dev environment is provided consisting of one broker and two proxies as well as an optional MITM proxy (listening on `localhost:9090`) for debugging. As the MITM proxy interferes with SSE, it is commented out per default in `dev/docker-compose.yml`. To use it, remove the comment signs for the MITM service and the `ALL_PROXY` environment variables.
+A dev environment is provided consisting of one broker and two proxies as well as an optional MITM proxy (listening on `localhost:9090`) for debugging. To use it, remove the comment signs for the MITM service and the `ALL_PROXY` environment variables in `dev/docker-compose.yml`. Note that the MITM proxy interferes with SSE. 
 
 > NOTE: The commands in this section will build the beam proxy and broker locally. To build beam, you need to install libssl-dev.
 
@@ -635,10 +635,10 @@ The data is symmetrically encrypted using the Authenticated Encryption with Auth
 - [x] Helpful dev environment
 - [x] Expiration of tasks and results
 - [x] Support TLS-terminating proxies
-- [x] Direct-Socket connections
+- [x] Transport direct socket connections
 - [x] Crate to support the development of Rust Beam client applications
-- [ ] Efficient file transfer for large data
-- [ ] Broker-side filtering of the unencrypted metadata fields with JSON queries
+- [ ] File transfers (with efficient support for large files)
+- [ ] Broker-side filtering of tasks using the unencrypted metadata fields (probably using JSON queries)
 - [ ] Integration of OAuth2 (in discussion)
 - [ ] Deliver usage metrics
 
