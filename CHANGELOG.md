@@ -1,4 +1,4 @@
-# Samply.Beam 0.7.0 – 2023-09-xx
+# Samply.Beam 0.7.0 – 2023-10-04
 
 This version, Samply.Beam 0.7.0, has long been in the making and introduces multiple improvements, new features, and bug fixes. In particular, we are thrilled to introduce the possibility to use Samply.Beam for secure and easy *direct socket connections*. This opens Samply.Beam for many additional use cases, where a message-passing approach is not suitable, e.g. applications with high bandwidth demands.
 
