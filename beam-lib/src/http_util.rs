@@ -81,7 +81,7 @@ impl BeamClient {
 
     /// Poll beam tasks using the `filter=todo` option and the given blocking options.
     /// The generic Parameter T represents the task body type that the requests are expected to have.
-    pub async fn poll_pending_tasks<T: DeserializeOwned>(&self, blocking: &BlockingOptions) -> Result<Vec<TaskRequest<T>>> {
+    pub async fn poll_pending_tasks<T: DeserializeOwned + 'static>(&self, blocking: &BlockingOptions) -> Result<Vec<TaskRequest<T>>> {
         let url = self.beam_proxy_url
             .join(&format!("/v1/tasks?filter=todo&{}", blocking.to_query()))
             .expect("The proxy url is valid");
@@ -106,7 +106,7 @@ impl BeamClient {
 
     /// Poll beam results for a given task id using the given blocking options.
     /// The generic Parameter T represents the result body type that the requests are expected to have.
-    pub async fn poll_results<T: DeserializeOwned>(&self, task_id: &MsgId, blocking: &BlockingOptions) -> Result<Vec<TaskResult<T>>> {
+    pub async fn poll_results<T: DeserializeOwned + 'static>(&self, task_id: &MsgId, blocking: &BlockingOptions) -> Result<Vec<TaskResult<T>>> {
         let url = self.beam_proxy_url
             .join(&format!("/v1/tasks/{task_id}/results?{}", blocking.to_query()))
             .expect("The proxy url is valid");
@@ -131,7 +131,7 @@ impl BeamClient {
     }
 
     /// Post a beam task with a serializeable body.
-    pub async fn post_task<T: Serialize>(&self, task: &TaskRequest<T>) -> Result<()> {
+    pub async fn post_task<T: Serialize + 'static>(&self, task: &TaskRequest<T>) -> Result<()> {
         let url = self.beam_proxy_url
             .join("/v1/tasks")
             .expect("The proxy url is valid");
@@ -149,7 +149,7 @@ impl BeamClient {
 
     /// Put a beam task result with a serializeable body.
     /// Returns true if the result was newly created or false if it was updated.
-    pub async fn put_result<T: Serialize>(&self, result: &TaskResult<T>, for_task_id: &MsgId) -> Result<bool> {
+    pub async fn put_result<T: Serialize + 'static>(&self, result: &TaskResult<T>, for_task_id: &MsgId) -> Result<bool> {
         let url = self.beam_proxy_url
             .join(&format!("/v1/tasks/{for_task_id}/results/{}", result.from))
             .expect("The proxy url is valid");
