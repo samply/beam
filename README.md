@@ -2,7 +2,13 @@
 
 [![Build with rust and docker](https://github.com/samply/beam/actions/workflows/rust.yml/badge.svg)](https://github.com/samply/beam/actions/workflows/rust.yml)
 
-Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. It provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation on top of an easy to use REST API.
+Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. It provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation on top of an easy to use REST API. In addition to task/response semantics, Samply.Beam supports high-performance applications with encrypted low-level direct socket connections.
+
+## Latest version: Samply.Beam 0.7.0 – 2023-10-04
+
+This new version introduces many new features, such as direct socket connections, improved certificate caching and health monitoring for the Proxy (via a long-lived control connection) and the Broker. As indicated by the [major version change](https://semver.org/), some breaking changes have been introduced. Please check the [Changelog](CHANGELOG.md) for details.
+
+Find info on all previous versions in the [Changelog](CHANGELOG.md).
 
 ## Table of Content
 <!-- - [Features](#features) -->
@@ -40,7 +46,7 @@ Although all IDs may look like fully-qualified domain names:
 
 - Only the *BrokerId* has to be a DNS-resolvable FQDN reachable via the network (Proxies will communicate with `https://broker1.samply.de/...`)
 - The *ProxyId* (`proxy2...`) is not represented in DNS but via the Proxy's certificate, which states `CN=proxy2.broker2.samply.de`
-- Finally, the *AppId* (`app3...`) results from using the correct API key in communication with the Proxy (Header `Authorization: app3.broker2.samply.de <app3's API key>`)
+- Finally, the *AppId* (`app3...`) results from using the correct API key in communication with the Proxy (Header `Authorization: ApiKey app3.broker2.samply.de <app3's API key>`)
 
 In practice,
 
@@ -54,33 +60,39 @@ The Proxies have to fetch certificates from the central Certificate Authority, h
 
 ## Getting started
 
+Using Docker, you can run a small demo beam network by checking out the git repository (use `main` or `develop` branch) and running the following command:
+```bash
+./dev/beamdev demo
+```
+This will launch your own beam demo network, which consists of one broker (listening on `localhost:8080`) and two connected proxies (listening on `localhost:8081` and `localhost:8082`).
+
 The following paragraph simulates the creation and the completion of a task
 using [cURL](http://curl.se) calls. Two parties (and their Samply.Proxies) are
-connected via a central broker. Each party runs an application, called `app`.
-We will simulate this application.
+connected via a central broker. Each party has one registered application.
+In the next section we will simulate the communication between these applications over the beam network.
 
-Note: cURL versions before 7.82 do not support the `--json` option. In this case, please use `--data` instead.
+> Note: cURL versions before 7.82 do not support the `--json` option. In this case, please use `--data` instead.
 
 The used BeamIds are the following:
 
 | System             | BeamID                       |
 |--------------------|------------------------------|
-| Broker             | broker.example.de            |
-| Proxy1             | proxy1.broker.example.de     |
-| App behind Proxy 1 | app.proxy1.broker.example.de |
-| Proxy2             | proxy2.broker.example.de     |
-| App behind Proxy 2 | app.proxy2.broker.example.de |
+| Broker             | broker                       |
+| Proxy1             | proxy1.broker                |
+| App behind Proxy 1 | app1.proxy1.broker           |
+| Proxy2             | proxy2.broker                |
+| App behind Proxy 2 | app2.proxy2.broker           |
 
-In this example, we use the same ApiKey `AppKey` for both parties.
+To simplify this example, we use the same ApiKey `App1Secret` for both apps. Also, the Broker has a short name (`broker`) where in a real setup, it would be required to have a fully-qualified domain name as `broker1.samply.de` (see [System Architecture](#system-architecture)).
 
 ### Creating a task
 
-`app` at party 1 has some important work to distribute. It knows, that `app`
-at party 2 is capable of solving it, so it asks `proxy1.broker.example.de` to
+`app1` at party 1 has some important work to distribute. It knows, that `app2`
+at party 2 is capable of solving it, so it asks `proxy1.broker` to
 create that new task:
 
-```
-curl -k -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app.proxy1.broker.example.de","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app.proxy2.broker.example.de"],"ttl":"60s"}' -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks
+```sh
+curl -v --json '{"body":"What is the answer to the ultimate question of life, the universe, and everything?","failure_strategy":{"retry":{"backoff_millisecs":1000,"max_tries":5}},"from":"app1.proxy1.broker","id":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","metadata":"The broker can read and use this field e.g., to apply filters on behalf of an app","to":["app2.proxy2.broker"],"ttl":"60s"}' -H "Authorization: ApiKey app1.proxy1.broker App1Secret" http://localhost:8081/v1/tasks
 ```
 
 `Proxy1` replies:
@@ -97,39 +109,86 @@ the task is registered and will be distributed to the appropriate locations.
 
 ### Listening for relevant tasks
 
-`app` at Party 2 is now able to fetch all tasks addressed to them, especially the task created before:
+`app2` at Party 2 is now able to fetch all tasks addressed to them, especially the task created before:
 
-```
-curl -k -X GET -v -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks?filter=todo
+```sh
+curl -X GET -v -H "Authorization: ApiKey app2.proxy2.broker App1Secret" http://localhost:8082/v1/tasks?filter=todo
 ```
 
 The `filter=todo` parameter instructs the Broker to only send unfinished tasks
 addressed to the querying party.
-The query returns the task, and as `app` at Proxy 2, we inform the broker that
+The query returns the task, and as `app2` at Proxy 2, we inform the broker that
 we are working on this important task by creating a preliminary "result" with
 `"status": "claimed"`:
 
-```
-curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":"claimed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/app.proxy2.broker.example.de
+```sh
+curl -X PUT -v --json '{"from":"app2.proxy2.broker","id":"8db76400-e2d9-4d9d-881f-f073336338c1","metadata":["Arbitrary","types","are","possible"],"status":"claimed","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app1.proxy1.broker"]}' -H "Authorization: ApiKey app2.proxy2.broker App1Secret" http://localhost:8082/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/app2.proxy2.broker
 ```
 
 ### Returning a Result
 
-Party 2 processes the received task. After succeeding, `app` at party 2 returns the result to party 1:
+Party 2 processes the received task. After succeeding, `app2` returns the result to party 1:
 
-```
-curl -k -X PUT -v --json '{"from":"app.proxy2.broker.example.de","metadata":["Arbitrary","types","are","possible"],"status":"succeeded","body":"The answer is 42","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app.proxy1.broker.example.de"]}' -H "Authorization: ApiKey app.proxy2.broker.example.de AppKey" https://proxy2.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/app.proxy2.broker.example.de
+```sh
+curl -X PUT -v --json '{"from":"app2.proxy2.broker","metadata":["Arbitrary","types","are","possible"],"status":"succeeded","body":"The answer is 42","task":"70c0aa90-bfcf-4312-a6af-42cbd57dc0b8","to":["app1.proxy1.broker"]}' -H "Authorization: ApiKey app2.proxy2.broker App1Secret" http://localhost:8082/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results/app2.proxy2.broker
 ```
 
 ### Waiting for tasks to complete
 
-Meanwhile, `app` at party 1 waits on the completion of its task. But not wanting to check for results every couple seconds, it asks Proxy 1 to be informed if the expected number of `1` result is present:
+Meanwhile, `app1` waits on the completion of its task. But not wanting to check for results every couple seconds, it asks Proxy 1 to be informed if the expected number of `1` result is present:
 
-```
-curl -k -X GET -v -H "Authorization: ApiKey app.proxy1.broker.example.de AppKey" https://proxy1.broker.example.de/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results?wait_count=1
+```sh
+curl -X GET -v -H "Authorization: ApiKey app1.proxy1.broker App1Secret" http://localhost:8081/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/results?wait_count=1
 ```
 
 This *long polling* opens the connection and sleeps until a reply is received. For more information, see the API documentation.
+
+### Using direct socket connections
+> Only available on builds of beam with the `sockets` feature 
+
+Establishing direct socket connections via Beam requires a negotiation phase prior to using the sockets. One application sends a socket request to the other application via their respective Beam.Proxy. The receiving application, upon receipt of the request, upgrades the connection to an encrypted TCP socket connection.
+
+While Beam sockets can be initiated using command line tools, such as curl, netcat, or socat, they are intended to be used by the applications' code. Thus, we show the usage in the following short python application exemplifying both applications, the initiating and the receiving one. Both sides of the communication run concurrently.
+
+```python
+import requests
+import threading
+import socket
+
+data = b"Hello beam sockets!"
+
+# App running in a beam network with proxy1 available at localhost:8081
+def app1():
+    # Post socket request to client
+    res = requests.post("http://localhost:8081/v1/sockets/app2.proxy2.broker", headers = {
+        "Upgrade": "tcp",
+        "Authorization": "ApiKey app1.proxy1.broker App1Secret"
+    }, stream=True)
+    # Get the underlying socket connection
+    stream = socket.fromfd(res.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
+    # Send some data
+    stream.send(data)
+
+# App running in a beam network with proxy2 available at localhost:8082
+def app2():
+    # Poll for incoming socket requests
+    socket_task_id = requests.get("http://localhost:8082/v1/sockets", headers={
+        "Authorization": "ApiKey app2.proxy2.broker App1Secret"
+    }).json()[0]["id"]
+    # Connect to the given id of the socket request
+    res = requests.get(f"http://localhost:8082/v1/sockets/{socket_task_id}", headers={
+        "Authorization": "ApiKey app2.proxy2.broker App1Secret",
+        "Upgrade": "tcp",
+    }, stream=True)
+    # Get the underlying socket connection
+    stream = socket.fromfd(res.raw.fileno(), socket.AF_INET, socket.SOCK_STREAM)
+    # Receive the data send by the other client
+    assert stream.recv(len(data)) == data
+
+threading.Thread(target=app1).start()
+threading.Thread(target=app2).start()
+```
+
 
 ## Data objects (JSON)
 
@@ -209,6 +268,24 @@ A failed task:
 - `body`: Supported and required for all `status`es except for `claimed`. Either carries the actual result payload of the task in case the status is `succeeded` or an error message.
 - `metadata`: Associated data readable by the broker. Can be of arbitrary type (see [Task](#task)) and is not encrypted.
 
+### Socket Task
+> Only available on builds of beam with the `sockets` feature 
+
+While "regular" Beam Tasks transport application data, Socket Task initiate direct socket connections between two Beam.Proxies.
+
+```json
+{
+    "from": "app1.proxy1.broker",
+    "to": ["app2.proxy2.broker"],
+    "id": "<socket_uuid>",
+    "ttl": "60s",
+}
+```
+
+- `from`: BeamID of the client requesting the socket connection
+- `to`: BeamIDs of the intended recipients. Due to the nature of socket connections, the array has to be of exact length 1.
+- `id`: A UUID v4 which identifies the socket connection and is used by the recipient to connect to this socket (see [here](#connecting-to-a-socket-request)).
+- `ttl`: The time-to-live of this socket task. After this time has elapsed the recipient can no longer connect to the socket. Already established connections are not affected.
 ## API
 
 ### Create task
@@ -230,6 +307,17 @@ Date: Mon, 27 Jun 2022 13:58:35 GMT
 ```
 
 In subsequent requests, use the URL defined in the `location` header to refer to the task (NOT the one you supplied in your POST body).
+
+If the task contains recipients (`to` field, see [Beam Task](#task)) with invalid certificates (i.e. not certificate exists or it expired), Beam *does not* create the task but returns HTTP status code `424 Failed Dependency` with a JSON array of the "offending" BeamIDs in the body, e.g.:
+
+```
+HTTP/1.1 424 Failed Dependency
+Content-Length: 17
+Server: Samply.Beam.Proxy/0.7.0-b1ca2ed-SNAPSHOT
+Date: Thu, 28 Sep 2023 07:16:24 GMT
+
+["proxy4.broker"]
+```
 
 ### Retrieve tasks
 
@@ -309,7 +397,7 @@ Date: Mon, 27 Jun 2022 14:26:45 GMT
 As part of making this API performant, all reading endpoints support long-polling as an efficient alternative to regular (repeated) polling. Using this function requires the following parameters:
 
 - `wait_count`: The API call will block until this many results are available ...
-- `wait_time`: ... or this time has passed (if not stated differntly, e.g., by adding 'm', 'h', 'ms', ..., this is interpreted as seconds), whichever comes first.
+- `wait_time`: ... or this time has passed (if not stated differently, e.g., by adding 'm', 'h', 'ms', ..., this is interpreted as seconds), whichever comes first.
 
 For example, retrieving a task's results:
 
@@ -368,7 +456,7 @@ Content-Length: 0
 Date: Mon, 27 Jun 2022 14:26:45 GMT
 ```
 
-The Beam.Broker implements a more informative health endpoint and returns a haalth summary and additional system details:
+The Beam.Broker implements a more informative health endpoint and returns a health summary and additional system details:
 
 ```
 HTTP/1.1 200
@@ -392,9 +480,81 @@ HTTP/1.1 503
 }
 ```
 
+Additionally, the broker health endpoint publishes the connection status of the proxies:
+
+Method: `GET`  
+URL: `/v1/health/proxies/<proxy-id>`  
+Authorization:
+
+ - Basic Auth with an empty user and the configured `MONITORING_API_KEY` as a password, so the header looks like `Authorization: Basic <base64 of ':<MONITORING_API_KEY>'>`.
+
+In case of a successful connection between proxy and broker, the call returns HTTP status code `200 OK`, otherwise `404 Not Found`.
+
+Querying the endpoint without specifying a ProxyId returns a JSON array of all proxies, that have ever connected to this broker:
+
+Method: `GET`  
+URL: `/v1/health/proxies`  
+Authorization:
+
+ - Basic Auth with an empty user and the configured `MONITORING_API_KEY` as a password, so the header looks like `Authorization: Basic <base64 of ':<MONITORING_API_KEY>'>`.
+
+yields, for example,
+
+```
+HTTP/1.1 200
+[
+  "proxy1.broker.example",
+  "proxy2.broker.example",
+  "proxy3.broker.example",
+  "proxy4.broker.example"
+]
+```
+
+### Socket connections
+> Note: Only available on builds with the feature `sockets` enabled. Both proxy and broker need to be built with this flag. There are also prebuilt docker images available with this feature.
+
+All API requests require the usual authentication header (see [getting started section](#getting-started)).
+
+#### Initialize a socket connection
+Initialize a socket connection with an Beam application, e.g. with AppId `app2.proxy2.broker`:
+
+Method: `POST`  
+URL: `/v1/sockets/<app_id>`  
+Header `Upgrade` is required, e.g. 'Upgrade: tls'
+
+This request will automatically lead to a connection to the other app, after it answers this request.
+
+#### Receive and answer a socket request
+To receive socket connections, the Beam.Proxy needs to be polled for incoming connections.
+This endpoint also supports the [long polling](#long-polling-api-access) query string semantics.
+
+Method: `GET`  
+URL: `/v1/sockets`
+Parameters:
+ * The same parameters as for long-polling, i.e. `to`, `from`, `filter=todo`, `wait_count` and `wait_time` are supported.
+
+Returns an array of JSON objects:
+``` json
+[
+    {
+        "from": "app1.proxy1.broker",
+        "to": ["app2.proxy2.broker"]
+        "id": "<socket_uuid>",
+        "ttl": "60s",
+    }
+]
+```
+
+#### Connecting to a socket request
+After the connection negotiation above, the App can proceed to connect to the socket:
+
+Method: GET  
+URL: `/v1/sockets/<socket_uuid>`
+
+
 ## Development Environment
 
-A dev environment is provided consisting of one broker and two proxies.
+A dev environment is provided consisting of one broker and two proxies as well as an optional MITM proxy (listening on `localhost:9090`) for debugging. To use it, remove the comment signs for the MITM service and the `ALL_PROXY` environment variables in `dev/docker-compose.yml`. Note that the MITM proxy interferes with SSE. 
 
 > NOTE: The commands in this section will build the beam proxy and broker locally. To build beam, you need to install libssl-dev.
 
@@ -417,6 +577,8 @@ Confirm that your setup works by running `./dev/test noci`, which runs the tests
 
 To work with the environment, you may run `./dev/beamdev defaults` to see some helpful values, including the dev default URLs and a working authentication header.
 
+To run the dev setup with additional cargo flags like feature flags or the release flag you may run `dev/beamdev start <cargo flags>`, i.e. `dev/beamdev start --features sockets`.
+
 ## Production Environment & Certificate Infrastructure
 
 A production system needs to operate a production-hardened central [Hashicorp Vault](https://www.vaultproject.io/) and requires a slightly more involved secret management process to ensure, that no secret is accidentally leaked. We can give no support regarding the vault setup, please see the [official documentation](https://developer.hashicorp.com/vault/docs/secrets/pki). However, our [deployment repositories](https://github.com/samply/beam-deployment) have a basic vault cookbook section, describing a basic setup and the most common operations.
@@ -430,7 +592,7 @@ Beam.Broker and Beam.Proxy expect the private key as well as the CA root certifi
 We created a [certificate enrollment companion tool](https://github.com/samply/beam-enroll), assisting the enrollment process. Please run the docker image via:
 
 ```bash
-docker run --rm -ti -v <output-directory>:/pki samply/beam-enroll:latest --output-file /pki/<proxy_name>.priv.pem --proxy-id <full_proxy_id>
+docker run --rm -v <output-directory>:/pki samply/beam-enroll:latest --output-file /pki/<proxy_name>.priv.pem --proxy-id <full_proxy_id>
 ```
 
 and follow the instructions on the screen. The tool generates the private key file in the given directory and prints the CSR to the console -- ready to be copied into an email to the central CA's administrator without the risk of accidentally sending the wrong, i.e. private, file.
@@ -459,7 +621,7 @@ Both the Broker and the Proxy respect the log level in the `RUST_LOG` environmen
 
 Samply.Beam encrypts all information in the `body` fields of both Tasks and Results. The data is encryted in the Samply.Proxy before forwarding to the Beam.Broker. Similarly, the decryption takes place in the Beam.Proxy as well. This is in addition to the transport encryption (TLS) and different in that even the broker is unable to decipher the message's content fields.
 
-The data is symmetrically encrypted using the Autheticated Encryption with Authenticated Data (AEAD) algorithm "XChaCha20Poly1305", a widespread algorithm (e.g., mandatory for the TLS protocol), regarded as highly secure by experts. The used [chacha20poly1305 library](https://docs.rs/chacha20poly1305/latest/chacha20poly1305/) was sublected to a [security audit](https://research.nccgroup.com/2020/02/26/public-report-rustcrypto-aes-gcm-and-chacha20poly1305-implementation-review/), with no significant findings. The randomly generated symmetric keys are encapsulated in a RSA encrypted ciphertext using OAEP Padding. This ensures, that only the intended recipients can decrypt the key and subsequently the transfered data.
+The data is symmetrically encrypted using the Authenticated Encryption with Authenticated Data (AEAD) algorithm "XChaCha20Poly1305", a widespread algorithm (e.g., mandatory for the TLS protocol), regarded as highly secure by experts. The used [chacha20poly1305 library](https://docs.rs/chacha20poly1305/latest/chacha20poly1305/) was sublected to a [security audit](https://research.nccgroup.com/2020/02/26/public-report-rustcrypto-aes-gcm-and-chacha20poly1305-implementation-review/), with no significant findings. The randomly generated symmetric keys are encapsulated in a RSA encrypted ciphertext using OAEP Padding. This ensures, that only the intended recipients can decrypt the key and subsequently the transferred data.
 
 ## Roadmap
 
@@ -469,19 +631,16 @@ The data is symmetrically encrypted using the Autheticated Encryption with Authe
 - [X] End-to-End signatures
 - [X] End-to-End encryption
 - [X] Docker deployment packages: CI/CD
-- [ ] Docker deployment packages: Documentation
 - [X] Broker-side filtering using pre-defined criteria
-- [ ] Broker-side filtering of the unencrypted metadata fields with JSON queries
-- [ ] Integration of OAuth2 (in discussion)
-- [ ] In addition to messages and tasks, also facilitate direct socket connections
-- [ ] Deliver usage metrics
 - [x] Helpful dev environment
 - [x] Expiration of tasks and results
 - [x] Support TLS-terminating proxies
-
-## Latest version: Samply.Beam 0.6.1 -- 2023-04-11
-
-This minor easter update is just a maintainance release. We updated our time-parsing dependency [fundu](https://crates.io/crates/fundu) to the next major version and fixed a bug in our CI/CD pipeline. With this fix, the project description is now correctly sent to Docker Hub. Internally, we improved the formatting of the source code.
+- [x] Transport direct socket connections
+- [x] Crate to support the development of Rust Beam client applications
+- [ ] File transfers (with efficient support for large files)
+- [ ] Broker-side filtering of tasks using the unencrypted metadata fields (probably using JSON queries)
+- [ ] Integration of OAuth2 (in discussion)
+- [ ] Deliver usage metrics
 
 ## Cryptography Notice
 

@@ -18,8 +18,12 @@ pub(crate) async fn serve(
 
     let router_health = serve_health::router();
 
-    let app = router_tasks
-        .merge(router_health)
+    let app = router_tasks.merge(router_health);
+
+    #[cfg(feature = "sockets")]
+    let app = app.merge(crate::serve_sockets::router(client));
+    // Middleware needs to be set last
+    let app = app
         .layer(axum::middleware::from_fn(shared::middleware::log))
         .layer(axum::middleware::map_response(banner::set_server_header));
 

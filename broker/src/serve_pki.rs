@@ -105,9 +105,7 @@ async fn get_certificate_list(
     _: Authorized,
 ) -> Result<Json<Vec<String>>, PkiError> {
     debug!("Asked for all certificates by {addr}");
-    let list = shared::crypto::get_serial_list()
-        .await
-        .map_err(|e| PkiError::CommunicationWithVault(e.to_string()))?;
+    let list = shared::crypto::get_serial_list().await;
     let json = Json(list);
     Ok(json)
 }

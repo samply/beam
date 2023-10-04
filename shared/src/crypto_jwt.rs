@@ -1,11 +1,11 @@
+use beam_lib::{AppOrProxyId, ProxyId};
 use crate::{
-    beam_id::{AppOrProxyId, ProxyId},
     config,
     config_shared::ConfigCrypto,
     crypto::{self, CryptoPublicPortion},
     errors::{CertificateInvalidReason, SamplyBeamError},
     middleware::{LoggingInfo, ProxyLogger},
-    BeamId, Msg, MsgEmpty, MsgId, MsgSigned,
+    Msg, MsgEmpty, MsgId, MsgSigned,
 };
 use axum::{async_trait, body::HttpBody, extract::FromRequest, http::StatusCode, BoxError};
 use http::{request::Parts, uri::PathAndQuery, Request};
@@ -50,7 +50,7 @@ where
     type Rejection = (StatusCode, &'static str);
 
     async fn from_request(req: Request<B>, _state: &S) -> Result<Self, Self::Rejection> {
-        let (parts, body) = req.into_parts();
+        let (mut parts, body) = req.into_parts();
         let bytes = hyper::body::to_bytes(body).await.map_err(|_| ERR_BODY)?;
         let token_without_extended_signature = std::str::from_utf8(&bytes).map_err(|e| {
             warn!(
@@ -59,7 +59,7 @@ where
             );
             ERR_SIG
         })?;
-        verify_with_extended_header(parts, token_without_extended_signature).await
+        verify_with_extended_header(&mut parts, token_without_extended_signature).await
     }
 }
 
@@ -106,7 +106,7 @@ pub async fn extract_jwt<T: DeserializeOwned + Serialize>(
             warn!("Failed to decode {data:?} to JwtClaims<HeaderClaims>. Err: {e}");
             SamplyBeamError::RequestValidationFailed("Invalid JWT body in header".to_string())
         })?;
-        let proxy_id: ProxyId = json.custom.from.get_proxy_id();
+        let proxy_id: ProxyId = json.custom.from.proxy_id();
         let mut certs = crypto::get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
             .await
             .into_iter()
@@ -133,17 +133,17 @@ pub async fn extract_jwt<T: DeserializeOwned + Serialize>(
 
 pub const JWT_VERIFICATION_OPTIONS: Lazy<VerificationOptions> = Lazy::new(|| VerificationOptions {
     accept_future: true,
-    max_token_length: Some(1024 * 1024 * 10), //10MB
+    max_token_length: Some(1024 * 1024 * 100), //100MB
     ..Default::default()
 });
 
-#[tracing::instrument]
+#[tracing::instrument(skip(token_without_extended_signature))]
 /// This verifys a Msg from sent to the Broker
 /// The Message is encoded in the JWT Claims of the body which is a JWT.
-/// There is never really a [`MsgSigned`] involved in Deserializing the message as the signature is just copyed from the body JWT.
+/// There is never really a [`MsgSigned`] involved in Deserializing the message as the signature is just copied from the body JWT.
 /// The token is verified by a key derived from the kid of the JWT in the Header which should also match the kid of the body JWT.
-async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
-    mut req: Parts,
+pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
+    req: &mut Parts,
     token_without_extended_signature: &str,
 ) -> Result<MsgSigned<M>, (StatusCode, &'static str)> {
     let token_with_extended_signature = std::str::from_utf8(
@@ -175,6 +175,12 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
                 );
                 ERR_SIG
             })?;
+
+    req.extensions
+        .remove::<ProxyLogger>()
+        .expect("Should be set by middleware")
+        .send(header_claims.custom.from.clone())
+        .expect("Receiver still lives in middleware");
 
     // Check extra digest
 
@@ -241,12 +247,6 @@ async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
         msg,
         jwt: token_without_extended_signature.to_string(),
     };
-    req.extensions
-        .remove::<ProxyLogger>()
-        .expect("Should be set by middleware")
-        .send(msg_signed.get_from().clone())
-        .expect("Reciever still lives in middleware");
-
     Ok(msg_signed)
 }
 

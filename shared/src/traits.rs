@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     BoxError, RequestPartsExt,
 };
-use fundu::DurationParser;
+use fundu::{DurationParser};
 use http::request::Parts;
 
 use crate::*;
@@ -19,8 +19,8 @@ struct HowLongToBlockQueryExtractor {
 fn test_duration_parsing() {
     let mut parser = DurationParser::default();
     let parser = parser.default_unit(fundu::TimeUnit::MilliSecond);
-    assert_eq!(parser.parse("1234s").unwrap().as_millis(), 1234000);
-    assert_eq!(parser.parse("1234").unwrap().as_millis(), 1234);
+    assert_eq!(Duration::try_from(parser.parse("1234s").unwrap()).unwrap().as_millis(), 1234000);
+    assert_eq!(Duration::try_from(parser.parse("1234").unwrap()).unwrap().as_millis(), 1234);
 }
 
 #[async_trait]
@@ -37,28 +37,15 @@ where
                     let wait_time = DurationParser::default()
                         .default_unit(fundu::TimeUnit::MilliSecond)
                         .parse(&wait_time_str)
-                        .map_err(|_| (StatusCode::BAD_REQUEST, "For long-polling, please define &wait_time=<duration with unit> (e.g. 1000ms) and &wait_count=<count>."))?;
+                        .ok()
+                        .and_then(|dur| dur.try_into().ok())
+                        .ok_or_else(|| (StatusCode::BAD_REQUEST, "For long-polling, please define &wait_time=<duration with unit> (e.g. 1000ms) and &wait_count=<count>."))?;
                     Ok(Self { wait_time: Some(wait_time), wait_count})
                 } else {
                     Ok(Self { wait_time: None, wait_count })
                 }
             },
             Err(_) => Err((StatusCode::BAD_REQUEST, "For long-polling, please define &wait_time=<duration with unit> (e.g. 1000ms) and &wait_count=<count>.")),
-        }
-    }
-}
-
-#[async_trait]
-impl<S> FromRequestParts<S> for MyUuid
-where
-    S: Send + Sync,
-{
-    type Rejection = (StatusCode, &'static str);
-
-    async fn from_request_parts(req: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        match req.extract::<Path<Uuid>>().await {
-            Ok(value) => Ok(Self(value.0)),
-            Err(_) => Err((StatusCode::BAD_REQUEST, "Invalid ID supplied.")),
         }
     }
 }

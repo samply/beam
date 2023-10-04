@@ -1,9 +1,9 @@
 use axum::{async_trait, body::Bytes, http::request, response::Response, Json};
-use hyper::{client::HttpConnector, Client, Method, Request, StatusCode, Uri};
+use hyper::{client::HttpConnector, Client, Method, Request, StatusCode, Uri, header};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
+use beam_lib::AppOrProxyId;
 use shared::{
-    beam_id::AppOrProxyId,
     config,
     config_proxy::Config,
     config_shared::ConfigCrypto,
@@ -12,7 +12,7 @@ use shared::{
     http_client::SamplyHttpClient,
     EncryptedMessage, MsgEmpty,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, error};
 
 use crate::serve_tasks::sign_request;
 
@@ -31,11 +31,12 @@ impl GetCertsFromBroker {
             .build()?;
 
         let body = EncryptedMessage::MsgEmpty(MsgEmpty {
-            from: AppOrProxyId::ProxyId(self.config.proxy_id.clone()),
+            from: AppOrProxyId::Proxy(self.config.proxy_id.clone()),
         });
         let (parts, body) = Request::builder()
             .method(Method::GET)
             .uri(&uri)
+            .header(header::USER_AGENT, env!("SAMPLY_USER_AGENT"))
             .body(body)
             .expect("To build request successfully")
             .into_parts();
@@ -85,7 +86,8 @@ impl GetCertsFromBroker {
 
 #[async_trait]
 impl GetCerts for GetCertsFromBroker {
-    async fn certificate_list(&self) -> Result<Vec<String>, SamplyBeamError> {
+    async fn certificate_list_via_network(&self) -> Result<Vec<String>, SamplyBeamError> {
+        debug!("Retrieving cert list from Broker ...");
         self.query_vec("/v1/pki/certs").await
     }
 
@@ -96,8 +98,22 @@ impl GetCerts for GetCertsFromBroker {
     }
 
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError> {
-        debug!("Retrieving im ca certificate ...");
+        debug!("Retrieving intermediate CA certificate ...");
         self.query("/v1/pki/certs/im-ca").await
+    }
+
+    async fn on_cert_expired(&self, expired_cert: shared::openssl::x509::X509) {
+        // We can't use our own `ConfigCrypto` here as it is only an intermidate config for getting initial certs from the broker
+        let own_cert = shared::crypto::get_own_crypto_material()
+            .public
+            .as_ref()
+            .expect("Fatal error: Unable to read our own certificate.");
+        let own_cert = &own_cert.cert;
+        if expired_cert.serial_number() == own_cert.serial_number() {
+            // TODO Tobias will find a smart solution ;)
+            error!("Our own cert has just expired -- exiting.");
+            std::process::exit(13);
+        }
     }
 }
 

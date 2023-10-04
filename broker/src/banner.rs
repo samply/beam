@@ -10,12 +10,13 @@ pub(crate) fn print_banner() {
         _ => "SNAPSHOT",
     };
     info!(
-        "🌈 Samply.Beam ({}) v{} (built {} {}, {}) starting up ...",
+        "🌈 Samply.Beam ({}) v{} (built {} {}, {} with feature(s): {}) starting up ...",
         env!("CARGO_PKG_NAME"),
         env!("CARGO_PKG_VERSION"),
         env!("BUILD_DATE"),
         env!("BUILD_TIME"),
-        commit
+        commit,
+        env!("FEATURES")
     );
 }
 

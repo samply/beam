@@ -21,12 +21,16 @@ use tokio::{
 };
 use tracing::{debug, info, trace, warn};
 
-use crate::{banner, crypto, health::Health, serve_health, serve_pki, serve_tasks};
+use crate::{banner, crypto, health::Health, serve_health, serve_pki, serve_tasks, compare_client_server_version};
 
 pub(crate) async fn serve(health: Arc<RwLock<Health>>) -> anyhow::Result<()> {
     let app = serve_tasks::router()
         .merge(serve_pki::router())
-        .merge(serve_health::router(health))
+        .merge(serve_health::router(health));
+    #[cfg(feature = "sockets")]
+    let app = app.merge(crate::serve_sockets::router());
+    // Middleware needs to be set last
+    let app = app
         .layer(axum::middleware::from_fn(shared::middleware::log))
         .layer(axum::middleware::map_response(banner::set_server_header));
 
