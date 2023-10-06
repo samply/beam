@@ -9,9 +9,10 @@ FROM alpine AS chmodder
 ARG FEATURE
 ARG TARGETARCH
 ARG COMPONENT
-COPY /artifacts/binaries-$TARGETARCH$FEATURE/$COMPONENT /app/component
+COPY /artifacts/binaries-$TARGETARCH$FEATURE/$COMPONENT /app/$COMPONENT
 RUN chmod +x /app/*
 
 FROM gcr.io/distroless/cc-debian12
-COPY --from=chmodder /app/component /usr/local/bin/
-ENTRYPOINT [ "/usr/local/bin/component" ]
+ARG COMPONENT
+COPY --from=chmodder /app/$COMPONENT /usr/local/bin/beam
+ENTRYPOINT [ "/usr/local/bin/beam" ]
