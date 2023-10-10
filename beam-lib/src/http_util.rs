@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{time::Duration, future::Future, pin::Pin};
 
 use reqwest::{Client, header::{self, HeaderValue}, Url, StatusCode, Response};
 use serde::{de::DeserializeOwned, Serialize};
@@ -98,8 +98,7 @@ impl BeamClient {
             } else {
                 Err(e.into())
             },
-        };
-        let response = handle_invalid_receivers(response).await?;
+        }.handle_invalid_receivers().await?;
         match response.status() {
             StatusCode::GATEWAY_TIMEOUT => Ok(Vec::with_capacity(0)),
             StatusCode::OK | StatusCode::PARTIAL_CONTENT => Ok(response.json().await?),
@@ -124,8 +123,7 @@ impl BeamClient {
             } else {
                 Err(e.into())
             },
-        };
-        let response = handle_invalid_receivers(response).await?;
+        }.handle_invalid_receivers().await?;
         match response.status() {
             // TODO: Add more status codes here
             StatusCode::GATEWAY_TIMEOUT => Ok(Vec::with_capacity(0)),
@@ -142,9 +140,8 @@ impl BeamClient {
         let response = self.client
             .post(url)
             .json(task)
-            .send()
-            .await?;
-        let response = handle_invalid_receivers(response).await?;
+            .send().await?
+            .handle_invalid_receivers().await?;
         match response.status() {
             // TODO: Add more status codes here
             StatusCode::CREATED => Ok(()),
@@ -161,9 +158,8 @@ impl BeamClient {
         let response = self.client
             .put(url)
             .json(result)
-            .send()
-            .await?;
-        let response = handle_invalid_receivers(response).await?;
+            .send().await?
+            .handle_invalid_receivers().await?;
         match response.status() {
             StatusCode::NO_CONTENT => Ok(false),
             StatusCode::CREATED => Ok(true),
@@ -190,9 +186,8 @@ impl BeamClient {
         let response = self.client
             .post(url)
             .header(header::UPGRADE, "tcp")
-            .send()
-            .await?;
-        let response = handle_invalid_receivers(response).await?;
+            .send().await?
+            .handle_invalid_receivers().await?;
         if response.status() != StatusCode::SWITCHING_PROTOCOLS {
             Err(BeamError::UnexpectedStatus(response.status()))
         } else {
@@ -220,8 +215,7 @@ impl BeamClient {
             } else {
                 Err(e.into())
             },
-        };
-        let response = handle_invalid_receivers(response).await?;
+        }.handle_invalid_receivers().await?;
         match response.status() {
             // TODO: Add more status codes here
             StatusCode::GATEWAY_TIMEOUT => Ok(Vec::with_capacity(0)),
@@ -239,9 +233,8 @@ impl BeamClient {
         let response = self.client
             .get(url)
             .header(header::UPGRADE, "tcp")
-            .send()
-            .await?;
-        let response = handle_invalid_receivers(response).await?;
+            .send().await?
+            .handle_invalid_receivers().await?;
         if response.status() != StatusCode::SWITCHING_PROTOCOLS {
             Err(BeamError::UnexpectedStatus(response.status()))
         } else {
@@ -253,10 +246,19 @@ impl BeamClient {
     }
 }
 
-async fn handle_invalid_receivers(res: Response) -> Result<Response> {
-    if res.status() == StatusCode::FAILED_DEPENDENCY {
-        Err(BeamError::InvalidReceivers(res.json().await?))
-    } else {
-        Ok(res)
+impl HandleInvalidReceiversExt for Response {
+    fn handle_invalid_receivers(self) -> Pin<Box<dyn Future<Output = Result<Response>>>> {
+        async fn handle_invalid_receivers(res: Response) -> Result<Response> {
+            if res.status() == StatusCode::FAILED_DEPENDENCY {
+                Err(BeamError::InvalidReceivers(res.json().await?))
+            } else {
+                Ok(res)
+            }
+        }
+        Box::pin(handle_invalid_receivers(self))
     }
+}
+
+trait HandleInvalidReceiversExt: Sized {
+    fn handle_invalid_receivers(self) -> Pin<Box<dyn Future<Output = Result<Response>>>>;
 }
