@@ -60,6 +60,37 @@ function request_proxy() {
      request "$application" "$cn" "$ttl" 
 }
 
+function revoke_proxy() {
+     application="${1:-app1}"
+     cn="${application}.$BROKER_ID"
+     revoke "$cn"
+}
+
+function revoke() {
+     cn="${1}"
+     CERTS=$(curl \
+    --header "X-Vault-Token: $VAULT_TOKEN" \
+    --silent \
+    --request LIST \
+    $VAULT_ADDR/v1/samply_pki/certs | jq .data.keys | tr -d "[]\",")
+     for cert in ${CERTS}; do
+          cert_cn=$(curl -H "X-Vault-Token: $VAULT_TOKEN" -X GET --silent -q  $VAULT_ADDR/v1/samply_pki/cert/$cert/raw/pem | openssl x509 -noout -text | awk -F'=' '/Subject:/{print  $2}')
+          if [[ "$(echo $cert_cn | xargs echo)" == "$(echo $cn | xargs echo)" ]]; then # xargs is used to trim whitespace
+               echo "Revoking $cert_cn, $cert"
+               curl \
+                   --header "X-Vault-Token: $VAULT_TOKEN" \
+                   --request POST \
+                   --silent \
+                   --data "{\"serial_number\": \"$cert\"}" \
+                   $VAULT_ADDR/v1/samply_pki/revoke
+          fi
+          revocation_time=$(curl -H "X-Vault-Token: $VAULT_TOKEN" --silent -X GET -q  http://localhost:8200/v1/samply_pki/cert/$cert | jq .data.revocation_time_rfc3339)
+          if [[ "$revocation_time" == "" ]]; then
+               echo "Error revoking certificate $cert"
+          fi
+     done
+}
+
 function request() {
      application=$1
      cn=$2
@@ -76,6 +107,22 @@ function request() {
      cat ${application}.json | jq -r .data.ca_chain[] > ${application}.chain.pem
      cat ${application}.json | jq -r .data.private_key > ${application}.priv.pem
      echo "Success: PEM files stored to ${application}*.pem"
+}
+
+function setup() {
+    clean
+    touch ${PROXY1_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
+    touch ${PROXY2_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
+    touch test1.priv.pem # see https://github.com/docker/compose/issues/8305
+    touch test2.priv.pem # see https://github.com/docker/compose/issues/8305
+    #touch root.crt.pem # see https://github.com/docker/compose/issues/8305
+    start
+    while ! [ "$(curl -s $VAULT_ADDR/v1/sys/health | jq -r .sealed)" == "false" ]; do echo "Waiting ..."; sleep 0.1; done
+    docker compose exec -T vault sh -c "https_proxy=$http_proxy apk add --no-cache bash curl jq"
+    docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki init"
+    docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY1_ID_SHORT" "24h"
+    docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY2_ID_SHORT" "24h"
+    docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy dummy" "24h"
 }
 
 function init() {
@@ -101,24 +148,24 @@ case "$1" in
      request_proxy)
           request_proxy $2 $3
           ;;
+     revoke_proxy)
+          revoke_proxy "$2"
+          ;;
      devsetup)
-          clean
-          touch ${PROXY1_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
-          touch ${PROXY2_ID_SHORT}.priv.pem # see https://github.com/docker/compose/issues/8305
-          touch test1.priv.pem # see https://github.com/docker/compose/issues/8305
-          touch test2.priv.pem # see https://github.com/docker/compose/issues/8305
-          #touch root.crt.pem # see https://github.com/docker/compose/issues/8305
-          start
-          while ! [ "$(curl -s $VAULT_ADDR/v1/sys/health | jq -r .sealed)" == "false" ]; do echo "Waiting ..."; sleep 0.1; done
-          docker-compose exec -T vault sh -c "https_proxy=$http_proxy apk add --no-cache bash curl jq"
-          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki init"
-          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY1_ID_SHORT" "24h"
-          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY2_ID_SHORT" "24h"
-          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy dummy" "24h"
-          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy test1 2s"
-          docker-compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy test2 2s"
+          setup
+          docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY2_ID_SHORT" "24h" # Duplicate certificate for testing
+          docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy test1 2s" # Expired certificate for testing
+          docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy test2 2s" # Expired certificate for testing
+          docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY2_ID_SHORT" "24h" # Duplicate certificate for testing
+          docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy invalid.proxy.id" "24h" # Invalid proxy id cert for testing
+          $SCRIPT_DIR/pki request_proxy test3 24h # Certificate for revokation testing
+          $SCRIPT_DIR/pki revoke_proxy test3 # Revokation testing
+
+          ;;
+     setup)
+          setup
           ;;
      *)
-          echo "Usage: $0 start|init|(request [AppName])"
+          echo "Usage: $0 start|setup|devsetup|init|(request [AppName])"
           ;;
 esac

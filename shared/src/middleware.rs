@@ -1,12 +1,24 @@
-use std::{net::{IpAddr, SocketAddr}, cell::RefCell, sync::Arc};
+use std::{
+    cell::RefCell,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
-use axum::{middleware::{self, Next}, response::{Response, IntoResponse}, body::HttpBody, extract::ConnectInfo};
-use http::{Request, StatusCode, header::{self, HeaderName}, HeaderValue, Method, Uri};
+use axum::{
+    body::HttpBody,
+    extract::ConnectInfo,
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+};
+use http::{
+    header::{self, HeaderName},
+    HeaderValue, Method, Request, StatusCode, Uri,
+};
 use hyper::Body;
-use tokio::sync::{Mutex, oneshot};
-use tracing::{info, warn, span, Level, instrument};
+use tokio::sync::{oneshot, Mutex};
+use tracing::{info, instrument, span, warn, Level, error};
 
-use crate::beam_id::AppOrProxyId;
+use beam_lib::AppOrProxyId;
 
 const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 
@@ -20,12 +32,18 @@ pub struct LoggingInfo {
     from_proxy: Option<AppOrProxyId>,
 
     // Added after handlers
-    status_code: Option<StatusCode>
+    status_code: Option<StatusCode>,
 }
 
 impl LoggingInfo {
     fn new(method: Method, uri: Uri, ip: IpAddr) -> Self {
-        Self { method, uri, ip, from_proxy: None, status_code: None }
+        Self {
+            method,
+            uri,
+            ip,
+            from_proxy: None,
+            status_code: None,
+        }
     }
 
     fn set_status_code(&mut self, status: StatusCode) {
@@ -37,11 +55,16 @@ impl LoggingInfo {
     }
 
     fn get_log(&self) -> String {
-        let from = self.from_proxy.as_ref().map(|id| id.hide_broker()).unwrap_or(self.ip.to_string());
-        format!("{} {} {} {}",
+        let from = self
+            .from_proxy
+            .as_ref()
+            .map(|id| id.hide_broker())
+            .unwrap_or(self.ip.to_string());
+        format!(
+            "{} {} {} {}",
             from,
             self.status_code
-                .expect("Did not set Statuscode before loggin"),
+                .expect("Did not set Statuscode before logging"),
             self.method,
             self.uri
         )
@@ -50,13 +73,17 @@ impl LoggingInfo {
 
 pub type ProxyLogger = oneshot::Sender<AppOrProxyId>;
 
-pub async fn log(ConnectInfo(info): ConnectInfo<SocketAddr>, mut req: Request<Body>, next: Next<Body>) -> Response {
+pub async fn log(
+    ConnectInfo(info): ConnectInfo<SocketAddr>,
+    mut req: Request<Body>,
+    next: Next<Body>,
+) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
     let ip = get_ip(&req, &info);
 
     let mut info = LoggingInfo::new(method, uri, ip);
-    // This channel may or may not recieve an AppOrProxyId from verify_with_extended_header
+    // This channel may or may not receive an AppOrProxyId from verify_with_extended_header
     let (tx, mut rx) = oneshot::channel();
     req.extensions_mut().insert(tx);
 
@@ -68,7 +95,8 @@ pub async fn log(ConnectInfo(info): ConnectInfo<SocketAddr>, mut req: Request<Bo
     }
 
     let line = info.get_log();
-    if resp.status().is_success() {
+    // If we get a gateway timeout we won't log it with log level warn as this happens regularly with the long polling api
+    if resp.status().is_success() || resp.status().is_informational() || resp.status() == StatusCode::GATEWAY_TIMEOUT {
         info!(target: "in", "{}", line);
     } else {
         warn!(target: "in", "{}", line);
@@ -77,7 +105,8 @@ pub async fn log(ConnectInfo(info): ConnectInfo<SocketAddr>, mut req: Request<Bo
 }
 
 fn get_ip(req: &Request<Body>, info: &SocketAddr) -> IpAddr {
-    req.headers().get(X_FORWARDED_FOR)
+    req.headers()
+        .get(X_FORWARDED_FOR)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.split(',').next())
         .and_then(|v| v.parse().ok())

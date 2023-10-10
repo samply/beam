@@ -30,6 +30,7 @@ export APP2_P1=${APP2_ID_SHORT}.$PROXY1_ID
 export APP1_P2=${APP1_ID_SHORT}.$PROXY2_ID
 export APP2_P2=${APP2_ID_SHORT}.$PROXY2_ID
 export APP_KEY=App1Secret
+export BROKER_MONITORING_KEY=SuperSecretKey
 export RUST_LOG=${RUST_LOG:-info}
 export MAINTANANCE_KEY=Maintanance
 
@@ -39,18 +40,6 @@ export P1="http://localhost:8081" # for scripts
 export P2="http://localhost:8082" # for scripts
 
 export ARCH=$(docker version --format "{{.Server.Arch}}")
-
-function image_for_docker() {
-     # Pick the correct Ubuntu version for the Docker image,
-     # so the locally-built rust binary works regarding libssl
-     if [[ "$(pkg-config --modversion libssl)" =~ ^3.* ]]; then
-          echo "ubuntu:latest" # Use libssl3
-     else
-          echo -n "" # Don't change (uses libssl1.1)
-     fi
-}
-
-export IMGNAME="$(image_for_docker)"
 
 function check_prereqs() {
      set +e
@@ -77,7 +66,7 @@ function build() {
     PROXY=./target/debug/proxy
     if [ ! -x ./artifacts/binaries-$ARCH ]; then
         echo "Binaries missing -- building ..."
-        BUILD="$(cargo build --message-format=json $BUILDARGS)"
+        BUILD="$(cargo build $@ --message-format=json)"
         echo "Will rebuild docker image since binaries had not been there."
         mkdir -p artifacts/binaries-$ARCH
         rsync "$BROKER" "$PROXY" artifacts/binaries-$ARCH/
@@ -87,7 +76,7 @@ function build() {
         BUILD_DOCKER=1
     elif [ -x ./target ]; then
         echo "Checking for changed Rust source code ..."
-        BUILD="$(cargo build --message-format=json $BUILDARGS)"
+        BUILD="$(cargo build $@ --message-format=json)"
         if echo $BUILD | jq 'select(.fresh==false)' | grep -q 'fresh'; then
             echo "Will rebuild docker image due to changes in rust binaries."
             rsync "$BROKER" "$PROXY" artifacts/binaries-$ARCH/
@@ -105,11 +94,7 @@ function build() {
 function build_docker() {
     BACK2=$(pwd)
     cd $SD
-    if [ -z "$IMGNAME" ]; then
-        docker-compose build --build-arg TARGETARCH=$ARCH
-    else
-        docker-compose build --build-arg TARGETARCH=$ARCH --build-arg IMGNAME=$IMGNAME
-    fi
+    docker-compose build --build-arg TARGETARCH=$ARCH
     cd $BACK2
 }
 
@@ -122,7 +107,21 @@ function start {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    build
+    build $@
+    docker compose up --no-build --no-recreate -d
+    docker compose logs -f
+}
+
+function demo {
+    if [ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]; then
+        export TAG=main
+    else
+        echo "You have checked out a non-main branch of beam. We will launch the latest develop version of beam. Your working copy remains untouched. In case of any problems, please switch to a clean develop branch."
+        export TAG=develop
+    fi
+    clean
+    pki/pki setup
+    echo "$VAULT_TOKEN" > ./pki/pki.secret
     docker-compose up --no-build --no-recreate --abort-on-container-exit
 }
 
@@ -130,7 +129,7 @@ function start_bg {
     clean
     pki/pki devsetup
     echo "$VAULT_TOKEN" > ./pki/pki.secret
-    build
+    build $@
     docker-compose up --no-build --no-recreate -d
     for ADDR in $P1 $P2; do
         TRIES=1
@@ -251,7 +250,7 @@ function curl_post_file {
 }
 
 function task_with_ttl {
-    sed "s/\[TTL\]/$1/g"
+    sed "s/\[TTL\]/\"$1\"/g"
 }
 
 export -f curl_get curl_post curl_post_file curl_put start stop clean testing fail success task_with_ttl
@@ -269,13 +268,21 @@ BUILDARGS=$2
 
 case "$1" in
   build)
-    build
+    shift
+    build $@
     ;;
   start)
-    start
+    shift
+    start $@
     ;;
   start_bg)
-    start_bg
+    shift
+    start_bg $@
+    ;;
+  restart)
+    shift
+    build $@
+    docker compose up --no-deps --no-build proxy1 proxy2 broker
     ;;
   clean)
     clean
@@ -285,10 +292,14 @@ case "$1" in
     ;;
   noop)
     ;;
+  demo)
+    shift
+    demo $@
+    ;;
   defaults)
     defaults
     ;;
   *)
-    echo "Usage: $0 [--tag SOMETAG, e.g. develop, to use an existing image] build|start|start_bg|stop|clean|defaults|noop"
+    echo "Usage: $0 [--tag SOMETAG, e.g. develop, to use an existing image] build|start|start_bg|restart|stop|clean|defaults|demo|noop"
     ;;
 esac

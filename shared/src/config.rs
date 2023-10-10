@@ -2,10 +2,15 @@ use once_cell::sync::OnceCell;
 use static_init::dynamic;
 use tracing::debug;
 
-use crate::{config_proxy, config_broker, config_shared::{self, ConfigCrypto}, errors::SamplyBeamError, crypto};
+use crate::{
+    config_broker, config_proxy,
+    config_shared::{self, ConfigCrypto},
+    crypto,
+    errors::SamplyBeamError,
+};
 
-pub(crate) trait Config: Sized{
-    fn load() -> Result<Self,SamplyBeamError>;
+pub(crate) trait Config: Sized {
+    fn load() -> Result<Self, SamplyBeamError>;
 }
 
 fn load<T: Config>() -> T where {
@@ -38,7 +43,7 @@ pub(crate) static CONFIG_SHARED_CRYPTO: OnceCell<ConfigCrypto> = OnceCell::new()
 
 pub fn prepare_env() {
     for var in ["http_proxy", "https_proxy", "all_proxy", "no_proxy"] {
-        for (k,v) in std::env::vars().filter(|(k,_)| k.to_lowercase() == var) {
+        for (k, v) in std::env::vars().filter(|(k, _)| k.to_lowercase() == var) {
             std::env::set_var(k.to_uppercase(), v);
         }
     }

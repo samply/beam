@@ -1,19 +1,35 @@
-use crate::{SamplyBeamError, crypto::{self, load_certificates_from_dir, CryptoPublicPortion, GetCerts, get_all_certs_and_clients_by_cname_as_pemstr}, beam_id::{BrokerId, BeamId, ProxyId}, config::CONFIG_SHARED_CRYPTO};
-use std::{path::PathBuf, rc::Rc, sync::Arc, fs::read_to_string};
+use beam_lib::ProxyId;
+use crate::{
+    config::CONFIG_SHARED_CRYPTO,
+    crypto::{
+        self, get_all_certs_and_clients_by_cname_as_pemstr, load_certificates_from_dir,
+        CryptoPublicPortion, GetCerts,
+    },
+    SamplyBeamError,
+};
 use axum::async_trait;
-use hyper::Uri;
 use clap::Parser;
+use hyper::Uri;
 use hyper_tls::native_tls::Certificate;
 use jwt_simple::prelude::RS256KeyPair;
-use openssl::{x509::{X509, self}, asn1::Asn1IntegerRef};
-use rsa::{RsaPrivateKey, pkcs8::DecodePrivateKey, pkcs1::DecodeRsaPrivateKey};
+use openssl::{
+    asn1::Asn1IntegerRef,
+    x509::{self, X509},
+};
+use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
 use static_init::dynamic;
-use tracing::{info, debug};
+use std::{fs::read_to_string, path::PathBuf, rc::Rc, sync::Arc};
+use tracing::{debug, info};
 
 pub(crate) const CLAP_FOOTER: &str = "For proxy support, environment variables HTTP_PROXY, HTTPS_PROXY, ALL_PROXY and NO_PROXY (and their lower-case variants) are supported. Usually, you want to set HTTP_PROXY *and* HTTPS_PROXY or set ALL_PROXY if both values are the same.\n\nFor updates and detailed usage instructions, visit https://github.com/samply/beam";
 
-#[derive(Parser,Debug)]
-#[clap(name("🌈 Samply.Beam (shared library)"), version, arg_required_else_help(true), after_help(crate::config_shared::CLAP_FOOTER))]
+#[derive(Parser, Debug)]
+#[clap(
+    name("🌈 Samply.Beam (shared library)"),
+    version,
+    arg_required_else_help(true),
+    after_help(crate::config_shared::CLAP_FOOTER)
+)]
 struct CliArgs {
     /// Outgoing HTTP proxy: Directory with CA certificates to trust for TLS connections (e.g. /etc/samply/cacerts/)
     #[clap(long, env, value_parser)]
@@ -41,29 +57,29 @@ struct CliArgs {
     examples: Option<String>,
 
     /// (included for technical reasons)
-    #[clap(long,hide(true))]
-    test_threads: Option<String>
+    #[clap(long, hide(true))]
+    test_threads: Option<String>,
 }
 
 #[allow(dead_code)]
 pub struct Config {
     pub(crate) tls_ca_certificates_dir: Option<PathBuf>,
-    pub(crate) broker_domain: String,
+    pub broker_domain: String,
     pub root_cert: X509,
-    pub tls_ca_certificates: Vec<X509>
+    pub tls_ca_certificates: Vec<X509>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ConfigCrypto {
     pub privkey_rs256: RS256KeyPair,
     pub privkey_rsa: RsaPrivateKey,
-    pub public: Option<CryptoPublicPortion>
+    pub public: Option<CryptoPublicPortion>,
 }
 
 impl crate::config::Config for Config {
-    fn load() -> Result<Self,SamplyBeamError> {
+    fn load() -> Result<Self, SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        BrokerId::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
+        beam_lib::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
 
         let root_cert = crypto::load_certificates_from_file(cli_args.rootcert_file)?;
         let broker_domain = cli_args.broker_url.host();
@@ -72,9 +88,21 @@ impl crate::config::Config for Config {
         }
         let broker_domain = broker_domain.unwrap().to_string();
         let tls_ca_certificates_dir = cli_args.tls_ca_certificates_dir;
-        let tls_ca_certificates = crate::crypto::load_certificates_from_dir(tls_ca_certificates_dir.clone())
-            .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory: {}", e)))?;
-        Ok(Config { broker_domain, tls_ca_certificates_dir, root_cert, tls_ca_certificates })
+        let tls_ca_certificates = crate::crypto::load_certificates_from_dir(
+            tls_ca_certificates_dir.clone(),
+        )
+        .map_err(|e| {
+            SamplyBeamError::ConfigurationFailed(format!(
+                "Unable to read from TLS CA directory: {}",
+                e
+            ))
+        })?;
+        Ok(Config {
+            broker_domain,
+            tls_ca_certificates_dir,
+            root_cert,
+            tls_ca_certificates,
+        })
     }
 }
 
@@ -89,11 +117,19 @@ fn get_enrollment_msg(proxy_id: &Option<String>) -> String {
     )
 }
 
-pub async fn init_public_crypto_for_proxy(private_config: ConfigCrypto) -> Result<(String, String), SamplyBeamError>{
+pub async fn init_public_crypto_for_proxy(
+    private_config: ConfigCrypto,
+) -> Result<(String, String), SamplyBeamError> {
     let cli_args = CliArgs::parse();
     let crypto = load_public_crypto_for_proxy(&cli_args, private_config).await?;
 
-    let cert_info = crypto::ProxyCertInfo::try_from(&crypto.public.as_ref().expect("Should be set by load_public_crypto_for_proxy").cert)?;
+    let cert_info = crypto::ProxyCertInfo::try_from(
+        &crypto
+            .public
+            .as_ref()
+            .expect("Should be set by load_public_crypto_for_proxy")
+            .cert,
+    )?;
     if CONFIG_SHARED_CRYPTO.set(crypto).is_err() {
         panic!("Tried to initialize crypto twice (init_public_crypto_for_proxy())");
     }
@@ -103,13 +139,30 @@ pub async fn init_public_crypto_for_proxy(private_config: ConfigCrypto) -> Resul
 pub fn load_private_crypto_for_proxy() -> Result<ConfigCrypto, SamplyBeamError> {
     let cli_args = CliArgs::parse();
     let privkey_pem = read_to_string(&cli_args.privkey_file)
-        .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to load private key from file {}: {}\n{}", cli_args.privkey_file.to_string_lossy(), e, get_enrollment_msg(&cli_args.proxy_id))))?
-        .trim().to_string();
+        .map_err(|e| {
+            SamplyBeamError::ConfigurationFailed(format!(
+                "Unable to load private key from file {}: {}\n{}",
+                cli_args.privkey_file.to_string_lossy(),
+                e,
+                get_enrollment_msg(&cli_args.proxy_id)
+            ))
+        })?
+        .trim()
+        .to_string();
     let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
         .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
-        .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
-    let privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem)
-        .map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}", e)))?;
+        .map_err(|e| {
+            SamplyBeamError::ConfigurationFailed(format!(
+                "Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}",
+                e
+            ))
+        })?;
+    let privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem).map_err(|e| {
+        SamplyBeamError::ConfigurationFailed(format!(
+            "Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}",
+            e
+        ))
+    })?;
     Ok(ConfigCrypto {
         privkey_rs256,
         privkey_rsa,
@@ -117,47 +170,62 @@ pub fn load_private_crypto_for_proxy() -> Result<ConfigCrypto, SamplyBeamError> 
     })
 }
 
-async fn load_public_crypto_for_proxy(cli_args: &CliArgs, mut config: ConfigCrypto) -> Result<ConfigCrypto, SamplyBeamError> {
+async fn load_public_crypto_for_proxy(
+    cli_args: &CliArgs,
+    mut config: ConfigCrypto,
+) -> Result<ConfigCrypto, SamplyBeamError> {
     let proxy_id = cli_args.proxy_id.as_ref()
         .expect("load_crypto() has been called without setting a Proxy ID (maybe in broker?). This should not happen.");
     let proxy_id = ProxyId::new(proxy_id)?;
-    let publics: Vec<CryptoPublicPortion>= get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id).await
+    let publics: Vec<CryptoPublicPortion> = get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
+        .await
         .into_iter()
-        .filter_map(|r| 
+        .filter_map(|r| {
             r.map_err(|e| debug!("Unable to parse Certificate: {e}"))
-            .ok())
+                .ok()
+        })
         .collect();
-    let public = crypto::get_best_own_certificate(publics, &config.privkey_rsa).ok_or(SamplyBeamError::SignEncryptError("Unable to choose valid, newest certificate for this proxy".into()))?;
+    let public = crypto::get_best_own_certificate(publics, &config.privkey_rsa).ok_or(
+        SamplyBeamError::SignEncryptError(
+            "Unable to choose valid, newest certificate for this proxy".into(),
+        ),
+    )?;
     let serial = asn_str_to_vault_str(public.cert.serial_number())?;
     config.privkey_rs256 = config.privkey_rs256.with_key_id(&serial);
     config.public = Some(public);
     Ok(config)
 }
 
-fn asn_str_to_vault_str(asn: &Asn1IntegerRef) -> Result<String,SamplyBeamError> {
+fn asn_str_to_vault_str(asn: &Asn1IntegerRef) -> Result<String, SamplyBeamError> {
     let mut a = asn
         .to_bn()
-        .map_err(|e| SamplyBeamError::SignEncryptError(format!("Unable to parse your certificate: {}", e)))?
+        .map_err(|e| {
+            SamplyBeamError::SignEncryptError(format!("Unable to parse your certificate: {}", e))
+        })?
         .to_hex_str()
-        .map_err(|e| SamplyBeamError::SignEncryptError(format!("Unable to parse your certificate: {}", e)))?
+        .map_err(|e| {
+            SamplyBeamError::SignEncryptError(format!("Unable to parse your certificate: {}", e))
+        })?
         .to_string()
         .to_ascii_lowercase();
 
-    let mut i=2;
-    while i<a.len() {
+    let mut i = 2;
+    while i < a.len() {
         a.insert(i, ':');
-        i+=3;
+        i += 3;
     }
-    
+
     Ok(a)
 }
 
 #[cfg(test)]
 mod test {
-    use openssl::{asn1::{Asn1Integer, Asn1StringRef, Asn1String}, bn::BigNum};
+    use openssl::{
+        asn1::{Asn1Integer, Asn1String, Asn1StringRef},
+        bn::BigNum,
+    };
 
     use super::asn_str_to_vault_str;
-
 
     #[test]
     fn hex_str() {

@@ -1,11 +1,48 @@
-# Samply.Beam 0.6.0 -- 2023-03-xx
+# Samply.Beam 0.7.0 – 2023-10-04
 
-This release improves efficiency in network communication with a base64 encoding of ciphertexts and encryption keys. Because of this internal API change, both the Beam.Proxies and the Beam.Broker need to run a 0.6.x version. However, the external API has not changed and does not require any action on the user's side.
+This major release features almost 300 commits introducing multiple improvements, new features, and bug fixes. In particular, we are thrilled to introduce the possibility to use Samply.Beam for secure and easy *direct socket connections*. This opens Samply.Beam for many additional use cases, where a message-passing approach is not suitable, e.g. applications with high bandwidth demands.
+
+## Breaking changes
+* *Streamlined Configuration:* To reduce configuration redundancy, the environment variable schema of the Beam.Proxies for AppIDs and related App-API Keys has changed. Both parameters are now consolidated in the form: `APP_<AppId>_KEY=<API-Key>`.
+* *Task Creation Bugfix:* A previous bug, where messages where the recipient list includes recipients with invalid/expired certificates was not handled properly, is now fixed. We decided to let the task creation in those cases fail to notify the client application of the issue by sending a status code `424 Failed Dependency`, instead of dropping the offending recipient quietly. 
+* *Time Units for Parameters:* Both, a Task's `ttl` field and the `wait_time` long polling parameter now expects not only an integer, but a specified time unit as well, e.g., `24h`, `5m`, `25ms`, etc.
+
+## Major changes
+* *Direct Socket Connection:* Samply.Beam can now securely transport direct socket connections. For many applications the message/task-based communication model is not a great fit, e.g. if many, many very small packages must be transmitted or if network bandwidth utilization is paramount. For those cases, Samply.Beam can now establish socket connections. As this feature might not be compatible with every data protection concept, it is only enabled if the corresponding `sockets` feature flag is set during compilation. Similarly, in addition to the usual `main` and `develop` docker image tags, the tags `main-sockets` and `develop-sockets` are published as well.
+* *Improved Certificate Caching and Management:* The certificate caching and management in the Beam.Proxy components have been vastly improved. This greatly reduces the communication overhead between proxy and broker. Note: If the proxy's own certificate changes, the proxy exits to restart with the new certificate.
+* *Health monitoring:* In parallel to the task/result transmitting connection between proxies and broker, a *permanent control connection* is established. Currently, this connection is only used to determine the online status of the proxies and monitor for unexpected connection interuptions, however, in the future additional signaling can utilize this channel.
+* *Introducing `beam-lib` Crate:* The project now contains a separate crate, `beam-lib`, exposing many data structures such as BeamIds and Task/Result structs. This crate can be used by application developers to easily interface with a beam proxy in the Rust programming language.
+* *Enhanced Broker Health Monitoring:* The Broker `health` Endpoint is much more verbose and can -- thanks to the control connection -- return information regarding the proxy connection status. This makes monitoring in a highly federated system much simpler.
+* *Certificate Management:* Support for revocation of Beam certificates. Enhanced cert management companion tools.
+
+## Minor changes
+* *Revamped Internal Event Handling:* The internal message queue of the broker has been completely refactored. The broker now employs a much more elegant event manager to handle tasks, expirations, and other events. Not only does this improve the efficiency, the new system is better maintainable and easily extensible in the future.
+* *Improved Wire Format:* The serialization of the Tasks and Results have been improved. The tasks should now require around a third less communication.
+* *Refined Logging and Error Handling:* Many improvements in logging, error handling, and the expressiveness of the return values have been implemented.
+* *Enhanced Beam.Broker Efficiency:* By using more efficient concurrent data structures, the efficiency of the Beam.Broker operation has been improved.
+* *Streamlined CI/CD Pipeline:* The CI/CD Pipeline has been tweaked to allow faster compile and testing cycles.
+* *Verbose User-Agent for Development Builds:* For non-`main` builds of Samply.Beam, the User-Agent identifies the git commit hash of the component for debugging purposes.
+* *Expanded Testing:* Additional tests have been added and refactoring efforts to include all integration tests fully into the Rust testing framework have been started.
+* *Dependency Maintenance:* All used dependencies of Samply.Beam have been pruned and updated.
+* *Made Debug MITM Proxy optional:* The MITM proxy for debugging, introduced in version 0.6.0 has been commented out in dev/docker-compose.yml, as it interferes with SSE, and hence, beamdev demo.
+
+## Bugfixes
+* In addition to the "recipient with invalid certificate" bug described under [Breaking changes](#breaking-changes), many small bugs dealing with certificate retrieval and concurrency have been fixed in this release.
+* Under some circumstances, the Beam.Broker would deadlock when using the SSE interface. This is now fixed.
+
+# Samply.Beam 0.6.1 -- 2023-04-11
+
+This minor easter update is just a maintenance release. We updated our time-parsing dependency [fundu](https://crates.io/crates/fundu) to the next major version and fixed a bug in our CI/CD pipeline. With this fix, the project description is now correctly sent to Docker Hub. Internally, we improved the formatting of the source code.
+
+# Samply.Beam 0.6.0 -- 2023-03-30
+
+Samply.Beam version 0.6.0 represents another major milestone in the Beam development roadmap. We improved our network communication sizes by more than a factor of two, added (experimental) Server-Sent-Events for more efficient communication and heavily refactored the codebase to provide better maintainability and robustness. For all times, i.e. `wait_time` calls and BeamTask's `ttl` (time-to-live) field, the unit of time can be specified. This comes at the cost of an external API change: please adapt your applications to send the `ttl` as a string. Of course, this release, again, contains a lot of quality-of-life improvements regarding logging, building, development setups, etc. The following changelog gives more details.
 
 ## Breaking changes
 
 * Improvement of internal message efficiency:
 In previous releases, the encrypted payload and the encapsulated encryption keys, both fields byte arrays, were encoded as JSON arrays of the ASCII representation of the corresponding decimal numbers. This, of course, potentially quadruples the payload size. We chose a base64-string encoding for those fields to strike a balance against network efficiency and encoding performance. Other encoding types, such as base85, turned out to be (depending on the payload) around 1300% slower.
+* All times given to Beam, both the time-to-live (ttl) field in the Beam Task and the `wait_time` long-polling parameter can be used with time units by adding `h` for hours, `m`for minutes, `ms` for milliseconds and so on. If no unit is given, seconds (`s`) is assumed. As this changes the `ttl` field from an integer to a string (with mandatory quotation marks), this is a braking change.
 * The log level for the hyper component (HTTP handling) is now set to `warn`, except if explicitly specified otherwise, e.g., by setting `RUST_LOG="debug,hyper=debug"`.
 
 ## Major changes
@@ -17,14 +54,17 @@ In previous releases, the encrypted payload and the encapsulated encryption keys
 
 ## Minor improvements
 
-* Bugfix: We fixed a bug, where the logging engine might be initialized and and lost some startup messages.
 * We improved the dev build script to avoid out-of-sync binary and docker image generation.
 * The logging was improved throughout the board. Some Information were reduced in severity to `trace` level.
-* Beam development is now supported on both libssl1.1 and libssl3 Linuxes (e.g. Ubuntu 20.04 vs. Ubuntu 22.04).
+* Beam development is now supported on both libssl1.1 and libssl3 Linuxes (e.g. Ubuntu 20.04 vs. Ubuntu 22.04). With the impending EOL of libssl 1.1, we hope for quick transition of the main linux distribution providers to fully remove libssl1.1 support in a future release.
 * Beam development will now automatically determine when to rebuild the Docker images.
 * Beam now gracefully (and quickly) exits in Docker environments where not all Unix signals are forwarded into containers.
 * `beamdev start` now starts a MITM proxy for debugging (access at http://localhost:9090)
-* (( TODO Jan's refactorings ))
+* Beams message types were heavily refactored for improved maintainability and cleaner, more ideomtaic code. 
+
+## Bugfixes
+* A bug, where some messages' signatures from the Beam.Broker to the Beam.Proxy were not properly validated, is fixed.
+* We fixed a bug, where the logging engine might be initialized and and lost some startup messages.
 
 # Samply.Beam 0.5.0 -- 2023-02-03
 
@@ -33,7 +73,7 @@ This change is incompatible with older versions of Samply.Beam, so please update
 
 # Samply.Beam 0.4.2 -- 2023-02-01
 
-In this first minor relase of the year, the following minor improvements were implemented:
+In this first minor release of the year, the following minor improvements were implemented:
 
 * The default log level is now "info", instead of "error"
 * The error handling, especially regarding proxy certificate validation, has been improved

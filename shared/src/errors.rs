@@ -3,6 +3,7 @@ use std::{net::AddrParseError, str::Utf8Error, string::FromUtf8Error};
 use http::StatusCode;
 use openssl::error::ErrorStack;
 use tokio::time::error::Elapsed;
+use beam_lib::ProxyId;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SamplyBeamError {
@@ -43,13 +44,15 @@ pub enum SamplyBeamError {
     #[error("Problem with HTTP proxy: {0}")]
     HttpProxyProblem(std::io::Error),
     #[error("Invalid Beam ID: {0}")]
-    InvalidBeamId(String),
+    InvalidBeamId(#[from] beam_lib::BeamIdError),
     #[error("Unable to parse HTTP response: {0}")]
     HttpParseError(FromUtf8Error),
     #[error("X509 certificate invalid: {0}")]
     CertificateError(#[from] CertificateInvalidReason),
     #[error("Timeout executing HTTP request: {0}")]
     HttpTimeoutError(Elapsed),
+    #[error("Invalid receivers: {0:?}")]
+    InvalidReceivers(Vec<ProxyId>)
 }
 
 impl From<AddrParseError> for SamplyBeamError {
@@ -92,9 +95,10 @@ pub enum CertificateInvalidReason {
     InvalidPublicKey,
     #[error("Internal error: {0}")]
     InternalError(String),
-    #[error("Not disclosed: Broker consideres this certificate invalid")]
+    #[error("Not disclosed: Broker considers this certificate invalid")]
     NotDisclosedByBroker,
+    #[error("Certificate has been revoked")]
+    Revoked,
     #[error("Other problem: {0}")]
     Other(String),
-
 }

@@ -3,8 +3,10 @@ use std::{fmt::Write, net::SocketAddr};
 use hyper::{client::HttpConnector, header, Client};
 use hyper_proxy::ProxyConnector;
 use hyper_tls::HttpsConnector;
-use shared::{config, errors::SamplyBeamError, config_shared, config_proxy, http_client::SamplyHttpClient};
-use tracing::{info, debug, warn, error};
+use shared::{
+    config, config_proxy, config_shared, errors::SamplyBeamError, http_client::SamplyHttpClient,
+};
+use tracing::{debug, error, info, warn};
 
 use crate::{banner, serve_health, serve_tasks};
 
@@ -18,17 +20,26 @@ pub(crate) async fn serve(
 
     let app = router_tasks.merge(router_health);
 
+    #[cfg(feature = "sockets")]
+    let app = app.merge(crate::serve_sockets::router(client));
     #[cfg(feature = "monitor")]
-    let app = {
-        app.merge(crate::monitorer::router())
-    };
-
-    let app = app.layer(axum::middleware::from_fn(shared::middleware::log))
+    let app = app.merge(crate::monitorer::router());
+    // Middleware needs to be set last
+    let app = app
+        .layer(axum::middleware::from_fn(shared::middleware::log))
         .layer(axum::middleware::map_response(banner::set_server_header));
 
     let mut apps_joined = String::new();
-    config.api_keys.keys().for_each(|k| write!(apps_joined, "{} ", k.to_string().split('.').next().unwrap()).unwrap());
-    info!("Startup complete. This is Proxy {} listening on {}. {} apps are known: {}", config.proxy_id, config.bind_addr, config.api_keys.len(), apps_joined);
+    config.api_keys.keys().for_each(|k| {
+        write!(apps_joined, "{} ", k.to_string().split('.').next().unwrap()).unwrap()
+    });
+    info!(
+        "Startup complete. This is Proxy {} listening on {}. {} apps are known: {}",
+        config.proxy_id,
+        config.bind_addr,
+        config.api_keys.len(),
+        apps_joined
+    );
 
     axum::Server::bind(&config.bind_addr)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
