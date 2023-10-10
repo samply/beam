@@ -48,7 +48,7 @@ async fn test_task_claiming() -> Result<()> {
     Ok(())
 }
 
-pub async fn post_task<T: Serialize>(body: T) -> Result<MsgId> {
+pub async fn post_task<T: Serialize + 'static>(body: T) -> Result<MsgId> {
     let id = MsgId::new();
     CLIENT1.post_task(&TaskRequest {
         id,
@@ -62,7 +62,7 @@ pub async fn post_task<T: Serialize>(body: T) -> Result<MsgId> {
     Ok(id)
 }
 
-pub async fn poll_task<T: DeserializeOwned>(expected_id: MsgId) -> Result<TaskRequest<T>> {
+pub async fn poll_task<T: DeserializeOwned + 'static>(expected_id: MsgId) -> Result<TaskRequest<T>> {
     CLIENT2.poll_pending_tasks(&BlockingOptions::from_time(Duration::from_secs(5)))
         .await?
         .into_iter()
@@ -70,14 +70,14 @@ pub async fn poll_task<T: DeserializeOwned>(expected_id: MsgId) -> Result<TaskRe
         .ok_or(anyhow::anyhow!("Did not find expected task"))
 }
 
-pub async fn poll_result<T: DeserializeOwned>(task_id: MsgId, block: &BlockingOptions) -> Result<TaskResult<T>> {
+pub async fn poll_result<T: DeserializeOwned + 'static>(task_id: MsgId, block: &BlockingOptions) -> Result<TaskResult<T>> {
     CLIENT1.poll_results(&task_id, block)
         .await?
         .pop()
         .ok_or(anyhow::anyhow!("Got no task"))
 }
 
-pub async fn put_result<T: Serialize>(task_id: MsgId, body: T, status: Option<beam_lib::WorkStatus>) -> Result<()> {
+pub async fn put_result<T: Serialize + 'static>(task_id: MsgId, body: T, status: Option<beam_lib::WorkStatus>) -> Result<()> {
     CLIENT2.put_result(&TaskResult {
         from: APP2.clone(),
         to: vec![APP1.clone()],
