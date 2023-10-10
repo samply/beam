@@ -1,10 +1,10 @@
 use std::time::Duration;
 
-use reqwest::{Client, header::{self, HeaderValue}, Url, StatusCode};
+use reqwest::{Client, header::{self, HeaderValue}, Url, StatusCode, Response};
 use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
-use crate::{AddressingId, TaskRequest, MsgId, TaskResult};
+use crate::{AddressingId, TaskRequest, MsgId, TaskResult, ProxyId};
 #[cfg(feature = "sockets")]
 use crate::SocketTask;
 
@@ -20,7 +20,9 @@ pub enum BeamError {
     #[error("Communication with beam proxy failed: {0}")]
     ReqwestError(#[from] reqwest::Error),
     #[error("Unexpected status code {0}")]
-    UnexpectedStatus(StatusCode)
+    UnexpectedStatus(StatusCode),
+    #[error("The following receivers had invalid certificates which is why the request has been canceld: {0:?}")]
+    InvalidReceivers(Vec<ProxyId>)
 }
 
 pub type Result<T> = std::result::Result<T, BeamError>;
@@ -97,6 +99,7 @@ impl BeamClient {
                 Err(e.into())
             },
         };
+        let response = handle_invalid_receivers(response).await?;
         match response.status() {
             StatusCode::GATEWAY_TIMEOUT => Ok(Vec::with_capacity(0)),
             StatusCode::OK | StatusCode::PARTIAL_CONTENT => Ok(response.json().await?),
@@ -122,6 +125,7 @@ impl BeamClient {
                 Err(e.into())
             },
         };
+        let response = handle_invalid_receivers(response).await?;
         match response.status() {
             // TODO: Add more status codes here
             StatusCode::GATEWAY_TIMEOUT => Ok(Vec::with_capacity(0)),
@@ -140,6 +144,7 @@ impl BeamClient {
             .json(task)
             .send()
             .await?;
+        let response = handle_invalid_receivers(response).await?;
         match response.status() {
             // TODO: Add more status codes here
             StatusCode::CREATED => Ok(()),
@@ -153,12 +158,13 @@ impl BeamClient {
         let url = self.beam_proxy_url
             .join(&format!("/v1/tasks/{for_task_id}/results/{}", result.from))
             .expect("The proxy url is valid");
-        let response_result = self.client
+        let response = self.client
             .put(url)
             .json(result)
             .send()
-            .await;
-        match response_result?.status() {
+            .await?;
+        let response = handle_invalid_receivers(response).await?;
+        match response.status() {
             StatusCode::NO_CONTENT => Ok(false),
             StatusCode::CREATED => Ok(true),
             status => Err(BeamError::UnexpectedStatus(status))
@@ -186,6 +192,7 @@ impl BeamClient {
             .header(header::UPGRADE, "tcp")
             .send()
             .await?;
+        let response = handle_invalid_receivers(response).await?;
         if response.status() != StatusCode::SWITCHING_PROTOCOLS {
             Err(BeamError::UnexpectedStatus(response.status()))
         } else {
@@ -214,6 +221,7 @@ impl BeamClient {
                 Err(e.into())
             },
         };
+        let response = handle_invalid_receivers(response).await?;
         match response.status() {
             // TODO: Add more status codes here
             StatusCode::GATEWAY_TIMEOUT => Ok(Vec::with_capacity(0)),
@@ -233,6 +241,7 @@ impl BeamClient {
             .header(header::UPGRADE, "tcp")
             .send()
             .await?;
+        let response = handle_invalid_receivers(response).await?;
         if response.status() != StatusCode::SWITCHING_PROTOCOLS {
             Err(BeamError::UnexpectedStatus(response.status()))
         } else {
@@ -241,5 +250,13 @@ impl BeamClient {
                 .await
                 .map_err(Into::into)
         }
+    }
+}
+
+async fn handle_invalid_receivers(res: Response) -> Result<Response> {
+    if res.status() == StatusCode::FAILED_DEPENDENCY {
+        Err(BeamError::InvalidReceivers(res.json().await?))
+    } else {
+        Ok(res)
     }
 }
