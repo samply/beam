@@ -69,16 +69,6 @@ jobs:
             echo "profilestr=--profile $PROFILE" >> $GITHUB_ENV
           fi
       - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
-        with:
-          node-version: 16
-          cache: 'npm'
-          cache-dependency-path: '**/package-lock.json'
-      - name: "Build monitoring frontend"
-        working-directory: ./proxy/monitor
-        run: |
-          npm ci
-          npm run build
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
