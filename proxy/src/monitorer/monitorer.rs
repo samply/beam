@@ -15,62 +15,24 @@ use axum::{
     Router,
 };
 use hyper::{body::Buf, header, Body, HeaderMap, Method, Request, StatusCode, Uri};
-use rust_embed::{utils, RustEmbed};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 use shared::{once_cell::sync::Lazy, PlainMessage, config::CONFIG_PROXY};
 use shared::{MsgId, MsgTaskRequest};
 use tokio::sync::broadcast::{self, Receiver, Sender};
 use tracing::{error, info};
-use axum_extra::extract::cookie::CookieJar;
+use axum_extra::extract::CookieJar;
 
 // pub async fn monitor(s: ConnectInfo<SocketAddr>, req: Request<Body>, next: Next<Body>) -> Response {
 //     // Maybe use this to log everthing
 //     todo!()
 // }
 
-#[derive(RustEmbed)]
-#[folder = "dist"]
-struct Assets;
-
-const INDEX_HTML: &str = "index.html";
-
 pub fn router() -> Router {
     Router::new()
         .route("/monitor/events", get(stream_recorded_tasks))
-        .fallback(static_handler)
 }
 
-async fn static_handler(uri: Uri) -> impl IntoResponse {
-    let path = uri.path().trim_start_matches('/');
-
-    if path.is_empty() || path == INDEX_HTML {
-        return index_html();
-    }
-
-    if let Some(content) = Assets::get(path) {
-        Response::builder()
-            .header(header::CONTENT_TYPE, content.metadata.mimetype())
-            .body(boxed(Full::from(content.data)))
-            .unwrap()
-    } else {
-        if path.contains('.') {
-            return StatusCode::NOT_FOUND.into_response();
-        };
-        index_html()
-    }
-}
-
-fn index_html() -> Response {
-    if let Some(content) = Assets::get(INDEX_HTML) {
-        Response::builder()
-            .header(header::CONTENT_TYPE, "text/html")
-            .body(boxed(Full::from(content.data)))
-            .unwrap()
-    } else {
-        StatusCode::NOT_FOUND.into_response()
-    }
-}
 
 pub async fn stream_recorded_tasks(cookies: CookieJar) -> Response {
     if !cookies
@@ -138,24 +100,25 @@ impl Monitorer {
     }
 }
 
+// TODO: This should be possible with zero copy
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MonitoringUpdate {
     /// Request from a proxy internal app to the broker
     Request {
-        #[serde(with = "hyper_serde")]
+        #[serde(with = "http_serde::uri")]
         uri: Uri,
-        #[serde(with = "hyper_serde")]
+        #[serde(with = "http_serde::method")]
         method: Method,
-        #[serde(with = "hyper_serde")]
+        #[serde(with = "http_serde::header_map")]
         headers: HeaderMap,
         json: PlainMessage,
     },
     /// Response from the broker to a proxy internal app
     Response {
-        #[serde(with = "hyper_serde")]
+        #[serde(with = "http_serde::status_code")]
         status: StatusCode,
-        #[serde(with = "hyper_serde")]
+        #[serde(with = "http_serde::header_map")]
         headers: HeaderMap,
         json: Value,
     },

@@ -43,12 +43,11 @@ async-sse = "5.1.0"
 async-stream = "0.3.4"
 
 # Monitor depedencies
-hyper_serde = { version = "0.13.0", optional = true}
-rust-embed = { version = "6.6", optional = true, features = ["axum-ex", "mime-guess", "debug-embed"] }
-axum-extra = { version = "0.7", optional = true }
+http-serde = { version = "1.1.3", optional = true }
+axum-extra = { version = "0.8.0", optional = true, features = ["cookie"] }
 
 [build-dependencies]
 build-data = "0"
 
 [features]
-monitor = ["axum-extra/cookie", "rust-embed", "hyper_serde"]
+monitor = ["dep:http-serde", "dep:http-serde"]
