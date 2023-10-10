@@ -29,7 +29,7 @@ pub struct Config {
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId, ApiKey>,
     pub tls_ca_certificates: Vec<X509>,
-    pub maintanance_key: String,
+    pub maintenance_key: String,
 }
 
 pub type ApiKey = String;
@@ -58,9 +58,9 @@ pub struct CliArgs {
     #[clap(long, env, value_parser)]
     pub proxy_id: String,
 
-    /// The maintanance key for accessing the proxies monitoring
+    /// The maintenance key for accessing the proxies monitoring
     #[clap(long, env, value_parser)]
-    pub maintanance_key: String,
+    pub maintenance_key: String,
 
     /// samply.pki: Path to own secret key
     #[clap(long, env, value_parser, default_value = "/run/secrets/privkey.pem")]
@@ -132,7 +132,7 @@ impl crate::config::Config for Config {
             proxy_id,
             api_keys,
             tls_ca_certificates,
-            maintanance_key: cli_args.maintanance_key
+            maintenance_key: cli_args.maintenance_key
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)

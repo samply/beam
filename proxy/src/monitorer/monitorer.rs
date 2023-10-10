@@ -24,7 +24,7 @@ use tracing::{error, info};
 use axum_extra::extract::CookieJar;
 
 // pub async fn monitor(s: ConnectInfo<SocketAddr>, req: Request<Body>, next: Next<Body>) -> Response {
-//     // Maybe use this to log everthing
+//     // Maybe use this to log everything
 //     todo!()
 // }
 
@@ -36,8 +36,8 @@ pub fn router() -> Router {
 
 pub async fn stream_recorded_tasks(cookies: CookieJar) -> Response {
     if !cookies
-        .get("maintanance_key")
-        .map(|cookie| cookie.value() == CONFIG_PROXY.maintanance_key)
+        .get("maintenance_key")
+        .map(|cookie| cookie.value() == CONFIG_PROXY.maintenance_key)
         .unwrap_or(false) 
     {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -52,7 +52,7 @@ pub async fn stream_recorded_tasks(cookies: CookieJar) -> Response {
             }
         }
         // I think this will never happen
-        error!("All senders have been droped or reciever is lagging. connection closed");
+        error!("All senders have been dropped or receiver is lagging. connection closed");
     };
     Sse::new(task_stream).into_response()
 }

@@ -32,7 +32,7 @@ export APP2_P2=${APP2_ID_SHORT}.$PROXY2_ID
 export APP_KEY=App1Secret
 export BROKER_MONITORING_KEY=SuperSecretKey
 export RUST_LOG=${RUST_LOG:-info}
-export MAINTANANCE_KEY=Maintanance
+export MAINTENANCE_KEY=Maintenance
 
 export VAULT_TOKEN=$(echo $RANDOM | md5sum | head -c 20; echo;)
 
