@@ -30,7 +30,7 @@ use axum_extra::extract::CookieJar;
 
 pub fn router() -> Router {
     Router::new()
-        .route("/monitor/events", get(stream_recorded_tasks))
+        .route("/v1/monitor/events", get(stream_recorded_tasks))
 }
 
 
