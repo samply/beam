@@ -312,12 +312,13 @@ If the task contains recipients (`to` field, see [Beam Task](#task)) with invali
 
 ```
 HTTP/1.1 424 Failed Dependency
-Content-Length: 17
-Server: Samply.Beam.Proxy/0.7.0-b1ca2ed-SNAPSHOT
+Content-Length: 34
 Date: Thu, 28 Sep 2023 07:16:24 GMT
 
-["proxy4.broker"]
+["proxy4.broker", "proxy6.broker"]
 ```
+
+In this case, remove or correct these BeamIDs from the `to` field of your task and re-send.
 
 ### Retrieve tasks
 
