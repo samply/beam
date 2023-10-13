@@ -318,7 +318,7 @@ Date: Thu, 28 Sep 2023 07:16:24 GMT
 ["proxy4.broker", "proxy6.broker"]
 ```
 
-In this case, remove these BeamIDs from the `to` field of your task and re-send.
+In this case, remove or correct these BeamIDs from the `to` field of your task and re-send.
 
 ### Retrieve tasks
 
