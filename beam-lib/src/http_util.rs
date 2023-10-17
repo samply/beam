@@ -247,7 +247,7 @@ impl BeamClient {
 }
 
 impl HandleInvalidReceiversExt for Response {
-    fn handle_invalid_receivers(self) -> Pin<Box<dyn Future<Output = Result<Response>>>> {
+    fn handle_invalid_receivers(self) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> {
         async fn handle_invalid_receivers(res: Response) -> Result<Response> {
             if res.status() == StatusCode::FAILED_DEPENDENCY {
                 Err(BeamError::InvalidReceivers(res.json().await?))
@@ -260,5 +260,5 @@ impl HandleInvalidReceiversExt for Response {
 }
 
 trait HandleInvalidReceiversExt: Sized {
-    fn handle_invalid_receivers(self) -> Pin<Box<dyn Future<Output = Result<Response>>>>;
+    fn handle_invalid_receivers(self) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>>;
 }
