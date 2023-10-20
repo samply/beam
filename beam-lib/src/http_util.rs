@@ -191,7 +191,7 @@ impl BeamClient {
         self.create_socket_with_metadata(destination, serde_json::Value::Null).await
     }
 
-    /// Same as `create_socket` but with metadata.
+    /// Same as `create_socket` but with associated (unencrypted) metadata.
     #[cfg(feature = "sockets")]
     pub async fn create_socket_with_metadata(&self, destination: &AddressingId, metadata: impl Serialize) -> Result<reqwest::Upgraded> {
         const METADATA_HEADER: HeaderName = HeaderName::from_static("metadata");
