@@ -48,6 +48,25 @@ async fn test_task_claiming() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn post_task_as_app2() -> Result<()> {
+    let id = MsgId::new();
+    CLIENT2.post_task(&TaskRequest {
+        id,
+        from: APP2.clone(),
+        to: vec![APP1.clone()],
+        body: serde_json::json!({
+            "foo": 12,
+            "bar": ["baz"]
+        }),
+        ttl: "10s".to_string(),
+        failure_strategy: beam_lib::FailureStrategy::Discard,
+        metadata: serde_json::Value::Null,
+    }).await?;
+    CLIENT1.poll_pending_tasks::<serde_json::Value>(&BlockingOptions::from_count(1)).await?;
+    Ok(())
+}
+
 pub async fn post_task<T: Serialize + 'static>(body: T) -> Result<MsgId> {
     let id = MsgId::new();
     CLIENT1.post_task(&TaskRequest {
