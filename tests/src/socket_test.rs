@@ -17,17 +17,20 @@ async fn test_connection<T: AsyncRead + AsyncWrite + Unpin>(mut a: T, mut b: T) 
 
 #[tokio::test]
 async fn test_full() -> Result<()> {
+    let metadata = serde_json::json!({
+        "foo": vec![1, 2, 3],
+    });
     let app1 = async {
-        CLIENT1.create_socket(&APP2).await.map_err(anyhow::Error::from)
+        CLIENT1.create_socket_with_metadata(&APP2, &metadata).await.map_err(anyhow::Error::from)
     };
     let app2 = async {
-        let id = CLIENT2
+        let task = CLIENT2
             .get_socket_tasks(&beam_lib::BlockingOptions::from_count(1))
             .await?
             .pop()
-            .ok_or(anyhow::anyhow!("Failed to get a socket task"))?
-            .id;
-        Ok(CLIENT2.connect_socket(&id).await?)
+            .ok_or(anyhow::anyhow!("Failed to get a socket task"))?;
+        assert_eq!(&task.metadata, &metadata);
+        Ok(CLIENT2.connect_socket(&task.id).await?)
     };
 
     let (app1, app2) = tokio::try_join!(app1, app2)?;

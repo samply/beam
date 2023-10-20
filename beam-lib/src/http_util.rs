@@ -1,6 +1,6 @@
 use std::{time::Duration, future::Future, pin::Pin};
 
-use reqwest::{Client, header::{self, HeaderValue}, Url, StatusCode, Response};
+use reqwest::{Client, header::{self, HeaderValue, HeaderName}, Url, StatusCode, Response};
 use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
@@ -22,7 +22,15 @@ pub enum BeamError {
     #[error("Unexpected status code {0}")]
     UnexpectedStatus(StatusCode),
     #[error("The following receivers had invalid certificates which is why the request has been canceld: {0:?}")]
-    InvalidReceivers(Vec<ProxyId>)
+    InvalidReceivers(Vec<ProxyId>),
+    #[error("Other handler specific error: {0}")]
+    Other(Box<dyn std::error::Error + Send + Sync>)
+}
+
+impl BeamError {
+    fn other<T: Into<Box<dyn std::error::Error + Send + Sync + 'static>>>(e: T) -> Self {
+        Self::Other(e.into())
+    }
 }
 
 pub type Result<T> = std::result::Result<T, BeamError>;
@@ -180,12 +188,23 @@ impl BeamClient {
     /// For this to work both the beam proxy and beam broker need to have the sockets feature enabled.
     #[cfg(feature = "sockets")]
     pub async fn create_socket(&self, destination: &AddressingId) -> Result<reqwest::Upgraded> {
+        self.create_socket_with_metadata(destination, serde_json::Value::Null).await
+    }
+
+    /// Same as `create_socket` but with metadata.
+    #[cfg(feature = "sockets")]
+    pub async fn create_socket_with_metadata(&self, destination: &AddressingId, metadata: impl Serialize) -> Result<reqwest::Upgraded> {
+        const METADATA_HEADER: HeaderName = HeaderName::from_static("metadata");
         let url = self.beam_proxy_url
             .join(&format!("/v1/sockets/{destination}"))
             .expect("The proxy url is valid");
         let response = self.client
             .post(url)
             .header(header::UPGRADE, "tcp")
+            .header(
+                METADATA_HEADER,
+                HeaderValue::try_from(serde_json::to_string(&metadata).map_err(BeamError::other)?).map_err(BeamError::other)?
+            )
             .send().await?
             .handle_invalid_receivers().await?;
         if response.status() != StatusCode::SWITCHING_PROTOCOLS {

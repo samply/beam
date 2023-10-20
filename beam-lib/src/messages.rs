@@ -54,6 +54,8 @@ pub struct SocketTask {
     pub to: Vec<AddressingId>,
     pub ttl: String,
     pub id: MsgId,
+    #[serde(default)]
+    pub metadata: Value,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
