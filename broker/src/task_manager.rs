@@ -170,6 +170,62 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         Ok(self.get_tasks_by(filter))
     }
 
+    pub fn stream_tasks(
+        self: Arc<Self>,
+        block: HowLongToBlock,
+        filter: impl Fn(&T) -> bool + 'static + Send + Sync
+    ) -> impl Stream<Item = Result<Event, Infallible>> + 'static + Send
+    where
+        T: Send + Sync + 'static + Serialize,
+    {
+        async_stream::stream! {
+            let (max_elements, wait_until) = decide_blocking_conditions(&block);
+            let tasks = self
+                .get_tasks_by(&filter)
+                .take(if max_elements == 0 { usize::MAX } else { max_elements })
+                .map(|t| to_event(t.deref(), SseEventType::NewTask))
+                .collect::<Vec<Event>>();
+            // Collect before yielding as yielding awaits which would hold the lock over an await point.
+            // From a performance side this should not matter as we need to convert to events anyway.
+            let mut num_of_tasks = tasks.len();
+            for task in tasks {
+                yield Ok(task);
+            }
+            let mut new_tasks = self.new_tasks.subscribe();
+            while num_of_tasks < max_elements && Instant::now() < wait_until {
+                tokio::select! {
+                    _ = tokio::time::sleep_until(wait_until) => {
+                        break;
+                    },
+                    result = new_tasks.recv() => {
+                        match result {
+                            Ok(task_id) => {
+                                let Ok(task) = self.get(&task_id) else {
+                                    warn!("Newly received task is already gone? Is someone creating 0s ttl tasks? ID was {task_id}");
+                                    continue;
+                                };
+                                if filter(&task.deref().msg) {
+                                    let event = to_event(task.deref(), SseEventType::NewResult);
+                                    drop(task);
+                                    num_of_tasks += 1;
+                                    yield Ok(event);
+                                }
+                            },
+                            Err(broadcast::error::RecvError::Lagged(n)) => {
+                                error!("new_tasks channel lagged by: {n} tasks. We need to make it bigger!");
+                                yield Ok(to_event("Internal server error", SseEventType::Error));
+                            },
+                            Err(broadcast::error::RecvError::Closed) => {
+                                error!("The task channel is never closed. Is the server shutting down?");
+                                break;
+                            }
+                        }
+                    },
+                }
+            }
+        }
+    }
+
     pub fn post_task(&self, task: MsgSigned<T>) -> Result<(), TaskManagerError> {
         let id = task.wait_id();
         if let Some(task) = self.tasks.get(&id) {
