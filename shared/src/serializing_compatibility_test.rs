@@ -109,12 +109,14 @@ fn test_socket_task() {
         secret: Plain { body: None },
         expire: SystemTime::now() + Duration::from_secs(10),
         id,
+        metadata: serde_json::Value::Null
     };
     let lib = beam_lib::SocketTask {
         from,
         to: vec![],
         ttl: "9".to_string(),
         id,
+        metadata: serde_json::Value::Null
     };
     let a_str = serde_json::to_string(&lib).unwrap();
     let b_str = serde_json::to_string(&internal).unwrap();

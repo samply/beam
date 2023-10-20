@@ -114,7 +114,7 @@ async fn create_socket_con(
     Path(to): Path<AppOrProxyId>,
     Extension(task_secret_map): Extension<MsgSecretMap>,
     state: State<TasksState>,
-    req: Request<Body>,
+    mut req: Request<Body>,
 ) -> Response {
     let task_id = MsgId::new();
     let secret = SocketEncKey::generate();
@@ -123,12 +123,18 @@ async fn create_socket_con(
     };
     const TTL: Duration = Duration::from_secs(60);
     task_secret_map.insert_for(TTL, task_id.clone(), secret);
+    let metadata = req
+        .headers_mut()
+        .remove("metadata")
+        .and_then(|v| serde_json::from_slice(v.as_bytes()).ok())
+        .unwrap_or_default();
     let socket_req = MsgSocketRequest {
         from: AppOrProxyId::App(sender.clone()),
         to: vec![to],
         expire: SystemTime::now() + TTL,
         id: task_id,
         secret: Plain::from(secret_encoded),
+        metadata
     };
 
     let Ok(body) = serde_json::to_vec(&socket_req) else {

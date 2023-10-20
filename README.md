@@ -279,6 +279,7 @@ While "regular" Beam Tasks transport application data, Socket Task initiate dire
     "to": ["app2.proxy2.broker"],
     "id": "<socket_uuid>",
     "ttl": "60s",
+    "metadata": "some custom json value"
 }
 ```
 
@@ -286,6 +287,7 @@ While "regular" Beam Tasks transport application data, Socket Task initiate dire
 - `to`: BeamIDs of the intended recipients. Due to the nature of socket connections, the array has to be of exact length 1.
 - `id`: A UUID v4 which identifies the socket connection and is used by the recipient to connect to this socket (see [here](#connecting-to-a-socket-request)).
 - `ttl`: The time-to-live of this socket task. After this time has elapsed the recipient can no longer connect to the socket. Already established connections are not affected.
+- `metadata`: Associated unencrypted data. Can be of arbitrary type same as in [Task](#task).
 ## API
 
 ### Create task
@@ -522,6 +524,8 @@ Initialize a socket connection with an Beam application, e.g. with AppId `app2.p
 Method: `POST`  
 URL: `/v1/sockets/<app_id>`  
 Header `Upgrade` is required, e.g. 'Upgrade: tls'
+Optionally takes a `metadata` header which is expected to be serialized json value.
+This corresponds to the `metadata` field on [Socket task](#socket-task).
 
 This request will automatically lead to a connection to the other app, after it answers this request.
 
@@ -539,9 +543,10 @@ Returns an array of JSON objects:
 [
     {
         "from": "app1.proxy1.broker",
-        "to": ["app2.proxy2.broker"]
+        "to": ["app2.proxy2.broker"],
         "id": "<socket_uuid>",
         "ttl": "60s",
+        "metadata": "Some json value"
     }
 ]
 ```
