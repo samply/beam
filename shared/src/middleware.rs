@@ -1,18 +1,18 @@
 use std::{
     cell::RefCell,
     net::{IpAddr, SocketAddr},
-    sync::Arc,
+    sync::Arc, convert::Infallible,
 };
 
 use axum::{
     body::HttpBody,
-    extract::ConnectInfo,
+    extract::{ConnectInfo, FromRequestParts},
     middleware::{self, Next},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Response}, async_trait
 };
 use http::{
     header::{self, HeaderName},
-    HeaderValue, Method, Request, StatusCode, Uri,
+    HeaderValue, Method, Request, StatusCode, Uri, request::Parts,
 };
 use hyper::Body;
 use tokio::sync::{oneshot, Mutex};
@@ -111,4 +111,24 @@ fn get_ip(req: &Request<Body>, info: &SocketAddr) -> IpAddr {
         .and_then(|v| v.split(',').next())
         .and_then(|v| v.parse().ok())
         .unwrap_or(info.ip())
+}
+
+pub struct IsSse(pub bool);
+
+#[async_trait]
+impl<S: Send + Sync> FromRequestParts<S> for IsSse {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Self::Rejection> {
+        let is_stream = parts.headers
+            .get(header::ACCEPT)
+            .and_then(|h| h.to_str().ok())
+            .is_some_and(|s| s
+                .split(',')
+                .map(str::trim)
+                .find(|&v| v == "text/event-stream")
+                .is_some()
+            );
+        Ok(IsSse(is_stream))
+    }
 }

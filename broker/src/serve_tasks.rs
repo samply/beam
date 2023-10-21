@@ -19,7 +19,7 @@ use beam_lib::WorkStatus;
 use shared::{
     config, errors::SamplyBeamError, sse_event::SseEventType,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg, MsgEmpty,
-    MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, EMPTY_VEC_APPORPROXYID, serde_helpers::DerefSerializer,
+    MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, EMPTY_VEC_APPORPROXYID, serde_helpers::DerefSerializer, middleware::IsSse,
 };
 use tokio::{
     sync::{
@@ -59,20 +59,10 @@ async fn get_results_for_task(
     State(state): State<TasksState>,
     block: HowLongToBlock,
     Path(task_id): Path<MsgId>,
-    headers: HeaderMap,
+    IsSse(is_sse): IsSse,
     msg: MsgSigned<MsgEmpty>,
 ) -> Response {
-    let found = &headers
-        .get(header::ACCEPT)
-        .unwrap_or(&HeaderValue::from_static(""))
-        .to_str()
-        .unwrap_or_default()
-        .split(',')
-        .map(|part| part.trim())
-        .find(|part| *part == "text/event-stream")
-        .is_some();
-
-    if *found {
+    if is_sse {
         get_results_for_task_stream(addr, state, block, task_id, msg)
             .await
             .into_response()

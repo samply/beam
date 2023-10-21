@@ -42,7 +42,7 @@ use shared::{
     sse_event::SseEventType,
     DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest,
     EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest,
-    MsgTaskResult, PlainMessage, is_actually_hyper_timeout,
+    MsgTaskResult, PlainMessage, is_actually_hyper_timeout, middleware::IsSse,
 };
 use tokio::io::BufReader;
 use tracing::{debug, error, info, trace, warn};
@@ -126,20 +126,10 @@ pub(crate) async fn handler_task(
     State(client): State<SamplyHttpClient>,
     State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
-    headers: HeaderMap,
+    IsSse(is_sse): IsSse,
     req: Request<Body>,
 ) -> Response {
-    let found = &headers
-        .get(header::ACCEPT)
-        .unwrap_or(&HeaderValue::from_static(""))
-        .to_str()
-        .unwrap_or_default()
-        .split(',')
-        .map(|part| part.trim())
-        .find(|part| *part == "text/event-stream")
-        .is_some();
-
-    if *found {
+    if is_sse {
         handler_tasks_stream(client, config, sender, req)
             .await
             .into_response()
