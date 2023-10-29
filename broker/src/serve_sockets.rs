@@ -1,10 +1,10 @@
 use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref, time::Duration};
 
-use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response}, headers::{ContentType, HeaderMapExt}};
+use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response, Sse}, headers::{ContentType, HeaderMapExt}};
 use bytes::BufMut;
 use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body, Request, Method, upgrade::{OnUpgrade, self}};
 use serde::{Serialize, Serializer, ser::SerializeSeq};
-use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}, expire_map::LazyExpireMap, serde_helpers::DerefSerializer};
+use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}, expire_map::LazyExpireMap, serde_helpers::DerefSerializer, middleware::IsSse};
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
 use tracing::{debug, log::error, warn};
 
@@ -50,19 +50,24 @@ pub(crate) fn router() -> Router {
 async fn get_socket_requests(
     mut block: HowLongToBlock,
     state: State<SocketState>,
+    IsSse(is_sse): IsSse,
     msg: MsgSigned<MsgEmpty>,
-) -> Result<DerefSerializer, StatusCode> {
+) -> Result<Response, StatusCode> {
     if block.wait_count.is_none() && block.wait_time.is_none() {
         block.wait_count = Some(1);
     }
-    let requester = msg.get_from();
-    let filter = |req: &MsgSocketRequest<Encrypted>| req.to.contains(requester);
+    let requester = msg.get_from().clone();
+    let filter = move |req: &MsgSocketRequest<Encrypted>| req.to.contains(&requester);
 
-    let socket_reqs = state.task_manager.wait_for_tasks(&block, filter).await?;
-    DerefSerializer::new(socket_reqs, block.wait_count).map_err(|e| {
-        warn!("Failed to serialize socket tasks: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
+    if is_sse {
+        Ok(Sse::new(state.task_manager.clone().stream_tasks(block, filter)).into_response())
+    } else {
+        let socket_reqs = state.task_manager.wait_for_tasks(&block, filter).await?;
+        DerefSerializer::new(socket_reqs, block.wait_count).map_err(|e| {
+            warn!("Failed to serialize socket tasks: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }).map(IntoResponse::into_response)
+    }
 }
 
 async fn post_socket_request(

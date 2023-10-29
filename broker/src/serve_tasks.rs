@@ -152,8 +152,9 @@ async fn get_tasks(
     block: HowLongToBlock,
     Query(taskfilter): Query<TaskFilter>,
     State(state): State<TasksState>,
+    IsSse(is_sse): IsSse,
     msg: MsgSigned<MsgEmpty>,
-) -> Result<DerefSerializer, (StatusCode, impl IntoResponse)> {
+) -> Result<Response, (StatusCode, impl IntoResponse)> {
     let from = taskfilter.from;
     let mut to = taskfilter.to;
     let unanswered_by = match taskfilter.filter {
@@ -188,19 +189,21 @@ async fn get_tasks(
     };
     let filter = MsgFilterForTask {
         normal: filter,
-        unanswered_by: unanswered_by.as_ref(),
-        workstatus_is_not: [WorkStatus::Succeeded, WorkStatus::PermFailed]
-            .iter()
-            .map(std::mem::discriminant)
-            .collect(),
+        unanswered_by,
+        workstatus_is_not: vec![WorkStatus::Succeeded, WorkStatus::PermFailed]
     };
-    let tasks = state.task_manager
-        .wait_for_tasks(&block, move |m| filter.matches(m))
-        .await?;
-    DerefSerializer::new(tasks, block.wait_count).map_err(|e| {
-        warn!("Failed to serialize tasks: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize tasks")
-    })
+    let filter = move |m: &_| filter.matches(m);
+    if is_sse {
+        Ok(Sse::new(state.task_manager.stream_tasks(block, filter)).into_response())
+    } else {
+        let tasks = state.task_manager
+            .wait_for_tasks(&block, filter)
+            .await?;
+        DerefSerializer::new(tasks, block.wait_count).map_err(|e| {
+            warn!("Failed to serialize tasks: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize tasks")
+        }).map(IntoResponse::into_response)
+    }
 }
 
 trait MsgFilterTrait<M: Msg> {
@@ -264,24 +267,23 @@ struct MsgFilterNoTask {
     mode: MsgFilterMode,
 }
 
-struct MsgFilterForTask<'a> {
+struct MsgFilterForTask {
     normal: MsgFilterNoTask,
-    unanswered_by: Option<&'a AppOrProxyId>,
-    workstatus_is_not: Vec<Discriminant<WorkStatus>>,
+    unanswered_by: Option<AppOrProxyId>,
+    workstatus_is_not: Vec<WorkStatus>,
 }
 
-impl<'a> MsgFilterForTask<'a> {
+impl MsgFilterForTask {
     fn unanswered(&self, msg: &EncryptedMsgTaskRequest) -> bool {
-        if self.unanswered_by.is_none() {
+        let Some(ref unanswered) = self.unanswered_by else {
             debug!("Is {} unanswered? Yes, criterion not defined.", msg.id());
             return true;
-        }
-        let unanswered = self.unanswered_by.unwrap();
+        };
         for res in msg.results.values() {
             if res.get_from() == unanswered
                 && self
                     .workstatus_is_not
-                    .contains(&std::mem::discriminant(&res.msg.status))
+                    .contains(&res.msg.status)
             {
                 debug!("Is {} unanswered? No, answer found.", msg.id());
                 return false;
@@ -292,7 +294,7 @@ impl<'a> MsgFilterForTask<'a> {
     }
 }
 
-impl<'a> MsgFilterTrait<EncryptedMsgTaskRequest> for MsgFilterForTask<'a> {
+impl MsgFilterTrait<EncryptedMsgTaskRequest> for MsgFilterForTask {
     fn from(&self) -> Option<&AppOrProxyId> {
         self.normal.from.as_ref()
     }
@@ -310,7 +312,7 @@ impl<'a> MsgFilterTrait<EncryptedMsgTaskRequest> for MsgFilterForTask<'a> {
     }
 }
 
-impl<'a, M: Msg> MsgFilterTrait<M> for MsgFilterNoTask {
+impl<M: Msg> MsgFilterTrait<M> for MsgFilterNoTask {
     fn from(&self) -> Option<&AppOrProxyId> {
         self.from.as_ref()
     }
