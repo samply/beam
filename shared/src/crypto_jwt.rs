@@ -136,24 +136,17 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
     token_without_extended_signature: &str,
 ) -> Result<MsgSigned<M>, (StatusCode, &'static str)> {
     let ip = get_ip(req).await;
-    // let a = _span.entered();
-    let token_with_extended_signature = std::str::from_utf8(
-        req.headers
-            .get(header::AUTHORIZATION)
-            .ok_or_else(|| {
-                warn!(%ip, "Missing Authorization header (in verify_with_extended_header)");
-                ERR_SIG
-            })?
-            .as_bytes(),
-    )
-    .map_err(|e| {
-        warn!(
-            %ip,
-            "Unable to parse existing Authorization header (in verify_with_extended_header): {}",
-            e
-        );
-        ERR_SIG
-    })?;
+    let token_with_extended_signature = req.headers
+        .get(header::AUTHORIZATION)
+        .ok_or_else(|| {
+            warn!(%ip, "Missing Authorization header");
+            ERR_SIG
+        })?
+        .to_str()
+        .map_err(|e| {
+            warn!(%ip, "Unable to parse existing Authorization header: {e}");
+            ERR_SIG
+        })?;
     let token_with_extended_signature =
         token_with_extended_signature.trim_start_matches("SamplyJWT ");
 
@@ -161,11 +154,7 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
         extract_jwt::<HeaderClaim>(token_with_extended_signature)
             .await
             .map_err(|e| {
-                warn!(
-                    %ip,
-                    "Unable to extract header JWT: {}. The full JWT was: {}. The header was: {:?}",
-                    e, token_with_extended_signature, req
-                );
+                warn!(%ip, "Unable to extract header JWT: {e}. The full JWT was: {token_with_extended_signature}");
                 ERR_SIG
             })?;
 
