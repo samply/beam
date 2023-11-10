@@ -107,7 +107,7 @@ impl AsRef<u32> for CertificateCacheUpdate {
 pub struct CertificateCache {
     serial_to_x509: HashMap<Serial, CertificateCacheEntry>,
     cn_to_serial: HashMap<ProxyId, Vec<Serial>>,
-    update_trigger: mpsc::Sender<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>,
+    update_trigger: mpsc::UnboundedSender<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>,
     root_cert: Option<X509>, // Might not be available at initialization time
     im_cert: Option<X509>,   // Might not be available at initialization time
 }
@@ -125,7 +125,7 @@ pub trait GetCerts: Sync + Send {
 
 impl CertificateCache {
     pub fn new(
-        update_trigger: mpsc::Sender<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>,
+        update_trigger: mpsc::UnboundedSender<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>,
     ) -> CertificateCache {
         Self {
             serial_to_x509: HashMap::new(),
@@ -256,7 +256,6 @@ impl CertificateCache {
             .await
             .update_trigger
             .send(tx)
-            .await
             .expect("Internal Error: Certificate Store Updater is not listening for requests.");
         debug!("Certificate update triggered -- waiting for results...");
         match rx.await {
@@ -514,7 +513,7 @@ pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
 
 #[dynamic(lazy)]
 pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
-    let (tx_refresh, mut rx_refresh) = mpsc::channel::<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>(16);
+    let (tx_refresh, mut rx_refresh) = mpsc::unbounded_channel::<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>();
     let (tx_newcerts, mut rx_newcerts) = mpsc::channel::<()>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx_refresh)));
     let cc2 = cc.clone();
@@ -942,7 +941,7 @@ mod tests {
             .collect();
         let n = certs.len();
     
-        let (tx, rx) = mpsc::channel(1);
+        let (tx, rx) = mpsc::unbounded_channel();
         let cert_cache = CertificateCache { 
             serial_to_x509: certs,
             update_trigger: tx,
@@ -964,7 +963,7 @@ mod tests {
 
     #[test]
     fn test_revokation() {
-        let mut cache = CertificateCache::new(mpsc::channel(1).0);
+        let mut cache = CertificateCache::new(mpsc::unbounded_channel().0);
         let mut certs: Vec<_> = [1, 5, 10].into_iter()
             .map(Duration::from_secs)
             .map(build_x509)
