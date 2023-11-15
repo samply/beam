@@ -3,12 +3,12 @@ use std::{
     ops::{Deref, DerefMut},
     pin::Pin,
     task::Poll,
-    time::{Duration, SystemTime, Instant}, sync::Arc,
+    time::{Duration, SystemTime, Instant}, sync::Arc, str::FromStr,
 };
 
 use axum::{
     extract::{Path, State},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Response, Result},
     routing::{get, post},
     RequestPartsExt, Router, Json, Extension,
 };
@@ -78,32 +78,29 @@ async fn get_tasks(
     state: State<TasksState>,
     Extension(task_secret_map): Extension<MsgSecretMap>,
     req: Request<Body>
-) -> Result<Json<Vec<MsgSocketRequest<Plain>>>, Response> {
+) -> Result<Json<Vec<MsgSocketRequest<Plain>>>> {
     let mut res = forward_request(req, &state.config, &sender, &state.client).await?;
     if res.status() != StatusCode::OK {
-        return Err(res.into_response());
+        return Err(res.into());
     }
-    let body = hyper::body::to_bytes(res.body_mut()).await.map_err(|_| StatusCode::BAD_GATEWAY.into_response())?;
-    let enc_json = serde_json::from_slice(&body).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
+    let body = hyper::body::to_bytes(res.body_mut()).await.map_err(|_| StatusCode::BAD_GATEWAY)?;
+    let enc_json = serde_json::from_slice(&body).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let plain_json = to_server_error(validate_and_decrypt(enc_json).await).map_err(IntoResponse::into_response)?;
-    let tasks: Vec<MessageType<Plain>> = serde_json::from_value(plain_json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
+    let tasks: Vec<MessageType<Plain>> = serde_json::from_value(plain_json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut out = Vec::with_capacity(tasks.len());
     for task in tasks {
-        if let MessageType::MsgSocketRequest(mut socket_task) = task {
-            let key = serde_json::from_value(Value::String(socket_task.secret.body
-                .as_ref()
-                .ok_or(StatusCode::INTERNAL_SERVER_ERROR.into_response())?
-                .to_string()
-            )).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
-            let Ok(ttl) = socket_task.expire.duration_since(SystemTime::now()) else {
-                continue;
-            };
-            task_secret_map.insert_for(ttl, socket_task.id, key);
-            socket_task.secret.body = None;
-            out.push(socket_task);
-        } else {
-            return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
-        }
+        let MessageType::MsgSocketRequest(mut socket_task) = task else {
+            return Err(StatusCode::INTERNAL_SERVER_ERROR.into());
+        };
+        let key = socket_task.secret.body
+            .and_then(|v| v.parse().ok())
+            .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+        let Ok(ttl) = socket_task.expire.duration_since(SystemTime::now()) else {
+            continue;
+        };
+        task_secret_map.insert_for(ttl, socket_task.id, key);
+        socket_task.secret.body = None;
+        out.push(socket_task);
     }
 
     Ok(Json(out))
@@ -270,9 +267,17 @@ impl<'de> Deserialize<'de> for SocketEncKey {
     where
         D: serde::Deserializer<'de>,
     {
-        let bytes = Base64UrlSafeNoPadding::decode_to_vec(String::deserialize(deserializer)?, None).map_err(serde::de::Error::custom)?;
+        String::deserialize(deserializer)?.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+impl FromStr for SocketEncKey {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let bytes = Base64UrlSafeNoPadding::decode_to_vec(s, None).map_err(|_| "Failed to base64 decode socket key")?;
         if bytes.len() != U32::to_usize() {
-            return Err(serde::de::Error::custom("Key does not match required key length"));
+            return Err("Key does not match required key length");
         } else {
             Ok(SocketEncKey(GenericArray::clone_from_slice(bytes.as_slice())))
         }
