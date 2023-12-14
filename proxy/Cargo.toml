@@ -17,7 +17,7 @@ axum = { version = "0.6", features = ["macros"] }
 hyper = { version = "0.14.19", features = ["full"] }
 
 # for HTTP client
-hyper-tls = "0.5.0"
+hyper-tls = "0.6.0"
 httpdate = "1.0.2"
 hyper-proxy = "0.9.1"
 

@@ -23,7 +23,7 @@ hyper = { version = "0.14.19", features = ["full"] }
 bytes = "1.4"
 
 # HTTP client with proxy support
-hyper-tls = "0.5.0"
+hyper-tls = "0.6.0"
 hyper-proxy = "0.9.1"
 mz-http-proxy = { version = "0.1.0", features = ["hyper"] }
 hyper-timeout = "0.4"
