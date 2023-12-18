@@ -14,7 +14,7 @@ beam-lib = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 async-recursion = "1.0.0"
 axum = { version = "0.6", features = ["macros"] }
-hyper = { version = "0.14.19", features = ["full"] }
+hyper = { version = "1.1.0", features = ["full"] }
 
 # for HTTP client
 hyper-tls = "0.5.0"
