@@ -3,6 +3,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use beam_lib::{MsgId, TaskRequest, TaskResult, WorkStatus, BlockingOptions};
 use serde::{de::DeserializeOwned, Serialize};
+use serde_json::Value;
 use tokio::sync::oneshot;
 
 use crate::{CLIENT1, APP1, APP2, CLIENT2};
@@ -31,8 +32,8 @@ async fn test_task_claiming() -> Result<()> {
     // Test waiting for 1 ready result which is not there yet
     let block = BlockingOptions::from_count(1);
     tokio::select! {
-        _ = poll_result::<()>(id, &block) => {
-            bail!("Got claimed result although we wanted to wait for a finished result");
+        res = poll_result::<()>(id, &block) => {
+            bail!("Got claimed result {res:?} although we wanted to wait for a finished result");
         }
         _ = tokio::time::sleep(Duration::from_secs(2)) => ()
     };
@@ -63,18 +64,22 @@ pub async fn post_task<T: Serialize + 'static>(body: T) -> Result<MsgId> {
 }
 
 pub async fn poll_task<T: DeserializeOwned + 'static>(expected_id: MsgId) -> Result<TaskRequest<T>> {
-    CLIENT2.poll_pending_tasks(&BlockingOptions::from_time(Duration::from_secs(5)))
+    let task = CLIENT2.poll_pending_tasks::<Value>(&BlockingOptions::from_time(Duration::from_secs(5)))
         .await?
         .into_iter()
         .find(|t| t.id == expected_id)
-        .ok_or(anyhow::anyhow!("Did not find expected task"))
+        .ok_or(anyhow::anyhow!("Did not find expected task"))?;
+    let TaskRequest { id, from, to, body, ttl, failure_strategy, metadata } = task;
+    // Parse body as T after finding the expected id as poll_pending_tasks aims to parse all task bodies directly as T which will error because other tests have other body types
+    let body = serde_json::from_value(body)?;
+    Ok(TaskRequest { id, from, to, body, ttl, failure_strategy, metadata })
 }
 
 pub async fn poll_result<T: DeserializeOwned + 'static>(task_id: MsgId, block: &BlockingOptions) -> Result<TaskResult<T>> {
     CLIENT1.poll_results(&task_id, block)
         .await?
         .pop()
-        .ok_or(anyhow::anyhow!("Got no task"))
+        .ok_or(anyhow::anyhow!("Got no result"))
 }
 
 pub async fn put_result<T: Serialize + 'static>(task_id: MsgId, body: T, status: Option<beam_lib::WorkStatus>) -> Result<()> {
