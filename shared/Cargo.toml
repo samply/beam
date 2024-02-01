@@ -56,17 +56,13 @@ http = "0.2.8"
 fundu = "2.0.0"
 regex = "1"
 
-# expire map dependencies
-dashmap =  { version = "5.4", optional = true}
-
 beam-lib = { workspace = true }
 
 [dev-dependencies]
 tokio-test = "0.4.2"
 
 [features]
-expire_map = ["dep:dashmap"]
-sockets = ["expire_map", "beam-lib/sockets"]
+sockets = ["beam-lib/sockets"]
 default = []
 config-for-proxy = []
 config-for-central = []
