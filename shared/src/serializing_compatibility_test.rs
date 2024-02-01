@@ -51,7 +51,6 @@ fn test_msg_task() {
             backoff_millisecs: 100,
             max_tries: 10,
         },
-        results: Default::default(),
         metadata: json_data.clone(),
     };
     let lib = beam_lib::TaskRequest {

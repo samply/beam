@@ -3,7 +3,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{MsgState, serialize_time, MsgId, Msg, DecryptableMsg, Plain, Encrypted, EncryptableMsg, HasWaitId};
+use crate::{MsgState, serialize_time, MsgId, Msg, DecryptableMsg, Plain, Encrypted, EncryptableMsg};
 use beam_lib::AppOrProxyId;
 
 
@@ -59,11 +59,5 @@ impl EncryptableMsg for MsgSocketRequest<Plain> {
 
     fn get_plain(&self) -> &Plain {
         &self.secret
-    }
-}
-
-impl<State: MsgState> HasWaitId<MsgId> for MsgSocketRequest<State> {
-    fn wait_id(&self) -> MsgId {
-        self.id
     }
 }

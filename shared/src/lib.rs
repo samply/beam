@@ -54,8 +54,6 @@ pub mod config_shared;
 pub mod config_broker;
 // #[cfg(feature = "config-for-proxy")]
 pub mod config_proxy;
-#[cfg(feature = "expire_map")]
-pub mod expire_map;
 #[cfg(feature = "sockets")]
 mod sockets;
 #[cfg(feature = "sockets")]
@@ -469,8 +467,6 @@ where
     #[serde(with = "serialize_time", rename = "ttl")]
     pub expire: SystemTime,
     pub failure_strategy: FailureStrategy,
-    #[serde(skip)]
-    pub results: HashMap<AppOrProxyId, MsgSigned<MsgTaskResult<State>>>,
     pub metadata: Value,
 }
 
@@ -496,7 +492,6 @@ impl EncryptableMsg for MsgTaskRequest {
             expire,
             failure_strategy,
             metadata,
-            results: Default::default(),
         }
     }
 
@@ -526,7 +521,6 @@ impl DecryptableMsg for MsgTaskRequest<Encrypted> {
             expire,
             failure_strategy,
             metadata,
-            results: Default::default(),
         }
     }
 
@@ -606,49 +600,6 @@ impl EncryptableMsg for MsgTaskResult<Plain> {
     }
 }
 
-pub trait HasWaitId<I: PartialEq> {
-    fn wait_id(&self) -> I;
-}
-
-impl HasWaitId<MsgId> for MsgTaskRequest {
-    fn wait_id(&self) -> MsgId {
-        self.id
-    }
-}
-
-impl HasWaitId<String> for MsgTaskResult {
-    fn wait_id(&self) -> String {
-        format!("{},{}", self.task, self.from)
-    }
-}
-
-impl HasWaitId<MsgId> for EncryptedMsgTaskRequest {
-    fn wait_id(&self) -> MsgId {
-        self.id
-    }
-}
-
-impl HasWaitId<String> for EncryptedMsgTaskResult {
-    fn wait_id(&self) -> String {
-        format!("{},{}", self.task, self.from)
-    }
-}
-
-impl<M, I> HasWaitId<I> for MsgSigned<M>
-where
-    M: HasWaitId<I> + Msg,
-    I: PartialEq,
-{
-    fn wait_id(&self) -> I {
-        self.msg.wait_id()
-    }
-}
-
-impl<T: MsgState> MsgTaskRequest<T> {
-    pub fn id(&self) -> &MsgId {
-        &self.id
-    }
-}
 impl MsgTaskRequest {
     pub fn new(
         from: AppOrProxyId,
@@ -663,7 +614,6 @@ impl MsgTaskRequest {
             to,
             body: body.into(),
             failure_strategy,
-            results: HashMap::new(),
             metadata,
             expire: SystemTime::now() + Duration::from_secs(3600),
         }
@@ -679,7 +629,6 @@ impl<T: MsgState> PartialEq for MsgTaskRequest<T> {
             && self.to == other.to
             && self.body == other.body
             && self.failure_strategy == other.failure_strategy
-            && self.results == other.results
             && self.metadata == other.metadata
     }
 }
@@ -755,7 +704,6 @@ mod tests {
             body: "Testbody".into(),
             expire: expiry,
             failure_strategy: failure,
-            results: HashMap::new(),
             metadata: "".into(),
         };
 
