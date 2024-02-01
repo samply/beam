@@ -1,31 +1,36 @@
 use std::{
-    borrow::Cow,
+    collections::HashSet,
     ops::Deref,
-    time::{Duration, SystemTime}, collections::HashMap, sync::Arc, convert::Infallible,
+    sync::Arc,
+    time::{Duration, SystemTime}
 };
 
-use axum::{response::{IntoResponse, sse::Event, Sse}, Json};
-use dashmap::DashMap;
-use futures_core::Stream;
+use axum::response::sse::Event;
+use beam_lib::{AppOrProxyId, MsgId, WorkStatus};
+use futures::Stream;
 use hyper::StatusCode;
-use once_cell::sync::Lazy;
+use moka::{future::Cache, Expiry};
 use serde::Serialize;
-use serde_json::json;
-use beam_lib::{AppOrProxyId, MsgEmpty, MsgId, WorkStatus};
 use shared::{
-    HasWaitId, HowLongToBlock, Msg, MsgSigned,
-    MsgState, MsgTaskRequest, MsgTaskResult, sse_event::SseEventType,
+    sse_event::SseEventType, HowLongToBlock, Msg, MsgSigned, MsgState, MsgTaskRequest,
+    MsgTaskResult,
 };
 use tokio::{sync::broadcast, time::Instant};
-use tracing::{warn, error};
+use tokio_stream::wrappers::BroadcastStream;
+use tracing::{error, warn};
+
+/// In Rust edition 2024 this will no longer be needed
+/// This is a helper trait to express that a RPIT captures a lifetime
+/// Using `impl Trait + 'a` is not what you want to return its `impl Trait + Captures<&'a ()>`
+/// See this [talk](https://www.youtube.com/watch?v=CWiz_RtA1Hw) from Jon Gjengset
+pub trait Captures<U> {}
+impl<T: ?Sized, U> Captures<U> for T {}
 
 pub trait Task {
     type Result;
 
-    fn get_results(&self) -> &HashMap<AppOrProxyId, Self::Result>;
-    /// Returns true if the value as been updated and false if it was a result from a new app
-    fn insert_result(&mut self, result: Self::Result) -> bool;
-    fn is_expired(&self) -> bool;
+    fn get_expire_time(&self) -> &SystemTime;
+    fn get_id(&self) -> MsgId;
 }
 
 pub trait HasStatus {
@@ -35,35 +40,25 @@ pub trait HasStatus {
 impl<State: MsgState> Task for MsgTaskRequest<State> {
     type Result = MsgSigned<MsgTaskResult<State>>;
 
-    fn insert_result(&mut self, result: Self::Result) -> bool {
-        self.results.insert(result.get_from().clone(), result).is_some()
+    fn get_expire_time(&self) -> &SystemTime {
+        &self.expire
     }
 
-    fn get_results(&self) -> &HashMap<AppOrProxyId, Self::Result> {
-        &self.results
-    }
-
-    fn is_expired(&self) -> bool {
-        self.expire < SystemTime::now()
+    fn get_id(&self) -> MsgId {
+        self.id
     }
 }
-
-static EMPTY_MAP: Lazy<HashMap<AppOrProxyId, ()>> = Lazy::new(|| {
-    HashMap::with_capacity(0)
-});
 
 #[cfg(feature = "sockets")]
 impl<State: MsgState> Task for shared::MsgSocketRequest<State> {
     type Result = ();
 
-    fn get_results(&self) -> &HashMap<AppOrProxyId, Self::Result> {
-        &EMPTY_MAP
+    fn get_expire_time(&self) -> &SystemTime {
+        &self.expire
     }
 
-    fn insert_result(&mut self, _result: Self::Result) -> bool { false }
-
-    fn is_expired(&self) -> bool {
-        self.expire < SystemTime::now()
+    fn get_id(&self) -> MsgId {
+        self.id
     }
 }
 
@@ -79,283 +74,309 @@ impl<T: HasStatus + Msg> HasStatus for MsgSigned<T> {
     }
 }
 
-pub struct TaskManager<T: HasWaitId<MsgId> + Task + Msg> {
-    tasks: DashMap<MsgId, MsgSigned<T>>,
-    new_tasks: broadcast::Sender<MsgId>,
-    /// Send the index at which the new result for the given Task was inserted
-    new_results: DashMap<MsgId, broadcast::Sender<AppOrProxyId>>,
+struct TaskExpirey;
+
+impl<K, T: Task + Msg> Expiry<K, (Instant, Arc<TaskWithResults<T>>)> for TaskExpirey {
+    /// TODO: use the created at from the fn and store an instance for the expire property of task
+    fn expire_after_create(
+        &self,
+        _: &K,
+        value: &(Instant, Arc<TaskWithResults<T>>),
+        _: std::time::Instant,
+    ) -> Option<Duration> {
+        value
+            .1
+            .task
+            .msg
+            .get_expire_time()
+            .duration_since(SystemTime::now())
+            .ok()
+    }
 }
 
-impl<T: HasWaitId<MsgId> + Task + Msg + Send + Sync + 'static> TaskManager<T> {
-    const EXPIRE_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
+pub struct TaskWithResults<T: Task + Msg> {
+    task: MsgSigned<T>,
+    results: Cache<AppOrProxyId, (Instant, Arc<T::Result>)>,
+    new_results: broadcast::Sender<Arc<T::Result>>,
+}
 
+impl<T> TaskWithResults<T>
+where
+    T: Task + Msg,
+    T::Result: Sync + Send + 'static,
+{
+    fn new(task: MsgSigned<T>) -> Self {
+        let max_results = task.get_to().len();
+        Self {
+            task,
+            results: Cache::builder().initial_capacity(max_results).build(),
+            new_results: broadcast::channel(1.max(max_results)).0,
+        }
+    }
+
+    pub async fn get_result(&self, from: &AppOrProxyId) -> Option<Arc<T::Result>> where T::Result: 'static {
+        self.results.get(from).await.map(|v| v.1)
+    }
+
+    fn stream_results_inner(
+        &self,
+        max_elements: usize,
+        filter: impl Fn(&T::Result) -> bool,
+    ) -> impl Stream<Item = Arc<T::Result>> + Captures<&'_ ()>
+    where
+        T::Result: HasStatus + 'static,
+    {
+        use tokio_stream::StreamExt;
+        let new_results = self.new_results.subscribe();
+        let ts = Instant::now();
+        let initial_results = self
+            .results
+            .into_iter()
+            .filter_map(move |(_, (insertion_time, msg))| (insertion_time <= ts).then_some(msg));
+        let stream = tokio_stream::iter(initial_results)
+            .chain(
+                BroadcastStream::new(new_results).filter_map(move |new_result| match new_result {
+                    Ok(result) => Some(result),
+                    Err(e) => {
+                        warn!("new_results channel lagged: {e}");
+                        None
+                    }
+                }),
+            )
+            .filter(move |res| filter(&res));
+        let mut num_of_results = 0;
+        async_stream::stream! {
+            for await res in stream {
+                let status = res.get_status();
+                yield res;
+                if status != WorkStatus::Claimed {
+                    num_of_results += 1;
+                    if num_of_results >= max_elements {
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    pub async fn get_results(
+        &self,
+        block: HowLongToBlock,
+        filter: impl Fn(&T::Result) -> bool,
+    ) -> Vec<Arc<T::Result>>
+    where
+        T::Result: HasStatus + Msg + 'static,
+    {
+        use futures::StreamExt;
+        struct HashMsg<M: Msg>(Arc<M>);
+        // Dedupe stream by the proxy id only keeping the most recent result
+        impl<M: Msg> std::hash::Hash for HashMsg<M> {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                self.0.get_from().proxy_id().hash(state)
+            }
+        }
+        impl<M: Msg> PartialEq for HashMsg<M> {
+            fn eq(&self, other: &Self) -> bool {
+                self.0.get_from().proxy_id() == other.0.get_from().proxy_id()
+            }
+        }
+        impl<M: Msg> Eq for HashMsg<M> {}
+
+        let (max_elements, wait_until) = decide_blocking_conditions(&block);
+        let mut s = std::pin::pin!(self.stream_results_inner(max_elements, filter).take_until(tokio::time::sleep_until(wait_until)));
+        let mut seen = HashSet::with_capacity(self.get_to().len());
+        while let Some(t) = s.next().await {
+            seen.insert(HashMsg(t));
+        }
+        seen.into_iter().map(|v| v.0).collect()
+    }
+
+    pub fn stream_result_events(
+        self: Arc<Self>,
+        block: HowLongToBlock,
+        filter: impl Fn(&T::Result) -> bool + 'static,
+    ) -> impl Stream<Item = Event> + 'static
+    where
+        T::Result: HasStatus + Serialize + 'static,
+        T: 'static
+    {
+        use futures::StreamExt;
+
+        async_stream::stream! {
+            let (max_results, wait_until) = decide_blocking_conditions(&block);
+            if block.wait_time.is_none() && block.wait_count.is_none() {
+                for await v in self.stream_results_inner(max_results, filter).take_until(tokio::time::sleep_until(wait_until)) {
+                    yield to_event(v.as_ref(), SseEventType::NewResult);
+                }
+                return;
+            };
+            let expired = &mut false;
+            let st = self.stream_results_inner(max_results, filter).take_until(async {
+                tokio::time::sleep_until(wait_until).await;
+                *expired = true;
+            });
+            for await res in st {
+                yield to_event(res.as_ref(), SseEventType::NewResult);
+            }
+            if *expired {
+                yield to_event((), SseEventType::WaitExpired);
+            }
+        }
+    }
+}
+
+impl<T> Deref for TaskWithResults<T>
+where
+    T: Task + Msg,
+{
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.task.msg
+    }
+}
+
+impl<T> Serialize for TaskWithResults<T>
+where
+    T: Task + Msg + Serialize
+{
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.task.serialize(serializer)
+    }
+}
+
+pub struct TaskManager<T: Task + Msg> {
+    tasks: Cache<MsgId, (Instant, Arc<TaskWithResults<T>>)>,
+    new_tasks: broadcast::Sender<Arc<TaskWithResults<T>>>,
+}
+
+impl<T> TaskManager<T>
+where
+    T: Task + Msg + Send + Sync + 'static,
+    T::Result: Send + Sync,
+{
     pub fn new() -> Arc<Self> {
         let (new_tasks, _) = broadcast::channel(256);
-        let task_manager = Arc::new(Self {
-            tasks: Default::default(),
+        Arc::new(Self {
+            tasks: Cache::builder().expire_after(TaskExpirey).build(),
             new_tasks,
-            new_results: Default::default(),
-        });
-        let tm = Arc::clone(&task_manager);
-        std::thread::spawn(move || {
-            loop {
-                std::thread::sleep(Self::EXPIRE_CHECK_INTERVAL);
-                tm.tasks.retain(|_, task| if task.msg.is_expired() {
-                    tm.new_results.remove(&task.msg.wait_id());
-                    false
-                } else {
-                    true
-                });
-                // If the memory footprint of the Dashmap will get too large we might need to consider calling DashMap::shrink_to_fit or find a better solution as
-                // this would need to lock the whole map making it inaccessible until everything is reallocated
-            }
-        });
-
-        task_manager
+        })
     }
 }
 
-impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
-
-    pub fn get(&self, task_id: &MsgId) -> Result<impl Deref<Target = MsgSigned<T>> + '_, TaskManagerError> {
-        self.tasks.get(task_id).ok_or(TaskManagerError::NotFound)
-    }
-
-    pub fn remove(&self, task_id: &MsgId) -> Result<MsgSigned<T>, TaskManagerError> {
-        self.tasks.remove(task_id).ok_or(TaskManagerError::NotFound).map(|v| v.1)
-    }
-
-    pub fn get_tasks_by(&self, filter: impl Fn(&T) -> bool) -> impl Iterator<Item = impl Deref<Target = MsgSigned<T>> + '_> {
+impl<T> TaskManager<T>
+where
+    T: Task + Msg + 'static,
+    T::Result: Send + Sync,
+    TaskWithResults<T>: Send + Sync
+{
+    pub async fn get(&self, task_id: MsgId) -> Result<Arc<TaskWithResults<T>>, TaskManagerError> {
         self.tasks
-            .iter()
-            .filter(move |entry| filter(&entry.msg))
-            .filter(|entry| !entry.msg.is_expired())
+            .get(&task_id)
+            .await
+            .map(|v| v.1)
+            .ok_or(TaskManagerError::NotFound)
     }
 
-    // Once async iterators are stabilized this should be one
+    pub async fn remove(&self, task_id: MsgId) {
+        self.tasks.invalidate(&task_id).await
+    }
+
     /// ## Note:
-    /// This function may yield less tasks than `block.wait_count` if tasks expired while waiting on new ones
-    pub async fn wait_for_tasks(
+    /// This function may yield tasks that expired while waiting on new ones
+    pub fn stream_tasks(
         &self,
-        block: &HowLongToBlock,
-        filter: impl Fn(&T) -> bool,
-    ) -> Result<impl Iterator<Item = impl Deref<Target = MsgSigned<T>> + '_>, TaskManagerError>
+        block: HowLongToBlock,
+    ) -> impl Stream<Item = Arc<TaskWithResults<T>>> + Captures<&'_ ()>
     {
-        let (max_elements, wait_until) = decide_blocking_conditions(block);
-        let mut new_tasks = self.new_tasks.subscribe();
-
-        let mut num_of_tasks = self.get_tasks_by(&filter).count();
-        while num_of_tasks < max_elements && Instant::now() < wait_until {
-            tokio::select! {
-                _ = tokio::time::sleep_until(wait_until) => {
-                    break;
-                },
-                result = new_tasks.recv() => {
-                    match result {
-                        Ok(id) => {
-                            if let Ok(task) = self.get(&id) {
-                                if filter(&task.msg) {
-                                    num_of_tasks += 1;
-                                }
-                            }
-                        },
-                        Err(e) => {
-                            warn!("new_tasks channel lagged: {e}");
-                            return Err(TaskManagerError::BroadcastBufferOverflow);
-                        }
+        let (max_elements, wait_until) = decide_blocking_conditions(&block);
+        let new_tasks = self.new_tasks.subscribe();
+        let ts = Instant::now();
+        let initial_tasks = self
+            .tasks
+            .into_iter()
+            .filter_map(move |(_, (insertion_time, msg))| (insertion_time <= ts).then_some(msg));
+        let new_task_stream = {
+            use tokio_stream::StreamExt;
+            BroadcastStream::new(new_tasks)
+                .filter_map(|new_task| match new_task {
+                    Ok(task) => Some(task),
+                    Err(e) => {
+                        warn!("new_tasks channel lagged: {e}");
+                        None
                     }
-                },
-            }
+                })
+        };
+        {
+            use futures::StreamExt;
+            tokio_stream::iter(initial_tasks)
+                .chain(new_task_stream)
+                .take(max_elements)
+                .take_until(tokio::time::sleep_until(wait_until))
         }
-        Ok(self.get_tasks_by(filter))
     }
 
-    pub fn post_task(&self, task: MsgSigned<T>) -> Result<(), TaskManagerError> {
-        let id = task.wait_id();
-        if let Some(task) = self.tasks.get(&id) {
-            // We only have a conflict if the conflicting task has not yet expired
-            if !task.msg.is_expired() {
-                return Err(TaskManagerError::Conflict);
-            }
+    pub async fn post_task(&self, task: MsgSigned<T>) -> Result<(), TaskManagerError> {
+        let entry = self
+            .tasks
+            .entry(task.msg.get_id())
+            .or_insert_with(async {
+                let task_with_results = Arc::new(TaskWithResults::new(task));
+                // We dont care if noone is listening
+                _ = self.new_tasks.send(task_with_results.clone());
+                (Instant::now(), task_with_results)
+            })
+            .await;
+        if !entry.is_fresh() {
+            warn!("Conflict: Task with id {} already existed", entry.key());
+            return Err(TaskManagerError::Conflict);
         }
-        let max_receivers = task.get_to().len();
-        self.tasks.insert(id.clone(), task);
-        let (results_sender, _) = broadcast::channel(1.max(max_receivers));
-        self.new_results.insert(id.clone(), results_sender);
-        // We dont care if noone is listening
-        _ = self.new_tasks.send(id);
         Ok(())
     }
 }
 
 fn decide_blocking_conditions(block: &HowLongToBlock) -> (usize, Instant) {
     match (block.wait_count, block.wait_time) {
-        // Dont wait
-        (None, None) => (0, Instant::now()),
+        // Only wait a very short time so that all tasks that are ready get yielded
+        (None, None) => (usize::MAX, Instant::now() + Duration::from_millis(100)),
         // Wait for as long as specified regardless of the number of elements
         (None, Some(wait_time)) => (usize::MAX, Instant::now() + wait_time),
         // Wait for n elements or timeout after 1h
-        (Some(wait_count), None) => (wait_count as usize, Instant::now() + Duration::from_secs(60 * 60)),
+        (Some(wait_count), None) => (
+            wait_count as usize,
+            Instant::now() + Duration::from_secs(60 * 60),
+        ),
         // Stop waiting after either some time or some number of elements
         (Some(wait_count), Some(wait_time)) => (wait_count as usize, Instant::now() + wait_time),
     }
 }
 
-impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T>
+impl<T> TaskManager<T>
 where
-    T::Result: Msg + HasStatus,
+    T: Task + Msg + 'static,
+    T::Result: Msg + Send + Sync,
+    TaskWithResults<T>: Send + Sync
 {
-    /// This does not check if the requester was the creator of the Task
-    pub async fn wait_for_results(
-        &self,
-        task_id: &MsgId,
-        block: &HowLongToBlock,
-        filter: impl Fn(&T::Result) -> bool,
-    ) -> Result<impl Deref<Target = MsgSigned<T>> + '_, TaskManagerError> {
-        let (max_elements, wait_until) = decide_blocking_conditions(block);
-        let mut num_of_results = self
-            .get(task_id)?
-            .msg
-            .get_results()
-            .values()
-            .filter(|result| filter(result) && result.get_status() != WorkStatus::Claimed)
-            .count();
-        let mut new_results = self
-            .new_results
-            .get(task_id)
-            .expect("Found task but no corresponding results channel")
-            .subscribe();
-        while num_of_results < max_elements && Instant::now() < wait_until {
-            tokio::select! {
-                _ = tokio::time::sleep_until(wait_until) => {
-                    break;
-                },
-                result = new_results.recv() => {
-                    match result {
-                        Ok(key) => {
-                            if let Ok(task) = self.get(task_id) {
-                                let result = &task.msg.get_results()[&key];
-                                if filter(result) && result.get_status() != WorkStatus::Claimed {
-                                    num_of_results += 1;
-                                }
-                            } else {
-                                return Err(TaskManagerError::Gone);
-                            }
-                        },
-                        Err(e) => {
-                            warn!("new_results channel lagged: {e}");
-                            return Err(TaskManagerError::BroadcastBufferOverflow);
-                        }
-                    }
-                },
-            }
-        }
-
-        // Somehow mapping this task to its results creates lifetime issues that I failed to solve.
-        // So the caller needs to get the results himself which is not to bad I guess.
-        // FIXME: Return results here
-        self.get(task_id).map_err(|_| TaskManagerError::Gone)
-    }
-
-    pub fn stream_results(
-        self: Arc<Self>,
-        task_id: MsgId,
-        block: HowLongToBlock,
-        filter: impl Fn(&T::Result) -> bool + 'static + Send + Sync
-    ) -> impl Stream<Item = Result<Event, Infallible>> + 'static + Send
-        where
-            T::Result: Serialize + Sync + Send,
-            T: Send + Sync + 'static
-    {
-        async_stream::stream! {
-            let Ok(task) = self.get(&task_id) else {
-                yield Ok(to_event("Did not find task", SseEventType::Error));
-                return;
-            };
-            let (max_elements, wait_until) = decide_blocking_conditions(&block);
-            let ready_results = task.msg
-                .get_results()
-                .values()
-                .filter(|result| filter(result));
-            let mut num_of_results = 0;
-            let mut events = Vec::with_capacity(task.msg.get_results().len());
-            for res in ready_results {
-                if res.get_status() != WorkStatus::Claimed {
-                    num_of_results += 1;
-                }
-                events.push(to_event(res, SseEventType::NewResult));
-                // Only break when wait_count was actually set otherwise we want all the tasks that are present
-                if num_of_results >= max_elements && max_elements != 0 {
-                    break;
-                }
-            }
-            // Drop lock before doing async stuff
-            drop(task);
-            for event in events {
-                yield Ok(event);
-            }
-            let mut new_results = self
-                .new_results
-                .get(&task_id)
-                .expect("Found task but no corresponding results channel")
-                .subscribe();
-            while num_of_results < max_elements && Instant::now() < wait_until {
-                tokio::select! {
-                    _ = tokio::time::sleep_until(wait_until) => {
-                        yield Ok(to_event((), SseEventType::WaitExpired));
-                        break;
-                    },
-                    result = new_results.recv() => {
-                        match result {
-                            Ok(key) => {
-                                if let Ok(task) = self.get(&task_id) {
-                                    let new_result = &task.msg.get_results()[&key];
-                                    if filter(new_result) {
-                                        if new_result.get_status() != WorkStatus::Claimed {
-                                            num_of_results += 1;
-                                        }
-                                        let event = to_event(new_result, SseEventType::NewResult);
-                                        drop(task);
-                                        yield Ok(event);
-                                    };
-                                } else {
-                                    yield Ok(to_event(json!({"task_id": task_id}), SseEventType::DeletedTask));
-                                }
-                            },
-                            Err(broadcast::error::RecvError::Lagged(n)) => {
-                                warn!("new_results channel lagged by: {n} results.");
-                                yield Ok(to_event("Internal server error", SseEventType::Error));
-                            },
-                            Err(broadcast::error::RecvError::Closed) => {
-                                yield Ok(to_event("Task expired", SseEventType::WaitExpired));
-                                break;
-                            }
-                        }
-                    },
-                }
-            }
-        }
-    }
-
     /// This will push the result to the given task by its id.
     /// Returns true if the given result was an update to an existing result
-    pub fn put_result(&self, task_id: &MsgId, result: T::Result) -> Result<bool, TaskManagerError> {
-        let Some(mut task) = self.tasks.get_mut(task_id) else {
-            return Err(TaskManagerError::NotFound);
-        };
+    pub async fn put_result(&self, task_id: MsgId, result: T::Result) -> Result<bool, TaskManagerError> {
+        let task = self.get(task_id).await?;
         if !task.get_to().contains(result.get_from()) {
             return Err(TaskManagerError::Unauthorized);
         }
         let sender = result.get_from().clone();
-        let is_updated = task.msg.insert_result(result);
+        let result = Arc::new(result);
         // We dont care if noone is listening
-        _ = self
-            .new_results
-            .get(task_id)
-            .expect(
-                "This task id must be present because it is present at the start of the function",
-            )
-            .send(sender);
+        _ = task.new_results.send(result.clone());
+        let mut is_updated = false;
+        task
+            .results
+            .entry(sender)
+            // I did not find another way to check if the result was actually present
+            .or_insert_with_if(std::future::ready((Instant::now(), result)), |_| {
+                is_updated = true;
+                true
+            }).await;
         Ok(is_updated)
     }
 }
@@ -401,10 +422,58 @@ impl From<TaskManagerError> for StatusCode {
 }
 
 fn to_event(json: impl Serialize, event_type: impl AsRef<str>) -> Event {
-    Event::default().event(event_type).json_data(json).unwrap_or_else(|e| {
-        error!("Unable to serialize message: {e}");
-        Event::default()
-            .event(SseEventType::Error)
-            .data("Internal error: Unable to serialize message.")
-    })
+    Event::default()
+        .event(event_type)
+        .json_data(json)
+        .unwrap_or_else(|e| {
+            error!("Unable to serialize message: {e}");
+            Event::default()
+                .event(SseEventType::Error)
+                .data("Internal error: Unable to serialize message.")
+        })
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use beam_lib::AppId;
+    use futures::StreamExt;
+    use shared::Plain;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_all() {
+        const N: u32 = 1000;
+        const CONCURRENT_TASKS: u8 = 2;
+        futures::future::join_all((0..N).map(|_| async move {
+            let tm = TaskManager::<MsgTaskRequest>::new();
+            let a = futures::future::join_all((0..CONCURRENT_TASKS).map(|_| tokio::spawn(add_task(tm.clone()))));
+            assert!(tokio::try_join!(
+                tokio::spawn(assert_n_tasks(CONCURRENT_TASKS, tm.clone())),
+                async {
+                    a.await.into_iter().collect::<Result<Vec<_>, _>>()
+                }
+            ).is_ok());
+        })).await;
+    }
+
+    async fn assert_n_tasks(n: u8, tm: Arc<TaskManager<MsgTaskRequest>>) {
+        let s = tm.stream_tasks(HowLongToBlock { wait_time: Some(Duration::from_millis(250)), wait_count: None });
+        futures::pin_mut!(s);
+        for _ in 0..n {
+            assert!(s.next().await.is_some(), "Had no task");
+        }
+        assert!(s.next().await.is_none(), "Had more tasks");
+    }
+
+    async fn add_task(tm: Arc<TaskManager<MsgTaskRequest>>) {
+        tm.post_task(MsgSigned { msg: MsgTaskRequest {
+            id: MsgId::new(),
+            from: AppId::new_unchecked("").into(),
+            to: vec![],
+            body: Plain::from(""),
+            expire: SystemTime::now() + Duration::from_secs(60),
+            failure_strategy: beam_lib::FailureStrategy::Discard,
+            metadata: serde_json::Value::Null,
+        }, jwt: String::new() }).await.unwrap()
+    }
 }
