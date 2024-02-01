@@ -8,10 +8,7 @@ use axum::{
     Extension, Json, Router,
 };
 use serde::Deserialize;
-use shared::{
-    config, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg,
-    MsgEmpty, MsgId, MsgSigned, EMPTY_VEC_APPORPROXYID,
-};
+use shared::config::CONFIG_CENTRAL;
 use tokio::{
     sync::{
         broadcast::{Receiver, Sender},
@@ -36,9 +33,9 @@ pub(crate) async fn serve(health: Arc<RwLock<Health>>) -> anyhow::Result<()> {
 
     info!(
         "Startup complete. Listening for requests on {}",
-        config::CONFIG_CENTRAL.bind_addr
+        CONFIG_CENTRAL.bind_addr
     );
-    axum::Server::bind(&config::CONFIG_CENTRAL.bind_addr)
+    axum::Server::bind(&CONFIG_CENTRAL.bind_addr)
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(shared::graceful_shutdown::wait_for_signal())
         .await?;
