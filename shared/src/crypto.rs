@@ -223,17 +223,12 @@ impl CertificateCache {
     }
 
     /// Searches cache for a certificate with the given Serial. If not found, updates cache from central vault. If then still not found, return None
-    pub async fn get_by_serial(serial: &str) -> Option<CertificateCacheEntry> {
+    pub async fn get_by_serial(serial: &str) -> Option<X509> {
         {
             // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
             let cache = CERT_CACHE.read().await;
-            let cert = cache.serial_to_x509.get(serial);
-            match cert {
-                // why is this not done in the second try?
-                Some(x) => {
-                    return Some(x.clone());
-                }
-                None => (),
+            if let Some(CertificateCacheEntry::Valid(cert)) = cache.serial_to_x509.get(serial) {
+                return Some(cert.clone());
             }
         }
         Self::update_certificates().await.unwrap_or_else(|e| {
@@ -242,9 +237,13 @@ impl CertificateCache {
             CertificateCacheUpdate::UnChanged
         });
         let cache = CERT_CACHE.read().await;
-        let cert = cache.serial_to_x509.get(serial);
-
-        cert.cloned()
+        match cache.serial_to_x509.get(serial)? {
+            CertificateCacheEntry::Valid(v) => Some(v.clone()),
+            CertificateCacheEntry::Invalid(e) => {
+                warn!("Certificate with serial {serial} is invalid after update because of {e}");
+                None
+            }
+        }
     }
 
     /// Manually update cache from fetching all certs from the central vault
@@ -568,7 +567,7 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
     cc
 };
 
-async fn get_cert_by_serial(serial: &str) -> Option<CertificateCacheEntry> {
+async fn get_cert_by_serial(serial: &str) -> Option<X509> {
     CertificateCache::get_by_serial(serial).await
 }
 
@@ -599,11 +598,7 @@ pub async fn get_all_certs_and_clients_by_cname_as_pemstr(
 pub async fn get_cert_and_client_by_serial_as_pemstr(
     serial: &str,
 ) -> Option<Result<CryptoPublicPortion, CertificateInvalidReason>> {
-    match get_cert_by_serial(serial).await {
-        None => None,
-        Some(CertificateCacheEntry::Valid(valid_cert)) => Some(extract_x509(&valid_cert)),
-        Some(CertificateCacheEntry::Invalid(reason)) => Some(Err(reason)),
-    }
+    CertificateCache::get_by_serial(serial).await.as_ref().map(extract_x509)
 }
 
 pub async fn get_newest_certs_for_cnames_as_pemstr(
