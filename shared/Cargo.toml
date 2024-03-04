@@ -52,7 +52,7 @@ anyhow = "1.0.58"
 # Command Line Interface
 clap = { version = "4.0.12", features = ["env", "derive"] }
 
-http = "0.2.8"
+http = "1.1.0"
 fundu = "2.0.0"
 regex = "1"
 
