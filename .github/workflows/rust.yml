@@ -88,18 +88,23 @@ jobs:
       - name: Build (native)
         if: env.is_cross == 'false'
         run: |
-          BINS=$(cargo build --tests --bins --message-format=json --target ${{ env.rustarch }} ${{ matrix.features && format('--features {0}', matrix.features) }} ${{ env.profilestr }} | jq -r 'select(.profile.test == true) | .executable | select(. != null)')
+          OUT="$(cargo build --tests --bins --message-format=json --target ${{ env.rustarch }} ${{ matrix.features && format('--features {0}', matrix.features) }} ${{ env.profilestr }})"
+          TESTS=$(echo "$OUT" | jq -r 'select(.profile.test == true) | .executable | select(. != null)')
           mkdir -p testbinaries/
-          for testbin in $BINS; do
+          for testbin in $TESTS; do
             mv -v $testbin testbinaries/
           done
+          {
+            echo 'bins<<EOF'
+            echo "$OUT" | jq -r 'select(.profile.test == false) | .executable | select(. != null)'
+            echo "EOF"
+          } >> $GITHUB_ENV
       - name: Upload (bins)
         uses: actions/upload-artifact@v3
         with:
           name: binaries-${{ matrix.arch }}-${{ matrix.features }}
           path: |
-            target/${{ env.rustarch }}/${{ env.PROFILE }}/proxy
-            target/${{ env.rustarch }}/${{ env.PROFILE }}/broker
+            ${{ env.bins }}
       - name: Upload (test, native only)
         if: matrix.arch == 'amd64'
         uses: actions/upload-artifact@v3
