@@ -1,5 +1,5 @@
 [package]
-name = "broker"
+name = "beam-broker"
 version = "0.7.0"
 edition = "2021"
 license = "Apache-2.0"

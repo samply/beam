@@ -1,5 +1,5 @@
 [package]
-name = "proxy"
+name = "beam-proxy"
 version = "0.7.0"
 edition = "2021"
 license = "Apache-2.0"
