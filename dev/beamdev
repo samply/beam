@@ -61,8 +61,8 @@ function build() {
     BUILD_DOCKER=0
     BACK=$(pwd)
     cd $SD/..
-    BROKER=./target/debug/broker
-    PROXY=./target/debug/proxy
+    BROKER=./target/debug/beam-broker
+    PROXY=./target/debug/beam-proxy
     if [ ! -x ./artifacts/binaries-$ARCH ]; then
         echo "Binaries missing -- building ..."
         BUILD="$(cargo build $@ --message-format=json)"

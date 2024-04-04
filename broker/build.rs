@@ -29,7 +29,7 @@ fn get_pkg_name() -> String {
 
 fn set_samply_user_agent() {
     println!(
-        "cargo:rustc-env=SAMPLY_USER_AGENT=Samply.Beam.{}/{}",
+        "cargo:rustc-env=SAMPLY_USER_AGENT=Samply.{}/{}",
         get_pkg_name(),
         get_version()
     );
