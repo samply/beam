@@ -10,7 +10,7 @@ on:
 
 jobs:
   build-with-samply:
-    uses: samply/github-workflows/.github/workflows/rust.yml@rust
+    uses: samply/github-workflows/.github/workflows/rust.yml@main
     with:
       # For information on these variables, please refer to https://github.com/samply/github-workflows/tree/main/.github/workflows/rust.yml
       # Docker Hub name will be {image-prefix}{component}
