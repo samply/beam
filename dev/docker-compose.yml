@@ -18,7 +18,7 @@ services:
       dockerfile: Dockerfile
       args:
         - COMPONENT=beam-broker
-    image: samply/beam-broker:${TAG}
+    image: samply/beam-broker:${TAG:-localbuild}
     ports:
       - 8080:8080
       - 8090:8090
@@ -49,7 +49,7 @@ services:
       dockerfile: Dockerfile
       args:
         - COMPONENT=beam-proxy
-    image: samply/beam-proxy:${TAG}
+    image: samply/beam-proxy:${TAG:-localbuild}
     ports:
       - 8081:8081
     environment:
@@ -71,7 +71,7 @@ services:
       dockerfile: Dockerfile
       args:
         - COMPONENT=beam-proxy
-    image: samply/beam-proxy:${TAG}
+    image: samply/beam-proxy:${TAG:-localbuild}
     ports:
       - 8082:8082
     environment:
