@@ -1,5 +1,4 @@
-use once_cell::sync::OnceCell;
-use static_init::dynamic;
+use once_cell::sync::{Lazy, OnceCell};
 use tracing::debug;
 
 use crate::{
@@ -21,23 +20,20 @@ fn load<T: Config>() -> T where {
         })
 }
 
-#[dynamic(lazy)]
-pub static CONFIG_PROXY: config_proxy::Config = {
+pub static CONFIG_PROXY: Lazy<config_proxy::Config> = Lazy::new(|| {
     debug!("Loading config CONFIG_PROXY");
     load()
-};
+});
 
-#[dynamic(lazy)]
-pub static CONFIG_CENTRAL: config_broker::Config = {
+pub static CONFIG_CENTRAL: Lazy<config_broker::Config> = Lazy::new(|| {
     debug!("Loading config CONFIG_CENTRAL");
     load()
-};
+});
 
-#[dynamic(lazy)]
-pub static CONFIG_SHARED: config_shared::Config = {
+pub static CONFIG_SHARED: Lazy<config_shared::Config> = Lazy::new(|| {
     debug!("Loading config CONFIG_SHARED");
     load()
-};
+});
 
 pub(crate) static CONFIG_SHARED_CRYPTO: OnceCell<ConfigCrypto> = OnceCell::new();
 

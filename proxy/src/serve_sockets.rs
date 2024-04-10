@@ -7,10 +7,7 @@ use std::{
 };
 
 use axum::{
-    extract::{Path, State},
-    response::{IntoResponse, Response},
-    routing::{get, post},
-    RequestPartsExt, Router, Json, Extension,
+    extract::{Path, Request, State}, http::{self, StatusCode}, response::{IntoResponse, Response}, routing::{get, post}, Extension, Json, RequestPartsExt, Router
 };
 use bytes::{Buf, BufMut, BytesMut};
 use chacha20poly1305::{
@@ -25,16 +22,13 @@ use chacha20poly1305::{
 };
 use dashmap::DashMap;
 use futures::{stream::IntoAsyncRead, FutureExt, SinkExt, StreamExt, TryStreamExt};
-use hyper::{upgrade::{OnUpgrade, self}, Body, Request, StatusCode};
+use hyper_util::rt::TokioIo;
 use rsa::rand_core::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::AppOrProxyId;
 use shared::{
-    config,
-    ct_codecs::{Base64UrlSafeNoPadding, Encoder as B64Encoder, Decoder as B64Decoder, self},
-    http_client::SamplyHttpClient,
-    MsgEmpty, MsgId, MsgSocketRequest, Plain, MessageType, expire_map::LazyExpireMap,
+    config, ct_codecs::{self, Base64UrlSafeNoPadding, Decoder as B64Decoder, Encoder as B64Encoder}, expire_map::LazyExpireMap, http_client::SamplyHttpClient, reqwest, MessageType, MsgEmpty, MsgId, MsgSocketRequest, Plain
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf, ReadHalf, WriteHalf};
 use tokio_util::{
@@ -77,14 +71,13 @@ async fn get_tasks(
     AuthenticatedApp(sender): AuthenticatedApp,
     state: State<TasksState>,
     Extension(task_secret_map): Extension<MsgSecretMap>,
-    req: Request<Body>
+    req: Request
 ) -> Result<Json<Vec<MsgSocketRequest<Plain>>>, Response> {
-    let mut res = forward_request(req, &state.config, &sender, &state.client).await?;
+    let res = forward_request(req, &state.config, &sender, &state.client).await?;
     if res.status() != StatusCode::OK {
-        return Err(res.into_response());
+        return Err(http::Response::from(res).map(axum::body::Body::new));
     }
-    let body = hyper::body::to_bytes(res.body_mut()).await.map_err(|_| StatusCode::BAD_GATEWAY.into_response())?;
-    let enc_json = serde_json::from_slice(&body).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
+    let enc_json = res.json().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
     let plain_json = to_server_error(validate_and_decrypt(enc_json).await).map_err(IntoResponse::into_response)?;
     let tasks: Vec<MessageType<Plain>> = serde_json::from_value(plain_json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
     let mut out = Vec::with_capacity(tasks.len());
@@ -114,7 +107,7 @@ async fn create_socket_con(
     Path(to): Path<AppOrProxyId>,
     Extension(task_secret_map): Extension<MsgSecretMap>,
     state: State<TasksState>,
-    mut req: Request<Body>,
+    mut req: Request,
 ) -> Response {
     let task_id = MsgId::new();
     let secret = SocketEncKey::generate();
@@ -141,7 +134,7 @@ async fn create_socket_con(
         warn!("Failed to serialize MsgSocketRequest");
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
-    let new_req = Request::post("/v1/sockets").body(Body::from(body));
+    let new_req = Request::post("/v1/sockets").body(axum::body::Body::from(body));
     let post_socket_task_req = match new_req {
         Ok(req) => req,
         Err(e) => {
@@ -174,11 +167,11 @@ async fn connect_socket(
     state: State<TasksState>,
     Extension(task_secret_map): Extension<MsgSecretMap>,
     Path(task_id): Path<MsgId>,
-    req: Request<Body>,
+    mut req: Request,
 ) -> Response {
-    if req.extensions().get::<OnUpgrade>().is_none() {
+    let Some(conn) =  req.extensions_mut().remove::<hyper::upgrade::OnUpgrade>() else {
         return StatusCode::UPGRADE_REQUIRED.into_response();
-    }
+    };
 
     let Some(key) = task_secret_map.get(&task_id).map(|v| v.clone()) else {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -192,7 +185,7 @@ async fn connect_socket(
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     // Try to connect to socket
-    let new_req = Request::get(format!("/v1/sockets/{task_id}")).body(Body::from(body));
+    let new_req = Request::get(format!("/v1/sockets/{task_id}")).body(axum::body::Body::from(body));
     let mut get_socket_con_req = match new_req {
         Ok(req) => req,
         Err(e) => {
@@ -202,7 +195,7 @@ async fn connect_socket(
     };
     *get_socket_con_req.headers_mut() = req.headers().clone();
 
-    let res = match forward_request(get_socket_con_req, &state.config, &sender, &state.client).await
+    let mut res = match forward_request(get_socket_con_req, &state.config, &sender, &state.client).await
     {
         Ok(res) => res,
         Err(err) => {
@@ -211,28 +204,29 @@ async fn connect_socket(
         }
     };
 
-    if res.extensions().get::<OnUpgrade>().is_none()
-        || res.status() != StatusCode::SWITCHING_PROTOCOLS
-    {
-        warn!("Failed to create an upgradable connection to the broker. Response was: {res:?}");
-        return res.status().into_response();
-    }
+    let broker_conn = match res.extensions_mut().remove::<hyper::upgrade::OnUpgrade>() {
+        Some(other_conn) if res.status() == StatusCode::SWITCHING_PROTOCOLS => other_conn,
+        _ => {
+            warn!("Failed to create an upgradable connection to the broker. Response was: {res:?}");
+            return res.status().into_response();
+        }
+    };
 
     // Connect sockets
     tokio::spawn(async move {
-        let (broker_socket, mut client_socket) = match tokio::try_join!(upgrade::on(res), upgrade::on(req)) {
+        let (broker_socket, client_socket) = match tokio::try_join!(broker_conn, conn) {
             Ok(sockets) => sockets,
             Err(e) => {
                 warn!("Failed to upgrade requests to socket connections: {e}");
                 return;
             },
         };
-        let Ok(mut enc_broker_socket) = EncryptedSocket::new(broker_socket, &key).await else {
+        let Ok(mut enc_broker_socket) = EncryptedSocket::new(TokioIo::new(broker_socket), &key).await else {
             warn!("Error encrypting connection to broker");
             return;
         };
 
-        let result = tokio::io::copy_bidirectional(&mut client_socket, &mut enc_broker_socket).await;
+        let result = tokio::io::copy_bidirectional(&mut TokioIo::new(client_socket), &mut enc_broker_socket).await;
         if let Err(e) = result {
             debug!("Relaying socket connection ended: {e}");
         }

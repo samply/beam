@@ -5,44 +5,19 @@ use std::{
 };
 
 use axum::{
-    body::Bytes,
-    extract::{BodyStream, FromRef, State},
-    http::{request::Parts, HeaderValue},
-    response::{sse::Event, IntoResponse, Response, Sse},
-    routing::{any, get, put},
-    Router, Json,
+    body::Bytes, extract::{FromRef, Request, State}, http::{header, request::Parts, HeaderMap, HeaderValue, StatusCode, Uri}, response::{sse::Event, IntoResponse, Response, Sse}, routing::{any, get, put}, Json, RequestExt, Router
 };
 use futures::{
     stream::{StreamExt, TryStreamExt},
     Stream, TryFutureExt,
 };
 use httpdate::fmt_http_date;
-use hyper::{
-    body,
-    body::HttpBody,
-    client::{connect::Connect, HttpConnector},
-    header,
-    service::Service,
-    Body, Client, HeaderMap, Request, StatusCode, Uri,
-};
-use hyper_proxy::ProxyConnector;
-use hyper_tls::HttpsConnector;
 use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::{AppId, AppOrProxyId, ProxyId};
 use shared::{
-    config::{self, CONFIG_PROXY},
-    config_proxy,
-    config_shared::ConfigCrypto,
-    crypto::{self, CryptoPublicPortion},
-    crypto_jwt,
-    errors::SamplyBeamError,
-    http_client::SamplyHttpClient,
-    sse_event::SseEventType,
-    DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest,
-    EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest,
-    MsgTaskResult, PlainMessage, is_actually_hyper_timeout,
+    config::{self, CONFIG_PROXY}, config_proxy, config_shared::ConfigCrypto, crypto::{self, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType, DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage
 };
 use tokio::io::BufReader;
 use tracing::{debug, error, info, trace, warn};
@@ -86,11 +61,11 @@ const ERR_FAKED_FROM: (StatusCode, &str) = (
 );
 
 pub(crate) async fn forward_request(
-    mut req: Request<Body>,
+    mut req: Request<axum::body::Body>,
     config: &config_proxy::Config,
     sender: &AppId,
     client: &SamplyHttpClient,
-) -> Result<hyper::Response<Body>, Response> {
+) -> Result<reqwest::Response, Response> {
     // Create uri to contact broker
     let path = req.uri().path();
     let path_query = req
@@ -110,8 +85,8 @@ pub(crate) async fn forward_request(
     let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
     let req = sign_request(encrypted_msg, parts, &config, None).await.map_err(IntoResponse::into_response)?;
     trace!("Requesting: {:?}", req);
-    let resp = client.request(req).await.map_err(|e| {
-        if is_actually_hyper_timeout(&e) {
+    let resp = client.execute(req).await.map_err(|e| {
+        if e.is_timeout() {
             debug!("Request to broker timed out after set proxy timeout of {PROXY_TIMEOUT}s");
             (StatusCode::GATEWAY_TIMEOUT, "Request to broker timed out ")
         } else {
@@ -127,7 +102,7 @@ pub(crate) async fn handler_task(
     State(config): State<config_proxy::Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
     headers: HeaderMap,
-    req: Request<Body>,
+    req: Request,
 ) -> Response {
     let found = &headers
         .get(header::ACCEPT)
@@ -154,16 +129,18 @@ async fn handler_tasks_nostream(
     client: SamplyHttpClient,
     config: config_proxy::Config,
     sender: AppId,
-    req: Request<Body>,
-) -> Result<Response<Body>, Response> {
+    req: Request,
+) -> Result<Response, Response> {
     // Validate Query, forward to server, get response.
 
     let resp = forward_request(req, &config, &sender, &client).await?;
+    let resp = axum::http::Response::from(resp);
 
     // Check reply's signature
 
     let (mut parts, body) = resp.into_parts();
-    let mut bytes = body::to_bytes(body).await.map_err(|e| {
+    // Is this stupid? Yes. Is there an other way to do this? Yes by depending on hyper-body-util. Do you want to do that? No
+    let mut bytes = reqwest::Response::from(axum::http::Response::new(body)).bytes().await.map_err(|e| {
         error!("Error receiving reply from the broker: {}", e);
         ERR_UPSTREAM.into_response()
     })?;
@@ -178,6 +155,8 @@ async fn handler_tasks_nostream(
                 "Validated and stripped signature: \"{}\"",
                 std::str::from_utf8(&bytes).unwrap_or("Unable to parse string as UTF-8")
             );
+            // Remove content length header as it has changed and is calculated by axum if unset
+            parts.headers.remove(header::CONTENT_LENGTH);
         } else {
             warn!(
                 "Answer is no valid JSON; returning as-is to client: \"{}\". Headers: {:?}",
@@ -187,44 +166,31 @@ async fn handler_tasks_nostream(
         }
     }
 
-    let body = Body::from(bytes);
+    let body = axum::body::Body::from(bytes);
 
-    if let Some(header) = parts.headers.remove(header::CONTENT_LENGTH) {
-        debug!(
-            "Removed header: \"{}: {}\"",
-            header::CONTENT_LENGTH,
-            header.to_str().unwrap_or("(invalid value)")
-        );
-    }
-
-    let resp = Response::from_parts(parts, body);
-
-    Ok(resp)
+    Ok(Response::from_parts(parts, body))
 }
 
 async fn handler_tasks_stream(
     client: SamplyHttpClient,
     config: config_proxy::Config,
     sender: AppId,
-    req: Request<Body>,
+    req: Request,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, Response> {
     // Validate Query, forward to server, get response.
 
-    let mut resp = forward_request(req, &config, &sender, &client).await?;
+    let resp = forward_request(req, &config, &sender, &client).await?;
     
     let code = resp.status();
     if !code.is_success() {
-        let bytes = body::to_bytes(resp.into_body()).await.ok();
-        let error_msg = bytes
-            .and_then(|v| String::from_utf8(v.into()).ok())
-            .unwrap_or("(unable to parse reply)".into());
+        let error_msg = resp.text().await.unwrap_or("(unable to parse reply)".into());
         warn!("Got unexpected response code from server: {code}. Returning error message as-is: \"{error_msg}\"");
         return Err((code, error_msg).into_response());
     }
 
     let outgoing = async_stream::stream! {
         let incoming = resp
-            .body_mut()
+            .bytes_stream()
             .map(|result| result.map_err(|error| {
                 let kind = error.is_timeout().then_some(std::io::ErrorKind::TimedOut).unwrap_or(std::io::ErrorKind::Other);
                 std::io::Error::new(kind, format!("IO Error: {error}"))
@@ -354,7 +320,7 @@ pub async fn sign_request(
     mut parts: Parts,
     config: &config_proxy::Config,
     private_crypto: Option<&ConfigCrypto>,
-) -> Result<Request<Body>, (StatusCode, &'static str)> {
+) -> Result<reqwest::Request, (StatusCode, &'static str)> {
     let from = body.get_from();
 
     let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, private_crypto)
@@ -387,23 +353,12 @@ pub async fn sign_request(
             error!("Crypto failed: {}", e);
             ERR_INTERNALCRYPTO
         })?;
-    let body: Body = token_without_extended_signature.into();
+    let body: reqwest::Body = token_without_extended_signature.into();
     let mut auth_header = String::from("SamplyJWT ");
     auth_header.push_str(&token_with_extended_signature);
     headers_mut.insert(header::HOST, config.broker_host_header.clone());
 
-    let length = HttpBody::size_hint(&body).exact().ok_or_else(|| {
-        error!("Cannot calculate length of request");
-        ERR_BODY
-    })?;
-    if let Some(old) = headers_mut.insert(header::CONTENT_LENGTH, length.into()) {
-        debug!(
-            "Exchanged old Content-Length header ({}) with new one ({})",
-            old.to_str().unwrap_or("(header invalid)"),
-            length
-        );
-    }
-
+    headers_mut.remove(header::CONTENT_LENGTH);
     headers_mut.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_str("application/jwt").unwrap(),
@@ -414,10 +369,10 @@ pub async fn sign_request(
     );
     parts.headers = headers_mut;
     let req = Request::from_parts(parts, body);
-    Ok(req)
+    Ok(req.try_into().expect("Uri to Url conversion should work"))
 }
 
-#[async_recursion::async_recursion]
+// This requires rustc 1.77
 pub(crate) async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
     // It might be possible to use MsgSigned directly instead but there are issues impl Deserialize for MsgSigned<EncryptedMessage>
     #[derive(Deserialize)]
@@ -427,7 +382,7 @@ pub(crate) async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBea
     if let Value::Array(arr) = json {
         let mut results = Vec::with_capacity(arr.len());
         for value in arr {
-            results.push(validate_and_decrypt(value).await?);
+            results.push(Box::pin(validate_and_decrypt(value)).await?);
         }
         Ok(Value::Array(results))
     } else if json.is_object() {
@@ -457,11 +412,11 @@ fn decrypt_msg<M: DecryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> 
 }
 
 async fn encrypt_request(
-    req: Request<Body>,
+    mut req: Request,
     sender: &AppId,
 ) -> Result<(EncryptedMessage, Parts), Response> {
-    let (parts, body) = req.into_parts();
-    let body = body::to_bytes(body).await.map_err(|e| {
+    let parts = req.extract_parts().await.unwrap();
+    let body: bytes::Bytes = req.extract().await.map_err(|e| {
         warn!("Unable to read message body: {e}");
         ERR_BODY.into_response()
     })?;

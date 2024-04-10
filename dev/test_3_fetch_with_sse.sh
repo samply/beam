@@ -10,7 +10,7 @@ if [ "$CODE" != "200" ]; then
     fail "$RET" Unable to fetch the existing task as app1.proxy1 via SSE
 fi
 
-EVENT_LINES=$(echo "$BODY" | grep '^event:' | sed 's/^event://g')
+EVENT_LINES=$(echo "$BODY" | grep '^event:' | sed 's/^event://g' | awk '{$1=$1;print}')
 COUNT=0
 IFS=$'\n'
 for LINE in $EVENT_LINES; do
@@ -64,7 +64,7 @@ if [ "$CODE" != "200" ]; then
     fail "$RET" Unable to fetch partial results as app1.proxy1 via SSE
 fi
 
-EVENT_LINES=$(echo "$BODY" | grep '^event:' | sed 's/^event://g')
+EVENT_LINES=$(echo "$BODY" | grep '^event:' | sed 's/^event://g' | awk '{$1=$1;print}')
 COUNT=0
 EXPIRED_COUNT=0
 IFS=$'\n'

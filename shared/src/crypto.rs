@@ -1,7 +1,7 @@
 use axum::{async_trait, body::Body, http::Request, Json};
 
 use itertools::Itertools;
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use openssl::{
     asn1::{Asn1Time, Asn1TimeRef, Asn1Integer},
     error::ErrorStack,
@@ -13,7 +13,6 @@ use rsa::{
     pkcs1::DecodeRsaPublicKey, pkcs8::DecodePublicKey, RsaPrivateKey, RsaPublicKey, traits::PublicKeyParts,
 };
 use sha2::{Digest, Sha256};
-use static_init::dynamic;
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
@@ -514,8 +513,7 @@ pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
     CERT_GETTER.get().unwrap().im_certificate_as_pem().await
 }
 
-#[dynamic(lazy)]
-pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
+pub(crate) static CERT_CACHE: Lazy<Arc<RwLock<CertificateCache>>> = Lazy::new(|| {
     let (tx_refresh, mut rx_refresh) = mpsc::unbounded_channel::<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>();
     let (tx_newcerts, mut rx_newcerts) = mpsc::channel::<()>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx_refresh)));
@@ -569,7 +567,7 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
         }
     });
     cc
-};
+});
 
 async fn get_cert_by_serial(serial: &str) -> Option<X509> {
     CertificateCache::get_by_serial(serial).await
@@ -768,14 +766,14 @@ pub fn load_certificates_from_file(ca_file: PathBuf) -> Result<X509, SamplyBeamE
     cert
 }
 
-pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, std::io::Error> {
+pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<reqwest::Certificate>, std::io::Error> {
     let mut result = Vec::new();
     if let Some(ca_dir) = ca_dir {
         for file in ca_dir.read_dir()? {
             //.map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory {}: {}", ca_dir.to_string_lossy(), e)))
             let path = file?.path();
             let content = std::fs::read(&path)?;
-            let cert = X509::from_pem(&content);
+            let cert = reqwest::Certificate::from_pem(&content);
             if let Err(e) = cert {
                 warn!(
                     "Unable to read certificate from file {}: {}",

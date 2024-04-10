@@ -1,7 +1,7 @@
 use std::{net::AddrParseError, str::Utf8Error, string::FromUtf8Error};
 
-use http::StatusCode;
 use openssl::error::ErrorStack;
+use reqwest::StatusCode;
 use tokio::time::error::Elapsed;
 use beam_lib::ProxyId;
 
@@ -26,7 +26,7 @@ pub enum SamplyBeamError {
     #[error("Samply.PKI error: Vault is still sealed.")]
     VaultSealed,
     #[error("Samply.PKI error: Unable to connect to Vault: {0}")]
-    VaultUnreachable(hyper::Error),
+    VaultUnreachable(reqwest::Error),
     #[error("Samply.PKI error: Vault has not been initialized, yet.")]
     VaultNotInitialized,
     #[error("Samply.PKI error: Vault has asked with code {0} to redirect to {1}; this should not happen.")]
@@ -38,9 +38,9 @@ pub enum SamplyBeamError {
     #[error("Internal synchronization error: {0}")]
     InternalSynchronizationError(String),
     #[error("Error executing HTTP request: {0}")]
-    HttpRequestError(hyper::Error),
-    #[error("Error building HTTP request: {0}")]
-    HttpRequestBuildError(#[from] http::Error),
+    HttpRequestError(#[from] reqwest::Error),
+    // #[error("Error building HTTP request: {0}")]
+    // HttpRequestBuildError(#[from] http::Error),
     #[error("Problem with HTTP proxy: {0}")]
     HttpProxyProblem(std::io::Error),
     #[error("Invalid Beam ID: {0}")]
@@ -72,12 +72,6 @@ impl From<ErrorStack> for SamplyBeamError {
 impl From<rsa::errors::Error> for SamplyBeamError {
     fn from(e: rsa::errors::Error) -> Self {
         Self::SignEncryptError(e.to_string())
-    }
-}
-
-impl From<hyper::Error> for SamplyBeamError {
-    fn from(e: hyper::Error) -> Self {
-        Self::HttpRequestError(e)
     }
 }
 

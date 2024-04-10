@@ -2,13 +2,10 @@
 
 use std::time::Duration;
 
+use axum::http::{header, HeaderValue, StatusCode};
 use backoff::{future::retry_notify, ExponentialBackoff};
-use hyper::header;
-use hyper::{body, client::HttpConnector, Client, Method, Request, StatusCode, Uri};
-use hyper_proxy::ProxyConnector;
-use hyper_tls::HttpsConnector;
 use beam_lib::AppOrProxyId;
-use shared::{PlainMessage, MsgEmpty, EncryptedMessage, is_actually_hyper_timeout};
+use shared::{reqwest, EncryptedMessage, MsgEmpty, PlainMessage};
 use shared::crypto::CryptoPublicPortion;
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
@@ -39,8 +36,7 @@ pub async fn main() -> anyhow::Result<()> {
         &config::CONFIG_SHARED.tls_ca_certificates,
         Some(Duration::from_secs(PROXY_TIMEOUT)),
         Some(Duration::from_secs(20)),
-    )
-    .map_err(SamplyBeamError::HttpProxyProblem)?;
+    )?;
 
     if let Err(err) = retry_notify(
         ExponentialBackoff::default(),
@@ -118,24 +114,8 @@ async fn get_broker_health(
     config: &Config,
     client: &SamplyHttpClient,
 ) -> Result<(), SamplyBeamError> {
-    let uri = Uri::builder()
-        .scheme(
-            config
-                .broker_uri
-                .scheme()
-                .expect("Config broker uri to have valid scheme")
-                .as_str(),
-        )
-        .authority(
-            config
-                .broker_uri
-                .authority()
-                .expect("Config broker uri to have valid authority")
-                .to_owned(),
-        )
-        .path_and_query("/v1/health")
-        .build()
-        .map_err(|e| SamplyBeamError::HttpRequestBuildError(e))
+    let uri = config.broker_uri
+        .join("/v1/health")
         .expect("Uri to be constructed correctly");
 
     let resp = retry_notify(
@@ -144,13 +124,11 @@ async fn get_broker_health(
             .with_max_elapsed_time(Some(Duration::from_secs(30)))
             .build(),
         || async {
-            let req = Request::builder()
-                .method(Method::GET)
-                .uri(&uri)
-                .header(hyper::header::USER_AGENT, env!("SAMPLY_USER_AGENT"))
-                .body(body::Body::empty())
-                .expect("Request to be constructed correctly");
-            Ok(client.request(req).await?)
+            Ok(client
+                .get(uri.clone())
+                .header(header::USER_AGENT, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")))
+                .send()
+                .await?)
         },
         |err, b: Duration| {
             warn!(
@@ -178,7 +156,7 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
             let body = EncryptedMessage::MsgEmpty(MsgEmpty {
                 from: AppOrProxyId::Proxy(config.proxy_id.clone()),
             });
-            let (parts, body) = Request::get(format!("{}v1/control", config.broker_uri))
+            let (parts, body) = axum::http::Request::get(format!("{}v1/control", config.broker_uri))
                 .header(header::USER_AGENT, env!("SAMPLY_USER_AGENT"))
                 .body(body)
                 .expect("To build request successfully")
@@ -186,7 +164,7 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
 
             let req = sign_request(body, parts, &config, None).await.expect("Unable to sign request; this should always work");
             // In the future this will poll actual control related tasks
-            match client.request(req).await {
+            match client.execute(req).await {
                 Ok(res) => {
                     match res.status() {
                         StatusCode::OK => {
@@ -202,7 +180,7 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
                     };
                 },
                 // For some reason e.is_timeout() does not work
-                Err(e) if is_actually_hyper_timeout(&e) => {
+                Err(e) if e.is_timeout() => {
                     debug!("Connection to broker timed out; retrying: {e}");
                 },
                 Err(e) => {

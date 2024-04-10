@@ -1,6 +1,7 @@
 use std::{sync::Arc, time::{Duration, SystemTime}};
 
-use axum::{extract::{State, Path}, http::StatusCode, routing::get, Json, Router, TypedHeader, headers::{Authorization, authorization::Basic}, response::Response};
+use axum::{extract::{State, Path}, http::StatusCode, routing::get, Json, Router, response::Response};
+use axum_extra::{headers::{authorization::Basic, Authorization}, TypedHeader};
 use beam_lib::ProxyId;
 use serde::{Serialize, Deserialize};
 use shared::{crypto_jwt::Authorized, Msg, config::CONFIG_CENTRAL};

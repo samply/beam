@@ -7,12 +7,7 @@ use crate::{
     middleware::{LoggingInfo, ProxyLogger},
     Msg, MsgEmpty, MsgId, MsgSigned,
 };
-use axum::{async_trait, body::HttpBody, extract::FromRequest, http::StatusCode, BoxError};
-use http::{request::Parts, uri::PathAndQuery, Request};
-use hyper::{
-    header::{self, HeaderName},
-    HeaderMap, Method, Uri,
-};
+use axum::{async_trait, body::HttpBody, extract::{FromRequest, Request}, http::{header, request::Parts, uri::PathAndQuery, HeaderMap, HeaderName, Method, StatusCode, Uri}, BoxError, RequestExt};
 use jwt_simple::{
     claims::JWTClaims,
     prelude::{
@@ -25,41 +20,35 @@ use once_cell::unsync::Lazy;
 use openssl::base64;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
-use static_init::dynamic;
 use tracing::{debug, error, warn};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
-const ERR_BODY: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Body is invalid.");
 const ERR_FROM: (StatusCode, &str) = (
     StatusCode::BAD_REQUEST,
     "\"from\" field in message does not match your certificate.",
 );
 
 #[async_trait]
-impl<S: Send + Sync, B: HttpBody + Send + Sync, T> FromRequest<S, B> for MsgSigned<T>
+impl<S: Send + Sync, T> FromRequest<S> for MsgSigned<T>
 where
     // these trait bounds are copied from `impl FromRequest for axum::Json`
     // T: DeserializeOwned,
     // B: axum::body::HttpBody + Send,
-    B::Data: Send,
-    B::Error: Into<BoxError>,
-    B: HttpBody + 'static,
     T: Serialize + DeserializeOwned + Msg,
 {
     type Rejection = (StatusCode, &'static str);
 
-    async fn from_request(req: Request<B>, _state: &S) -> Result<Self, Self::Rejection> {
-        let (mut parts, body) = req.into_parts();
-        let bytes = hyper::body::to_bytes(body).await.map_err(|_| ERR_BODY)?;
-        let token_without_extended_signature = std::str::from_utf8(&bytes).map_err(|e| {
+    async fn from_request(mut req: Request, _state: &S) -> Result<Self, Self::Rejection> {
+        let mut parts = req.extract_parts().await.expect("Infallible");
+        let token_without_extended_signature: String = req.extract().await.map_err(|e| {
             warn!(
                 "Unable to parse token_without_extended_signature as UTF-8: {}",
                 e
             );
             ERR_SIG
         })?;
-        verify_with_extended_header(&mut parts, token_without_extended_signature).await
+        verify_with_extended_header(&mut parts, &token_without_extended_signature).await
     }
 }
 
@@ -180,6 +169,7 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
         .remove::<ProxyLogger>()
         .expect("Should be set by middleware")
         .send(header_claims.custom.from.clone())
+        .await
         .expect("Receiver still lives in middleware");
 
     // Check extra digest
