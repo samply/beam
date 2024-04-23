@@ -1,40 +1,30 @@
-use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref, time::Duration};
+use std::{sync::Arc, collections::HashMap, time::Duration};
 
-use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response}, headers::{ContentType, HeaderMapExt}};
-use bytes::BufMut;
-use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body, Request, Method, upgrade::{OnUpgrade, self}};
-use serde::{Serialize, Serializer, ser::SerializeSeq};
-use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}, expire_map::LazyExpireMap, serde_helpers::DerefSerializer};
-use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
-use tracing::{debug, log::error, warn};
+use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response}};
+use futures::StreamExt;
+use hyper::{StatusCode, header, Body, Request, upgrade::{OnUpgrade, self}};
+use serde::Serialize;
+use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, MsgEmpty, Msg, MsgId};
+use tokio::sync::{oneshot, Mutex};
+use tracing::{debug, warn};
 
-use crate::task_manager::{TaskManager, Task};
-
+use crate::task_manager::TaskManager;
 
 #[derive(Clone)]
 struct SocketState {
     task_manager: Arc<TaskManager<MsgSocketRequest<Encrypted>>>,
-    waiting_connections: Arc<LazyExpireMap<MsgId, oneshot::Sender<Request<Body>>>>
+    waiting_connections: Arc<Mutex<HashMap<MsgId, oneshot::Sender<Request<Body>>>>>
 }
 
 impl SocketState {
-    const WAITING_CONNECTIONS_TIMEOUT: Duration = Duration::from_secs(60);
-    const WAITING_CONNECTIONS_CLEANUP_INTERVAL: Duration = Duration::from_secs(5 * 60);
+    const TTL: Duration = Duration::from_secs(60);
 }
 
 impl Default for SocketState {
     fn default() -> Self {
-        let waiting_connections: Arc<LazyExpireMap<_, _>> = Default::default();
-        let cons = waiting_connections.clone();
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Self::WAITING_CONNECTIONS_CLEANUP_INTERVAL).await;
-                cons.retain_expired();
-            }
-        });
         Self {
             task_manager: TaskManager::new(),
-            waiting_connections
+            waiting_connections: Default::default()
         }
     }
 }
@@ -51,26 +41,29 @@ async fn get_socket_requests(
     mut block: HowLongToBlock,
     state: State<SocketState>,
     msg: MsgSigned<MsgEmpty>,
-) -> Result<DerefSerializer, StatusCode> {
+) -> (StatusCode, Json<impl Serialize>) {
     if block.wait_count.is_none() && block.wait_time.is_none() {
         block.wait_count = Some(1);
     }
-    let requester = msg.get_from();
-    let filter = |req: &MsgSocketRequest<Encrypted>| req.to.contains(requester);
-
-    let socket_reqs = state.task_manager.wait_for_tasks(&block, filter).await?;
-    DerefSerializer::new(socket_reqs, block.wait_count).map_err(|e| {
-        warn!("Failed to serialize socket tasks: {e}");
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
+    let requester = msg.msg.from;
+    let socket_tasks: Vec<_> = state.task_manager
+        .stream_tasks(block, |t| std::future::ready(t.to.contains(&requester)))
+        .collect()
+        .await;
+    let status = if block.wait_count.is_some_and(|wc| socket_tasks.len() < wc.into()) {
+        StatusCode::PARTIAL_CONTENT
+    } else {
+        StatusCode::OK
+    };
+    (status, Json(socket_tasks))
 }
 
 async fn post_socket_request(
     state: State<SocketState>,
     msg: MsgSigned<MsgSocketRequest<Encrypted>>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let msg_id = msg.wait_id();
-    state.task_manager.post_task(msg)?;
+    let msg_id = msg.msg.id;
+    state.task_manager.post_task(msg).await?;
 
     Ok((
         StatusCode::CREATED,
@@ -97,7 +90,7 @@ async fn connect_socket(
         Err(e) => return Ok(e.into_response()),
     };
     {
-        let task = state.task_manager.get(&task_id)?;
+        let task = state.task_manager.get(task_id).await?;
         // Allowed to connect are the issuer of the task and the recipient
         if !(task.get_from() == &msg.from || task.get_to().contains(&msg.from)) {
             return Err(StatusCode::UNAUTHORIZED);
@@ -108,20 +101,29 @@ async fn connect_socket(
         return Err(StatusCode::UPGRADE_REQUIRED);
     }
 
-    if let Some(req_sender) = state.waiting_connections.remove(&task_id) {
+    let connection_channel = state.waiting_connections.lock().await.remove(&task_id);
+    if let Some(req_sender) = connection_channel {
         if let Err(_) = req_sender.send(req) {
             warn!("Error sending socket connection to tunnel. Receiver has been dropped");
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     } else {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        state.waiting_connections.insert_for(SocketState::WAITING_CONNECTIONS_TIMEOUT, task_id, tx);
-        let Ok(other_req) = rx.await else {
-            debug!("Socket expired because nobody connected");
-            return Err(StatusCode::GONE);
+        let (tx, rx) = oneshot::channel();
+        state.waiting_connections.lock().await.insert(task_id, tx);
+        let other_req = tokio::select! {
+            other_req = rx => {
+                other_req.map_err(|_| {
+                    warn!("Socket expired because the sender was dropped");
+                    StatusCode::GONE
+                })?
+            }
+            _ = tokio::time::sleep(SocketState::TTL) => {
+                state.waiting_connections.lock().await.remove(&task_id);
+                debug!("Socket expired because nobody connected after {}s", SocketState::TTL.as_secs());
+                return Err(StatusCode::GONE)
+            }
         };
-        // We don't care if the task expired by now
-        _ = state.task_manager.remove(&task_id);
+        state.task_manager.remove(task_id).await;
         tokio::spawn(async move {
             let (mut socket1, mut socket2) = match tokio::try_join!(upgrade::on(req), upgrade::on(other_req)) {
                 Ok(sockets) => sockets,

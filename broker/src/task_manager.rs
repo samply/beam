@@ -7,7 +7,7 @@ use std::{
 
 use axum::response::sse::Event;
 use beam_lib::{AppOrProxyId, MsgId, WorkStatus};
-use futures::Stream;
+use futures::{Future, Stream};
 use hyper::StatusCode;
 use moka::{future::Cache, Expiry};
 use serde::Serialize;
@@ -284,10 +284,11 @@ where
 
     /// ## Note:
     /// This function may yield tasks that expired while waiting on new ones
-    pub fn stream_tasks(
-        &self,
+    pub fn stream_tasks<'s, Fut: Future<Output = bool> + Captures<&'s ()>>(
+        &'s self,
         block: HowLongToBlock,
-    ) -> impl Stream<Item = Arc<TaskWithResults<T>>> + Captures<&'_ ()>
+        filter: impl for<'a> FnMut(&'a Arc<TaskWithResults<T>>) -> Fut
+    ) -> impl Stream<Item = Arc<TaskWithResults<T>>> + Captures<&'s ()>
     {
         let (max_elements, wait_until) = decide_blocking_conditions(&block);
         let new_tasks = self.new_tasks.subscribe();
@@ -311,6 +312,7 @@ where
             use futures::StreamExt;
             tokio_stream::iter(initial_tasks)
                 .chain(new_task_stream)
+                .filter(filter)
                 .take(max_elements)
                 .take_until(tokio::time::sleep_until(wait_until))
         }
@@ -457,7 +459,7 @@ mod test {
     }
 
     async fn assert_n_tasks(n: u8, tm: Arc<TaskManager<MsgTaskRequest>>) {
-        let s = tm.stream_tasks(HowLongToBlock { wait_time: Some(Duration::from_millis(250)), wait_count: None });
+        let s = tm.stream_tasks(HowLongToBlock { wait_time: Some(Duration::from_millis(250)), wait_count: None }, |_| futures::future::ready(true));
         futures::pin_mut!(s);
         for _ in 0..n {
             assert!(s.next().await.is_some(), "Had no task");
