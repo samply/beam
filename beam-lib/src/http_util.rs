@@ -93,7 +93,7 @@ impl BeamClient {
     /// The generic Parameter T represents the task body type that the requests are expected to have.
     pub async fn poll_pending_tasks<T: DeserializeOwned + 'static>(&self, blocking: &BlockingOptions) -> Result<Vec<TaskRequest<T>>> {
         let url = self.beam_proxy_url
-            .join(&format!("/v1/tasks?filter=todo&{}", blocking.to_query()))
+            .join(&format!("v1/tasks?filter=todo&{}", blocking.to_query()))
             .expect("The proxy url is valid");
         let response_result = self.client
             .get(url)
@@ -118,7 +118,7 @@ impl BeamClient {
     /// The generic Parameter T represents the result body type that the requests are expected to have.
     pub async fn poll_results<T: DeserializeOwned + 'static>(&self, task_id: &MsgId, blocking: &BlockingOptions) -> Result<Vec<TaskResult<T>>> {
         let url = self.beam_proxy_url
-            .join(&format!("/v1/tasks/{task_id}/results?{}", blocking.to_query()))
+            .join(&format!("v1/tasks/{task_id}/results?{}", blocking.to_query()))
             .expect("The proxy url is valid");
         let response_result = self.client
             .get(url)
@@ -143,7 +143,7 @@ impl BeamClient {
     /// Post a beam task with a serializeable body.
     pub async fn post_task<T: Serialize + 'static>(&self, task: &TaskRequest<T>) -> Result<()> {
         let url = self.beam_proxy_url
-            .join("/v1/tasks")
+            .join("v1/tasks")
             .expect("The proxy url is valid");
         let response = self.client
             .post(url)
@@ -161,7 +161,7 @@ impl BeamClient {
     /// Returns true if the result was newly created or false if it was updated.
     pub async fn put_result<T: Serialize + 'static>(&self, result: &TaskResult<T>, for_task_id: &MsgId) -> Result<bool> {
         let url = self.beam_proxy_url
-            .join(&format!("/v1/tasks/{for_task_id}/results/{}", result.from))
+            .join(&format!("v1/tasks/{for_task_id}/results/{}", result.from))
             .expect("The proxy url is valid");
         let response = self.client
             .put(url)
@@ -196,7 +196,7 @@ impl BeamClient {
     pub async fn create_socket_with_metadata(&self, destination: &AddressingId, metadata: impl Serialize) -> Result<reqwest::Upgraded> {
         const METADATA_HEADER: HeaderName = HeaderName::from_static("metadata");
         let url = self.beam_proxy_url
-            .join(&format!("/v1/sockets/{destination}"))
+            .join(&format!("v1/sockets/{destination}"))
             .expect("The proxy url is valid");
         let response = self.client
             .post(url)
@@ -221,7 +221,7 @@ impl BeamClient {
     #[cfg(feature = "sockets")]
     pub async fn get_socket_tasks(&self, blocking: &BlockingOptions) -> Result<Vec<SocketTask>> {
         let url = self.beam_proxy_url
-            .join(&format!("/v1/sockets?{}", blocking.to_query()))
+            .join(&format!("v1/sockets?{}", blocking.to_query()))
             .expect("The proxy url is valid");
         let response_result = self.client
             .get(url)
@@ -247,7 +247,7 @@ impl BeamClient {
     #[cfg(feature = "sockets")]
     pub async fn connect_socket(&self, socket_task_id: &MsgId) -> Result<reqwest::Upgraded> {
         let url = self.beam_proxy_url
-            .join(&format!("/v1/sockets/{socket_task_id}"))
+            .join(&format!("v1/sockets/{socket_task_id}"))
             .expect("The proxy url is valid");
         let response = self.client
             .get(url)
