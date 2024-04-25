@@ -28,6 +28,7 @@ async fn test_full_task_cycle() -> Result<()> {
 async fn test_task_claiming() -> Result<()> {
     let id = post_task(()).await?;
     put_result(id, (), Some(WorkStatus::Claimed)).await?;
+    assert!(poll_task::<()>(id).await.is_err(), "Got task although it was already claimed by us");
     // Test waiting for 1 ready result which is not there yet
     let block = BlockingOptions::from_count(1);
     tokio::select! {
@@ -63,7 +64,7 @@ pub async fn post_task<T: Serialize + 'static>(body: T) -> Result<MsgId> {
 }
 
 pub async fn poll_task<T: DeserializeOwned + 'static>(expected_id: MsgId) -> Result<TaskRequest<T>> {
-    CLIENT2.poll_pending_tasks(&BlockingOptions::from_time(Duration::from_secs(5)))
+    CLIENT2.poll_pending_tasks(&BlockingOptions::from_time(Duration::from_secs(1)))
         .await?
         .into_iter()
         .find(|t| t.id == expected_id)
