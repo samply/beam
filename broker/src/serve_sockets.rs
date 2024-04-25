@@ -86,6 +86,7 @@ async fn connect_socket(
 ) -> Result<Response, StatusCode> {
     // We have to do this reconstruction of the request as calling extract on the req to get the body will take ownership of the request
     let (mut parts, body) = req.into_parts();
+    tracing::info!(?parts, ?parts.extensions);
     let body = hyper::body::to_bytes(body)
         .await
         .ok()
@@ -105,6 +106,7 @@ async fn connect_socket(
     }
     req = Request::from_parts(parts, Body::empty());
     if req.extensions().get::<OnUpgrade>().is_none() {
+        tracing::info!("Somehow no upgrade");
         return Err(StatusCode::UPGRADE_REQUIRED);
     }
 
