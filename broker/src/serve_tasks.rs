@@ -199,7 +199,7 @@ async fn get_tasks(
     let filter = MsgFilterForTask {
         normal: filter,
         unanswered_by: unanswered_by.as_ref(),
-        workstatus_is_not: [WorkStatus::Succeeded, WorkStatus::PermFailed]
+        workstatus_is_not: [WorkStatus::Succeeded, WorkStatus::PermFailed, WorkStatus::Claimed]
             .iter()
             .map(std::mem::discriminant)
             .collect(),
