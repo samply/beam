@@ -503,7 +503,11 @@ pub fn init_cert_getter<G: GetCerts + 'static>(getter: G) {
 
 pub async fn get_serial_list() -> Vec<String> {
     let cache = CERT_CACHE.read().await;
-    cache.serial_to_x509.keys().cloned().collect()
+    cache.serial_to_x509.iter()
+        .filter(|(_, v)| matches!(v, CertificateCacheEntry::Valid(_)))
+        .map(|(k, _)| k)
+        .cloned()
+        .collect()
 }
 
 pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
