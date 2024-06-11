@@ -192,6 +192,9 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
                         StatusCode::OK => {
                             // Process control task
                         },
+                        StatusCode::GATEWAY_TIMEOUT => {
+                            debug!("Connection to broker timed out; retrying.");
+                        },
                         other => {
                             warn!("Got unexpected status getting control tasks from broker: {other}");
                             tokio::time::sleep(RETRY_INTERVAL).await;
