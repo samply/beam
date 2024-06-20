@@ -225,14 +225,21 @@ async fn handler_tasks_stream(
     let outgoing = async_stream::stream! {
         let incoming = resp
             .body_mut()
-            .map(|result| result.map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, format!("IO Error: {error}"))))
+            .map(|result| result.map_err(|error| {
+                let kind = error.is_timeout().then_some(std::io::ErrorKind::TimedOut).unwrap_or(std::io::ErrorKind::Other);
+                std::io::Error::new(kind, format!("IO Error: {error}"))
+            }))
             .into_async_read();
 
         let mut reader = async_sse::decode(incoming);
 
         while let Some(event) = reader.next().await {
             let event = match event {
-                Ok(event) => event,
+                Ok(event)=> event,
+                Err(e) if e.downcast_ref::<std::io::Error>().unwrap().kind() == std::io::ErrorKind::TimedOut => {
+                    debug!("SSE connection timed out");
+                    break;
+                },
                 Err(err) => {
                     error!("Got error reading SSE stream: {err}");
                     yield Ok(Event::default()
