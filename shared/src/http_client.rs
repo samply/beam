@@ -25,7 +25,8 @@ pub fn build(
         builder = builder.add_root_certificate(cert.clone());
     }
 
-    // This is not doing the logic that reqwest does ofc. reqwest supports all proxy env config vars in upper and lower case
+    // This is not doing the logic that reqwest does ofc. reqwest supports all proxy env config vars in upper and lower case.
+    // This is just for display purposes as reqwest does not expose which proxies it loaded.
     let proxies = std::env::vars()
         .filter(|(k, _)| k.to_ascii_lowercase().contains("proxy"))
         .collect::<Vec<_>>();
