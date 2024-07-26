@@ -6,14 +6,13 @@ use std::{
 use axum::{
     extract::ConnectInfo,
     extract::{Path, Query, State},
-    http::{header, HeaderValue, StatusCode},
+    http::{header, HeaderValue, StatusCode, HeaderMap},
     response::{sse::Event, IntoResponse, Response, Sse},
     routing::{get, post, put},
     Json, Router,
 };
 use beam_lib::AppOrProxyId;
 use futures_core::{stream, Stream};
-use hyper::HeaderMap;
 use serde::Deserialize;
 use beam_lib::WorkStatus;
 use shared::{

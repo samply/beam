@@ -1,5 +1,4 @@
-use axum::{routing::get, Router};
-use hyper::StatusCode;
+use axum::{http::StatusCode, routing::get, Router};
 
 pub(crate) fn router() -> Router {
     Router::new().route("/v1/health", get(handler_health))

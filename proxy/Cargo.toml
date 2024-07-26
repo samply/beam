@@ -12,45 +12,38 @@ shared = { path = "../shared", features = ["config-for-proxy"] }
 beam-lib = { workspace = true }
 
 tokio = { version = "1", features = ["full"] }
-async-recursion = "1.0.0"
-axum = { version = "0.6", features = ["macros"] }
-hyper = { version = "0.14.19", features = ["full"] }
-
-# for HTTP client
-hyper-tls = "0.5.0"
-httpdate = "1.0.2"
-hyper-proxy = "0.9.1"
+axum = { version = "0.7", features = ["macros"] }
+bytes = { version = "1" }
+httpdate = "1.0"
 
 # Error handling
-thiserror = "1.0.31"
-anyhow = "1.0.58"
-backoff = { version = "0.4.0", features = ["tokio"] }
+anyhow = "1"
+backoff = { version = "0.4", features = ["tokio"] }
 
-# Logging is imported through shared
-tracing = "0.1.35"
-#tracing-subscriber = { version = "0.3.11", features = ["env-filter"] }
+# Subscriber is imported through shared
+tracing = "0.1"
 
 # Config file parsing
 serde = "1"
 serde_json = "1"
 
 # Encryption handling
-rsa = "0.9.2"
+rsa = "0.9"
 
 # Server-sent Events (SSE) support
-tokio-util = { version = "0.7.7", features = ["io"] }
-futures = "0.3.26"
-async-sse = "5.1.0"
-async-stream = "0.3.4"
+tokio-util = { version = "0.7", features = ["io"] }
+futures = "0.3"
+async-sse = "5.1"
+async-stream = "0.3"
 
 # Socket dependencies
-chacha20poly1305 = { version = "0.10.1", features = ["stream"], optional = true }
-bytes = { version = "1.4", optional = true}
-dashmap =  { version = "5.4", optional = true}
-
+chacha20poly1305 = { version = "0.10", features = ["stream"], optional = true }
+dashmap =  { version = "5.5", optional = true}
+hyper = { version = "1", default-features = false, optional = true }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"], optional = true}
 
 [features]
-sockets = ["dep:bytes", "dep:chacha20poly1305", "dep:dashmap", "tokio-util/codec", "tokio-util/compat", "shared/sockets", "shared/expire_map"]
+sockets = ["dep:chacha20poly1305", "dep:dashmap", "tokio-util/codec", "tokio-util/compat", "shared/sockets", "shared/expire_map", "dep:hyper", "dep:hyper-util"]
 
 [build-dependencies]
 build-data = "0"

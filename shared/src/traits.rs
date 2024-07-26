@@ -1,11 +1,10 @@
 use axum::{
     async_trait,
     extract::{self, FromRequest, FromRequestParts, Path, Query},
-    http::StatusCode,
+    http::{request::Parts, StatusCode},
     BoxError, RequestPartsExt,
 };
-use fundu::{DurationParser};
-use http::request::Parts;
+use fundu::DurationParser;
 
 use crate::*;
 

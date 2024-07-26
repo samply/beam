@@ -1,5 +1,4 @@
-use axum::{middleware::Next, response::Response};
-use hyper::{header, Request, Body, http::HeaderValue};
+use axum::{http::{header, HeaderValue}, middleware::Next, response::Response, extract::Request};
 use tracing::{debug, warn};
 
 enum Verdict {
@@ -37,8 +36,8 @@ fn compare_version(their_version_header: &HeaderValue) -> Verdict {
 }
 
 pub(crate) async fn log_version_mismatch(
-    req: Request<Body>,
-    next: Next<Body>,
+    req: Request,
+    next: Next,
 ) -> Response {
     let user_agent = req.headers().get(header::USER_AGENT);
 

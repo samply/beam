@@ -1,10 +1,10 @@
 use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref, time::Duration};
 
-use axum::{Router, Json, extract::{State, Path}, routing::get, response::{IntoResponse, Response}, headers::{ContentType, HeaderMapExt}};
+use axum::{extract::{Path, Request, State}, http::{header, request::Parts, StatusCode}, response::{IntoResponse, Response}, routing::get, RequestExt, Router};
 use bytes::BufMut;
-use hyper::{StatusCode, header, HeaderMap, http::HeaderValue, Body, Request, Method, upgrade::{OnUpgrade, self}};
+use hyper_util::rt::TokioIo;
 use serde::{Serialize, Serializer, ser::SerializeSeq};
-use shared::{MsgSocketRequest, Encrypted, MsgSigned, HowLongToBlock, crypto_jwt::Authorized, MsgEmpty, Msg, MsgId, HasWaitId, config::{CONFIG_SHARED, CONFIG_CENTRAL}, expire_map::LazyExpireMap, serde_helpers::DerefSerializer};
+use shared::{config::{CONFIG_CENTRAL, CONFIG_SHARED}, crypto_jwt::Authorized, expire_map::LazyExpireMap, serde_helpers::DerefSerializer, Encrypted, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned, MsgSocketRequest};
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
 use tracing::{debug, log::error, warn};
 
@@ -14,7 +14,7 @@ use crate::task_manager::{TaskManager, Task};
 #[derive(Clone)]
 struct SocketState {
     task_manager: Arc<TaskManager<MsgSocketRequest<Encrypted>>>,
-    waiting_connections: Arc<LazyExpireMap<MsgId, oneshot::Sender<Request<Body>>>>
+    waiting_connections: Arc<LazyExpireMap<MsgId, oneshot::Sender<hyper::upgrade::OnUpgrade>>>
 }
 
 impl SocketState {
@@ -81,16 +81,10 @@ async fn post_socket_request(
 async fn connect_socket(
     state: State<SocketState>,
     Path(task_id): Path<MsgId>,
-    mut req: Request<Body>
+    mut parts: Parts,
+    body: String,
     // This Result is just an Either type. An error value does not mean something went wrong
 ) -> Result<Response, StatusCode> {
-    // We have to do this reconstruction of the request as calling extract on the req to get the body will take ownership of the request
-    let (mut parts, body) = req.into_parts();
-    let body = hyper::body::to_bytes(body)
-        .await
-        .ok()
-        .and_then(|data| String::from_utf8(data.to_vec()).ok())
-        .ok_or(StatusCode::BAD_REQUEST)?;
     let result = shared::crypto_jwt::verify_with_extended_header::<MsgEmpty>(&mut parts, &body).await;
     let msg = match result {
         Ok(msg) => msg.msg,
@@ -103,27 +97,27 @@ async fn connect_socket(
             return Err(StatusCode::UNAUTHORIZED);
         }
     }
-    req = Request::from_parts(parts, Body::empty());
-    if req.extensions().get::<OnUpgrade>().is_none() {
+
+    let Some(conn) = parts.extensions.remove::<hyper::upgrade::OnUpgrade>() else {
         return Err(StatusCode::UPGRADE_REQUIRED);
-    }
+    };
 
     if let Some(req_sender) = state.waiting_connections.remove(&task_id) {
-        if let Err(_) = req_sender.send(req) {
+        if let Err(_) = req_sender.send(conn) {
             warn!("Error sending socket connection to tunnel. Receiver has been dropped");
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     } else {
         let (tx, rx) = tokio::sync::oneshot::channel();
         state.waiting_connections.insert_for(SocketState::WAITING_CONNECTIONS_TIMEOUT, task_id, tx);
-        let Ok(other_req) = rx.await else {
+        let Ok(other_con) = rx.await else {
             debug!("Socket expired because nobody connected");
             return Err(StatusCode::GONE);
         };
         // We don't care if the task expired by now
         _ = state.task_manager.remove(&task_id);
         tokio::spawn(async move {
-            let (mut socket1, mut socket2) = match tokio::try_join!(upgrade::on(req), upgrade::on(other_req)) {
+            let (socket1, socket2) = match tokio::try_join!(conn, other_con) {
                 Ok(sockets) => sockets,
                 Err(e) => {
                     warn!("Failed to upgrade requests to socket connections: {e}");
@@ -131,7 +125,7 @@ async fn connect_socket(
                 },
             };
 
-            let result = tokio::io::copy_bidirectional(&mut socket1, &mut socket2).await;
+            let result = tokio::io::copy_bidirectional(&mut TokioIo::new(socket1), &mut TokioIo::new(socket2)).await;
             if let Err(e) = result {
                 debug!("Relaying socket connection ended: {e}");
             }

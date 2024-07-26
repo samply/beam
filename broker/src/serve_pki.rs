@@ -4,13 +4,11 @@ use std::{convert::Infallible, net::SocketAddr, string::FromUtf8Error};
 
 use axum::{
     extract::{ConnectInfo, Path, Query},
-    http::Request,
+    http::{Request, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, Route},
     Extension, Json, Router,
 };
-use hyper::{client::HttpConnector, Body, Client, StatusCode};
-use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use shared::{
     config::CONFIG_CENTRAL,

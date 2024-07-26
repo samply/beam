@@ -1,4 +1,5 @@
 use beam_lib::ProxyId;
+use reqwest::{Certificate, Url};
 use crate::{
     config::CONFIG_SHARED_CRYPTO,
     crypto::{
@@ -9,15 +10,12 @@ use crate::{
 };
 use axum::async_trait;
 use clap::Parser;
-use hyper::Uri;
-use hyper_tls::native_tls::Certificate;
 use jwt_simple::prelude::RS256KeyPair;
 use openssl::{
     asn1::Asn1IntegerRef,
     x509::{self, X509},
 };
 use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
-use static_init::dynamic;
 use std::{fs::read_to_string, path::PathBuf, rc::Rc, sync::Arc};
 use tracing::{debug, info};
 
@@ -46,7 +44,7 @@ struct CliArgs {
     // TODO: The following arguments have been added for compatibility reasons with the proxy config. Find another way to merge configs.
     /// (included for technical reasons)
     #[clap(long, env, value_parser)]
-    broker_url: Uri,
+    broker_url: Url,
 
     /// (included for technical reasons)
     #[clap(long, env, value_parser)]
@@ -66,7 +64,7 @@ pub struct Config {
     pub(crate) tls_ca_certificates_dir: Option<PathBuf>,
     pub broker_domain: String,
     pub root_cert: X509,
-    pub tls_ca_certificates: Vec<X509>,
+    pub tls_ca_certificates: Vec<Certificate>,
 }
 
 #[derive(Debug, Clone)]
