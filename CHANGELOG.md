@@ -1,18 +1,18 @@
 # Samply.Beam 0.8.0 - 2024-07-26
 
-This major release mostly features some bugfixes and the big upgrade of `hyper` to version 1.
+This major release of Beam 0.8 features many changes "under the hood", such as the highly anticipated upgrade of our `hyper` dependency to version 1, as well as many bug fixes. We were able to decrease the communication overhead between Beam.Proxies and the Beam.Broker and streamlined the behavior of some endpoints to make the usage of Samply.Beam simpler.
 
 ## Breaking changes
 
-* The `filter=todo` parameter on the tasks endpoint will not yield tasks anymore that are claimed. This is a bugfix but changes the behavior of the tasks endpoint in some cases.
-* The library (`beam lib`) reexports types from `reqwest`, which has now been upgraded to use hyper 1.0. This leads to compile errors in code using previous reqwest versions.
+* The `filter=todo` parameter on the tasks endpoint will not yield tasks anymore that are claimed. This change of behavior streamlines some often occurring usage patterns of this endpoint.
+* The library (`beam lib`) reexports types from `reqwest`, which has now been upgraded to use hyper 1.0. This may lead to compile errors in code bases using older reqwest versions.
 
 ## Minor changes
 
 * Socket tasks may now hold additional metadata.
 * New functions in beam lib to create sockets with metadata.
-* Added `beam_lib::RawString`, a string wrapper to prevent beam lib from json encoding the string again. Useful for interacting with beam clients that don't use beam lib for serializing and deserializing types.
-* Added a `beam_lib::Error::InvalidReceivers` variant holding all invalid receivers when trying to create a task with invalid recipients.
+* Added `beam_lib::RawString`, a string wrapper to prevent beam lib from json encoding the string again. This is useful for beam_lib clients that handle serializing and deserializing types outside of beam_lib.
+* Added a dedicated `beam_lib::Error::InvalidReceivers` error variant holding all invalid receivers when trying to create a task with invalid recipients.
 
 ## Bugfixes
 
