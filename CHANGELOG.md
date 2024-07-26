@@ -4,23 +4,22 @@ This major release mostly features some bugfixes and the big upgrade of `hyper` 
 
 ## Breaking changes
 
-* The `filter=todo` parameter on the tasks endpoint will now not yield tasks anymore which are claimed. This was bug but does change the behavior of the tasks endpoint in some cases.
-* beam lib reexports types from `reqwest` which has been upgraded to the hyper 1 compatible version. This may lead to compile errors in code which uses old reqwest versions.
+* The `filter=todo` parameter on the tasks endpoint will not yield tasks anymore that are claimed. This is a bugfix but changes the behavior of the tasks endpoint in some cases.
+* The library (`beam lib`) reexports types from `reqwest`, which has now been upgraded to use hyper 1.0. This leads to compile errors in code using previous reqwest versions.
 
 ## Minor changes
 
 * Socket tasks may now hold additional metadata.
 * New functions in beam lib to create sockets with metadata.
-* Added `beam_lib::RawString` a string wrapper to prevent beam lib from json encoding the string again. Useful for interacting with beam clients that don't use beam lib for serializing and deserializing types.
-* Added a `beam_lib::Error::InvalidReceivers` variant which holds all invalid receivers when trying to create a task with invalid recipients.
+* Added `beam_lib::RawString`, a string wrapper to prevent beam lib from json encoding the string again. Useful for interacting with beam clients that don't use beam lib for serializing and deserializing types.
+* Added a `beam_lib::Error::InvalidReceivers` variant holding all invalid receivers when trying to create a task with invalid recipients.
 
 ## Bugfixes
 
-* Fix broker deadlock when too many clients tried to update their certificates at the same time.
-* Revalidate expired proxy certificates when they are resigned after an update.
-* `filter=todo` does not yield claimed tasks anymore.
-* Don't return already expired certificates to beam proxies.
-* Retry health check connection immediately after a gateway timeout.
+* Fix broker deadlock when too many clients tried to fetch certificates at the same time.
+* Re-validate expired proxy certificates when they are re-signed after an update.
+* The broker will now only return valid (non-expired) certificates to beam proxies.
+* beam-proxies will retry their health check connections to the broker immediately after a gateway timeout.
 * Close SSE connection on a timeout without logging an error message.
 
 # Samply.Beam 0.7.0 – 2023-10-04
