@@ -49,6 +49,7 @@ notice = "warn"
 # output a note when they are encountered.
 ignore = [
     "RUSTSEC-2020-0071", #used only by build-data as a build dependency
+    "RUSTSEC-2023-0071", #Currently no patch available, but impratical attack for OAEP and 2k keys 
 ]
 # Threshold for security vulnerabilities, any vulnerability with a CVSS score
 # lower than the range specified will be ignored. Note that ignored advisories
@@ -81,6 +82,7 @@ allow = [
     "ISC",
     "BSD-3-Clause",
     "Unicode-DFS-2016",
+    "Unicode-3.0",
     #"Apache-2.0 WITH LLVM-exception",
 ]
 # List of explicitly disallowed licenses

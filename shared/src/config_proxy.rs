@@ -1,6 +1,7 @@
 use clap::Parser;
 use openssl::x509::X509;
 use regex::Regex;
+use reqwest::Url;
 
 use std::{
     collections::HashMap,
@@ -12,23 +13,20 @@ use std::{
 };
 
 use axum::http::HeaderValue;
-use hyper::Uri;
 use serde::Deserialize;
 use tracing::{debug, info, warn};
 
 use beam_lib::{AppId, ProxyId};
-use crate::{
-    errors::SamplyBeamError,
-};
+use crate::errors::SamplyBeamError;
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub broker_uri: Uri,
+    pub broker_uri: Url,
     pub broker_host_header: HeaderValue,
     pub bind_addr: SocketAddr,
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId, ApiKey>,
-    pub tls_ca_certificates: Vec<X509>,
+    pub tls_ca_certificates: Vec<reqwest::Certificate>,
 }
 
 pub type ApiKey = String;
@@ -51,7 +49,7 @@ pub struct CliArgs {
 
     /// The broker's base URL, e.g. https://broker23.beam.samply.de
     #[clap(long, env, value_parser)]
-    pub broker_url: Uri,
+    pub broker_url: Url,
 
     /// This proxy's beam id, e.g. proxy42.broker23.beam.samply.de
     #[clap(long, env, value_parser)]
@@ -133,11 +131,11 @@ impl crate::config::Config for Config {
     }
 }
 
-fn uri_to_host_header(uri: &Uri) -> Result<HeaderValue, SamplyBeamError> {
+fn uri_to_host_header(uri: &Url) -> Result<HeaderValue, SamplyBeamError> {
     let hostname: String = uri
         .host()
         .ok_or(SamplyBeamError::WrongBrokerUri("URI's host is empty."))?
-        .into();
+        .to_string();
     let port = match uri.port() {
         Some(p) => format!(":{}", p),
         None => String::from(""),

@@ -6,17 +6,13 @@ use std::{
 
 use axum::{
     body::HttpBody,
-    extract::ConnectInfo,
+    extract::{ConnectInfo, Request},
+    http::{header::HeaderName, Method, StatusCode, Uri},
     middleware::{self, Next},
     response::{IntoResponse, Response},
 };
-use http::{
-    header::{self, HeaderName},
-    HeaderValue, Method, Request, StatusCode, Uri,
-};
-use hyper::Body;
-use tokio::sync::{oneshot, Mutex};
-use tracing::{info, instrument, span, warn, Level, error};
+use tokio::sync::mpsc;
+use tracing::{error, info, instrument, span, warn, Level};
 
 use beam_lib::AppOrProxyId;
 
@@ -71,12 +67,12 @@ impl LoggingInfo {
     }
 }
 
-pub type ProxyLogger = oneshot::Sender<AppOrProxyId>;
+pub type ProxyLogger = mpsc::Sender<AppOrProxyId>;
 
 pub async fn log(
     ConnectInfo(info): ConnectInfo<SocketAddr>,
-    mut req: Request<Body>,
-    next: Next<Body>,
+    mut req: Request,
+    next: Next,
 ) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
@@ -84,7 +80,8 @@ pub async fn log(
 
     let mut info = LoggingInfo::new(method, uri, ip);
     // This channel may or may not receive an AppOrProxyId from verify_with_extended_header
-    let (tx, mut rx) = oneshot::channel();
+    // TODO: Solve this with tracing
+    let (tx, mut rx) = mpsc::channel(1);
     req.extensions_mut().insert(tx);
 
     let resp = next.run(req).await;
@@ -104,7 +101,7 @@ pub async fn log(
     resp
 }
 
-fn get_ip(req: &Request<Body>, info: &SocketAddr) -> IpAddr {
+fn get_ip(req: &Request, info: &SocketAddr) -> IpAddr {
     req.headers()
         .get(X_FORWARDED_FOR)
         .and_then(|v| v.to_str().ok())

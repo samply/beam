@@ -129,6 +129,7 @@ fn strip_broker_id(id: &str) -> Result<&str, BeamIdError> {
     }
 }
 
+#[cfg(feature = "strict-ids")]
 #[derive(PartialEq, Debug)]
 pub(crate) enum BeamIdType {
     AppId,

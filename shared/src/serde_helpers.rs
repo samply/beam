@@ -1,8 +1,7 @@
 use std::ops::Deref;
 
-use axum::{response::{IntoResponse, Response}, headers::{ContentType, HeaderMapExt}};
+use axum::{http::{header, HeaderValue, StatusCode}, response::{IntoResponse, Response}};
 use bytes::BufMut;
-use http::StatusCode;
 use serde::{Serialize, Serializer, ser::SerializeSeq};
 
 
@@ -119,7 +118,7 @@ impl IntoResponse for DerefSerializer {
         } else {
             StatusCode::PARTIAL_CONTENT
         };
-        resp.headers_mut().typed_insert(ContentType::json());
+        resp.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
         resp
     }
 }

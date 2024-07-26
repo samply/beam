@@ -61,8 +61,8 @@ function build() {
     BUILD_DOCKER=0
     BACK=$(pwd)
     cd $SD/..
-    BROKER=./target/debug/broker
-    PROXY=./target/debug/proxy
+    BROKER=./target/debug/beam-broker
+    PROXY=./target/debug/beam-proxy
     if [ ! -x ./artifacts/binaries-$ARCH ]; then
         echo "Binaries missing -- building ..."
         BUILD="$(cargo build $@ --message-format=json)"
@@ -113,10 +113,10 @@ function start {
 
 function demo {
     if [ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]; then
-        export TAG=main
+        export TAG=${TAG:-"main"}
     else
-        echo "You have checked out a non-main branch of beam. We will launch the latest develop version of beam. Your working copy remains untouched. In case of any problems, please switch to a clean develop branch."
-        export TAG=develop
+        export TAG=${TAG:-"develop"}
+        echo "You have checked out a non-main branch of beam. We will launch the latest $TAG version of beam. Your working copy remains untouched. In case of any problems, please switch to a clean develop branch."
     fi
     clean
     pki/pki setup
@@ -260,8 +260,6 @@ if [ "$1" == "--tag" ]; then
     TAG="$2"
     shift 2
 fi
-
-export TAG=${TAG:-localbuild}
 
 case "$1" in
   build)

@@ -1,16 +1,7 @@
-use axum::{async_trait, body::Bytes, http::request, response::Response, Json};
-use hyper::{client::HttpConnector, Client, Method, Request, StatusCode, Uri, header};
-use hyper_proxy::ProxyConnector;
-use hyper_tls::HttpsConnector;
+use axum::{async_trait, body::Bytes, http::{header, request, Method, Request, StatusCode, Uri}, response::Response, Json};
 use beam_lib::AppOrProxyId;
 use shared::{
-    config,
-    config_proxy::Config,
-    config_shared::ConfigCrypto,
-    crypto::GetCerts,
-    errors::{CertificateInvalidReason, SamplyBeamError},
-    http_client::SamplyHttpClient,
-    EncryptedMessage, MsgEmpty,
+    config, config_proxy::Config, config_shared::ConfigCrypto, crypto::GetCerts, errors::{CertificateInvalidReason, SamplyBeamError}, http_client::SamplyHttpClient, reqwest, EncryptedMessage, MsgEmpty
 };
 use tracing::{debug, info, warn, error};
 
@@ -23,12 +14,13 @@ pub(crate) struct GetCertsFromBroker {
 }
 
 impl GetCertsFromBroker {
-    async fn request(&self, path: &str) -> Result<Response<hyper::Body>, SamplyBeamError> {
+    async fn request(&self, path: &str) -> Result<reqwest::Response, SamplyBeamError> {
         let uri = Uri::builder()
-            .scheme(self.config.broker_uri.scheme().unwrap().to_owned())
-            .authority(self.config.broker_uri.authority().unwrap().to_owned())
+            .scheme(self.config.broker_uri.scheme())
+            .authority(self.config.broker_uri.authority())
             .path_and_query(path)
-            .build()?;
+            .build()
+            .expect("To build request successfully");
 
         let body = EncryptedMessage::MsgEmpty(MsgEmpty {
             from: AppOrProxyId::Proxy(self.config.proxy_id.clone()),
@@ -44,41 +36,38 @@ impl GetCertsFromBroker {
         let req = sign_request(body, parts, &self.config, Some(&self.crypto_conf))
             .await
             .map_err(|(_, msg)| SamplyBeamError::SignEncryptError(msg.into()))?;
-        Ok(self.client.request(req).await?)
+        Ok(self.client.execute(req).await?.into())
     }
 
     async fn query(&self, path: &str) -> Result<String, SamplyBeamError> {
-        let mut req = self.request(path).await?;
-        let resp = hyper::body::to_bytes(req.body_mut()).await?;
-        let resp =
-            String::from_utf8(resp.to_vec()).map_err(|e| SamplyBeamError::HttpParseError(e))?;
+        let req = self.request(path).await?;
         match req.status() {
             StatusCode::NOT_FOUND => Ok(String::new()),
             StatusCode::NO_CONTENT => {
                 debug!("Broker rejected to send us invalid certificate on path {path}");
                 Err(CertificateInvalidReason::NotDisclosedByBroker.into())
             }
-            StatusCode::OK => Ok(resp),
+            StatusCode::OK => Ok(req.text().await?),
             x => Err(SamplyBeamError::VaultOtherError(format!(
                 "Got code {x}, error message: {}",
-                resp
+                req.text().await?
             ))),
         }
     }
 
     async fn query_vec(&self, path: &str) -> Result<Vec<String>, SamplyBeamError> {
-        let mut req = self.request(path).await?;
-        let resp = hyper::body::to_bytes(req.body_mut()).await?;
-        let json: Vec<String> = serde_json::from_slice(&resp).map_err(|e| {
-            SamplyBeamError::VaultOtherError(format!("Unable to parse vault reply: {}", e))
-        })?;
+        let req = self.request(path).await?;
         match req.status() {
-            StatusCode::NOT_FOUND => Ok(json),
+            StatusCode::NOT_FOUND | StatusCode::OK => {
+                let resp = req.bytes().await?;
+                serde_json::from_slice(&resp).map_err(|e| {
+                    SamplyBeamError::VaultOtherError(format!("Unable to parse vault reply: {}", e))
+                })
+            },
             StatusCode::NO_CONTENT => {
                 debug!("Broker rejected to send us invalid certificate on path {path}");
                 Err(CertificateInvalidReason::NotDisclosedByBroker.into())
             }
-            StatusCode::OK => Ok(json),
             x => Err(SamplyBeamError::VaultOtherError(format!("Got code {x}"))),
         }
     }
@@ -123,20 +112,6 @@ pub(crate) fn build_cert_getter(
     crypto_conf: ConfigCrypto,
 ) -> Result<GetCertsFromBroker, SamplyBeamError> {
     let client = client;
-    let broker_url = config.broker_uri.clone();
-    let _ = broker_url
-        .scheme()
-        .ok_or(SamplyBeamError::ConfigurationFailed(
-            "Broker URL invalid.".into(),
-        ))?;
-    let _ = broker_url
-        .authority()
-        .ok_or(SamplyBeamError::ConfigurationFailed(
-            "Broker URL invalid.".into(),
-        ))?;
-    // let broker_builder = Uri::builder()
-    //     .scheme(scheme)
-    //     .authority(authority);
     Ok(GetCertsFromBroker {
         client,
         config,

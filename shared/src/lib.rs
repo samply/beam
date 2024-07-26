@@ -14,7 +14,6 @@ use openssl::base64;
 use rsa::{RsaPrivateKey, RsaPublicKey, Oaep};
 use serde_json::{json, Value};
 use sha2::Sha256;
-use static_init::dynamic;
 use tracing::debug;
 
 use std::{
@@ -34,6 +33,7 @@ use uuid::Uuid;
 use crate::{crypto_jwt::JWT_VERIFICATION_OPTIONS, serde_helpers::*};
 // Reexport b64 implementation
 pub use jwt_simple::reexports::ct_codecs;
+pub use reqwest;
 
 pub type MsgId = beam_lib::MsgId;
 pub type MsgType = String;
@@ -98,7 +98,6 @@ impl<M: Msg + DeserializeOwned> MsgSigned<M> {
     }
 }
 
-#[dynamic]
 pub static EMPTY_VEC_APPORPROXYID: Vec<AppOrProxyId> = Vec::new();
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -834,21 +833,4 @@ mod tests {
         assert_eq!(msg_p1_decr, msg_p2_decr);
         assert_eq!(msg, msg_p1_decr);
     }
-}
-
-pub fn is_actually_hyper_timeout(err: &hyper::Error) -> bool {
-    if err.is_timeout() {
-        return true;
-    }
-    // This is exactly the way hyper looks for timeout errors except it only looks for its internal TimedOut error
-    // and not for any std::io::Error with the kind TimedOut as used by hyper_timeout.
-    // hyper_timeout won't be able to fix this though as *all* of hypers Error types are private except hyper::Error.
-    let mut source = err.source();
-    while let Some(err) = source {
-        if let Some(io_err) = err.downcast_ref::<std::io::Error>() {
-            return io_err.kind() == std::io::ErrorKind::TimedOut;
-        }
-        source = err.source();
-    }
-    false
 }

@@ -5,7 +5,7 @@ use crate::{
 };
 use axum::http::Uri;
 use clap::Parser;
-use static_init::dynamic;
+use reqwest::Url;
 use std::str::FromStr;
 use tracing::info;
 
@@ -31,7 +31,7 @@ struct CliArgs {
 
     /// samply.pki: URL to HTTPS endpoint
     #[clap(long, env, value_parser)]
-    pki_address: Uri,
+    pki_address: Url,
 
     /// samply.pki: Authentication realm
     #[clap(long, env, value_parser, default_value = "samply_pki")]
@@ -60,7 +60,7 @@ struct CliArgs {
 
 pub struct Config {
     pub bind_addr: SocketAddr,
-    pub pki_address: Uri,
+    pub pki_address: Url,
     pub pki_realm: String,
     pub pki_token: String,
     pub tls_ca_certificates_dir: Option<PathBuf>,

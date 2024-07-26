@@ -1,7 +1,7 @@
 use axum::{async_trait, body::Body, http::Request, Json};
 
 use itertools::Itertools;
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use openssl::{
     asn1::{Asn1Time, Asn1TimeRef, Asn1Integer},
     error::ErrorStack,
@@ -13,7 +13,6 @@ use rsa::{
     pkcs1::DecodeRsaPublicKey, pkcs8::DecodePublicKey, RsaPrivateKey, RsaPublicKey, traits::PublicKeyParts,
 };
 use sha2::{Digest, Sha256};
-use static_init::dynamic;
 use std::{
     borrow::BorrowMut,
     collections::HashMap,
@@ -107,7 +106,7 @@ impl AsRef<u32> for CertificateCacheUpdate {
 pub struct CertificateCache {
     serial_to_x509: HashMap<Serial, CertificateCacheEntry>,
     cn_to_serial: HashMap<ProxyId, Vec<Serial>>,
-    update_trigger: mpsc::Sender<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>,
+    update_trigger: mpsc::UnboundedSender<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>,
     root_cert: Option<X509>, // Might not be available at initialization time
     im_cert: Option<X509>,   // Might not be available at initialization time
 }
@@ -125,7 +124,7 @@ pub trait GetCerts: Sync + Send {
 
 impl CertificateCache {
     pub fn new(
-        update_trigger: mpsc::Sender<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>,
+        update_trigger: mpsc::UnboundedSender<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>,
     ) -> CertificateCache {
         Self {
             serial_to_x509: HashMap::new(),
@@ -223,17 +222,12 @@ impl CertificateCache {
     }
 
     /// Searches cache for a certificate with the given Serial. If not found, updates cache from central vault. If then still not found, return None
-    pub async fn get_by_serial(serial: &str) -> Option<CertificateCacheEntry> {
+    pub async fn get_by_serial(serial: &str) -> Option<X509> {
         {
             // TODO: Do smart caching: Return reference to existing certificate that exists only once in memory.
             let cache = CERT_CACHE.read().await;
-            let cert = cache.serial_to_x509.get(serial);
-            match cert {
-                // why is this not done in the second try?
-                Some(x) => {
-                    return Some(x.clone());
-                }
-                None => (),
+            if let Some(CertificateCacheEntry::Valid(cert)) = cache.serial_to_x509.get(serial) {
+                return Some(cert.clone());
             }
         }
         Self::update_certificates().await.unwrap_or_else(|e| {
@@ -242,9 +236,13 @@ impl CertificateCache {
             CertificateCacheUpdate::UnChanged
         });
         let cache = CERT_CACHE.read().await;
-        let cert = cache.serial_to_x509.get(serial);
-
-        cert.cloned()
+        match cache.serial_to_x509.get(serial)? {
+            CertificateCacheEntry::Valid(v) => Some(v.clone()),
+            CertificateCacheEntry::Invalid(e) => {
+                warn!("Certificate with serial {serial} is invalid after update because of {e}");
+                None
+            }
+        }
     }
 
     /// Manually update cache from fetching all certs from the central vault
@@ -256,7 +254,6 @@ impl CertificateCache {
             .await
             .update_trigger
             .send(tx)
-            .await
             .expect("Internal Error: Certificate Store Updater is not listening for requests.");
         debug!("Certificate update triggered -- waiting for results...");
         match rx.await {
@@ -505,16 +502,19 @@ pub fn init_cert_getter<G: GetCerts + 'static>(getter: G) {
 
 pub async fn get_serial_list() -> Vec<String> {
     let cache = CERT_CACHE.read().await;
-    cache.serial_to_x509.keys().cloned().collect()
+    cache.serial_to_x509.iter()
+        .filter(|(_, v)| matches!(v, CertificateCacheEntry::Valid(_)))
+        .map(|(k, _)| k)
+        .cloned()
+        .collect()
 }
 
 pub async fn get_im_cert() -> Result<String, SamplyBeamError> {
     CERT_GETTER.get().unwrap().im_certificate_as_pem().await
 }
 
-#[dynamic(lazy)]
-pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
-    let (tx_refresh, mut rx_refresh) = mpsc::channel::<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>(16);
+pub(crate) static CERT_CACHE: Lazy<Arc<RwLock<CertificateCache>>> = Lazy::new(|| {
+    let (tx_refresh, mut rx_refresh) = mpsc::unbounded_channel::<oneshot::Sender<Result<CertificateCacheUpdate, SamplyBeamError>>>();
     let (tx_newcerts, mut rx_newcerts) = mpsc::channel::<()>(1);
     let cc = Arc::new(RwLock::new(CertificateCache::new(tx_refresh)));
     let cc2 = cc.clone();
@@ -567,9 +567,9 @@ pub(crate) static CERT_CACHE: Arc<RwLock<CertificateCache>> = {
         }
     });
     cc
-};
+});
 
-async fn get_cert_by_serial(serial: &str) -> Option<CertificateCacheEntry> {
+async fn get_cert_by_serial(serial: &str) -> Option<X509> {
     CertificateCache::get_by_serial(serial).await
 }
 
@@ -600,11 +600,7 @@ pub async fn get_all_certs_and_clients_by_cname_as_pemstr(
 pub async fn get_cert_and_client_by_serial_as_pemstr(
     serial: &str,
 ) -> Option<Result<CryptoPublicPortion, CertificateInvalidReason>> {
-    match get_cert_by_serial(serial).await {
-        None => None,
-        Some(CertificateCacheEntry::Valid(valid_cert)) => Some(extract_x509(&valid_cert)),
-        Some(CertificateCacheEntry::Invalid(reason)) => Some(Err(reason)),
-    }
+    CertificateCache::get_by_serial(serial).await.as_ref().map(extract_x509)
 }
 
 pub async fn get_newest_certs_for_cnames_as_pemstr(
@@ -770,14 +766,14 @@ pub fn load_certificates_from_file(ca_file: PathBuf) -> Result<X509, SamplyBeamE
     cert
 }
 
-pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<X509>, std::io::Error> {
+pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<reqwest::Certificate>, std::io::Error> {
     let mut result = Vec::new();
     if let Some(ca_dir) = ca_dir {
         for file in ca_dir.read_dir()? {
             //.map_err(|e| SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory {}: {}", ca_dir.to_string_lossy(), e)))
             let path = file?.path();
             let content = std::fs::read(&path)?;
-            let cert = X509::from_pem(&content);
+            let cert = reqwest::Certificate::from_pem(&content);
             if let Err(e) = cert {
                 warn!(
                     "Unable to read certificate from file {}: {}",
@@ -942,7 +938,7 @@ mod tests {
             .collect();
         let n = certs.len();
     
-        let (tx, rx) = mpsc::channel(1);
+        let (tx, rx) = mpsc::unbounded_channel();
         let cert_cache = CertificateCache { 
             serial_to_x509: certs,
             update_trigger: tx,
@@ -964,7 +960,7 @@ mod tests {
 
     #[test]
     fn test_revokation() {
-        let mut cache = CertificateCache::new(mpsc::channel(1).0);
+        let mut cache = CertificateCache::new(mpsc::unbounded_channel().0);
         let mut certs: Vec<_> = [1, 5, 10].into_iter()
             .map(Duration::from_secs)
             .map(build_x509)

@@ -1,6 +1,6 @@
 [package]
 name = "shared"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 license = "Apache-2.0"
 documentation = "https://github.com/samply/beam"
@@ -8,61 +8,50 @@ documentation = "https://github.com/samply/beam"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-uuid = { version = "1.1.2", features = [
+uuid = { version = "1", features = [
     "v4",                # Lets you generate random UUIDs
     "fast-rng",          # Use a faster (but still sufficiently random) RNG
-    "macro-diagnostics", # Enable better diagnostics for compile-time UUIDs
     "serde"
 ]}
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 tokio = { version = "1", features = ["full"] }
-axum = { version = "0.6", features = ["macros", "headers"] }
-hyper = { version = "0.14.19", features = ["full"] }
+axum = { version = "0.7", features = [] }
 bytes = "1.4"
 
 # HTTP client with proxy support
-hyper-tls = "0.5.0"
-hyper-proxy = "0.9.1"
-mz-http-proxy = { version = "0.1.0", features = ["hyper"] }
-hyper-timeout = "0.4"
+reqwest = { version = "0.12", features = ["stream"] }
 
 # Logging
-tracing = "0.1.35"
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Crypto
-rand = "0.8.5"
-rsa = "0.9.2"
-sha2 = "0.10.2"
-openssl = "0.10.40"
-chacha20poly1305 = "0.10.1"
-itertools = "0.11.0"
-jwt-simple = "0.11.1"
+rand = "0.8"
+rsa = "0.9"
+sha2 = "0.10"
+openssl = "0.10"
+chacha20poly1305 = "0.10"
+itertools = "0.12.0"
+jwt-simple = "0.11"
 
 # Global variables
-static_init = "1.0.2"
-once_cell = "1.13.0"
+once_cell = "1"
 
 # Error handling
-thiserror = "1.0.31"
-anyhow = "1.0.58"
+thiserror = "1"
 
 # Command Line Interface
-clap = { version = "4.0.12", features = ["env", "derive"] }
+clap = { version = "4", features = ["env", "derive"] }
 
-http = "0.2.8"
-fundu = "2.0.0"
+fundu = "2.0"
 regex = "1"
 
 # expire map dependencies
 dashmap =  { version = "5.4", optional = true}
 
 beam-lib = { workspace = true }
-
-[dev-dependencies]
-tokio-test = "0.4.2"
 
 [features]
 expire_map = ["dep:dashmap"]

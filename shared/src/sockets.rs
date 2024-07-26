@@ -18,6 +18,8 @@ where State: MsgState {
     pub id: MsgId,
     #[serde(skip_serializing_if = "MsgState::is_empty")]
     pub secret: State,
+    #[serde(default)]
+    pub metadata: Value
 }
 
 impl<State: MsgState> Msg for MsgSocketRequest<State> {
@@ -30,7 +32,7 @@ impl<State: MsgState> Msg for MsgSocketRequest<State> {
     }
 
     fn get_metadata(&self) -> &Value {
-        &Value::Null
+        &self.metadata
     }
 }
 
@@ -42,8 +44,8 @@ impl DecryptableMsg for MsgSocketRequest<Encrypted> {
     }
 
     fn convert_self(self, body: String) -> Self::Output {
-        let Self { from, to, expire, id, .. } = self;
-        Self::Output { from, to, expire, secret: body.into(), id }
+        let Self { from, to, expire, id, metadata, .. } = self;
+        Self::Output { from, to, expire, secret: body.into(), id, metadata }
     }
 }
 
@@ -51,8 +53,8 @@ impl EncryptableMsg for MsgSocketRequest<Plain> {
     type Output = MsgSocketRequest<Encrypted>;
 
     fn convert_self(self, body: Encrypted) -> Self::Output {
-        let Self { from, to, expire, id, .. } = self;
-        Self::Output { from, to, expire, secret: body, id }
+        let Self { from, to, expire, id, metadata, .. } = self;
+        Self::Output { from, to, expire, secret: body, id, metadata }
     }
 
     fn get_plain(&self) -> &Plain {

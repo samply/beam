@@ -1,6 +1,4 @@
 
-use http::{Request, header, StatusCode};
-use hyper::{Client, Body};
 use once_cell::sync::Lazy;
 use beam_lib::{AddressingId, set_broker_id, AppOrProxyId, BeamClient};
 
@@ -42,10 +40,13 @@ pub static CLIENT2: Lazy<BeamClient> = Lazy::new(|| BeamClient::new(&APP2, APP_K
 
 #[tokio::test]
 async fn test_time_out() {
-    let res = Client::new().request(Request::get("http://localhost:8081/v1/tasks?wait_count=100&filter=todo&wait_time=5s")
+    use reqwest::{header, StatusCode};
+    let res = reqwest::Client::new()
+        .get("http://localhost:8081/v1/tasks?wait_count=100&filter=todo&wait_time=5s")
         .header(header::AUTHORIZATION, format!("ApiKey {} {APP_KEY}", APP1.clone()))
-        .body(Body::empty()).unwrap()
-    ).await.unwrap();
+        .send()
+        .await
+        .unwrap();
 
     assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
 }

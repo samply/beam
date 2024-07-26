@@ -2,21 +2,14 @@ use std::{future::Future, mem::discriminant};
 
 use axum::{
     async_trait,
-    http::{method, uri::Scheme},
+    http::{header, method, uri::Scheme, Method, Request, StatusCode, Uri},
 };
-use hyper::{
-    body,
-    client::{HttpConnector, ResponseFuture},
-    header, Body, Client, Method, Request, Response, StatusCode, Uri,
-};
-use hyper_proxy::ProxyConnector;
-use hyper_tls::HttpsConnector;
 use serde::{Deserialize, Serialize};
 use shared::{
     config,
-    crypto::{GetCerts, CertificateCache, CertificateCacheUpdate, parse_crl},
+    crypto::{parse_crl, CertificateCache, CertificateCacheUpdate, GetCerts},
     errors::SamplyBeamError,
-    http_client::{self, SamplyHttpClient}, openssl::x509::X509Crl,
+    http_client::{self, SamplyHttpClient}, openssl::x509::X509Crl, reqwest::{self, Url},
 };
 use std::time::Duration;
 use tokio::time::timeout;
@@ -68,8 +61,7 @@ impl GetCertsFromPki {
             &config::CONFIG_SHARED.tls_ca_certificates,
             Some(Duration::from_secs(30)),
             Some(Duration::from_secs(20)),
-        )
-        .map_err(SamplyBeamError::HttpProxyProblem)?;
+        )?;
         let pki_realm = config::CONFIG_CENTRAL.pki_realm.clone();
 
         Ok(Self {
@@ -109,7 +101,7 @@ impl GetCertsFromPki {
     async fn check_vault_health_helper(&self) -> Result<(), SamplyBeamError> {
         let url = pki_url_builder("sys/health");
         debug!("Checking Vault's health at URL {url}");
-        let health = self.hyper_client.get(url).await;
+        let health = self.hyper_client.get(url).send().await;
         let Ok(resp) = health else {
             return Err(SamplyBeamError::VaultUnreachable(health.unwrap_err()));
         };
@@ -137,22 +129,20 @@ impl GetCertsFromPki {
         method: &Method,
         api_path: &str,
         max_tries: Option<u32>,
-    ) -> Result<Response<Body>, SamplyBeamError> {
-        debug!("Samply.PKI: Vault request to {api_path}");
+    ) -> Result<reqwest::Response, SamplyBeamError> {
         let uri = pki_url_builder(api_path);
+        debug!("Samply.PKI: Vault request to {uri}");
         let max_tries = max_tries.unwrap_or(u32::MAX);
         for tries in 0..max_tries {
             if tries > 0 {
                 tokio::time::sleep(Duration::from_secs(3)).await;
             }
-            let req = Request::builder()
-                .method(method)
+            let resp = self.hyper_client
+                .request(method.clone(), uri.clone())
                 .header("X-Vault-Token", &config::CONFIG_CENTRAL.pki_token)
-                .uri(&uri)
                 .header("User-Agent", env!("SAMPLY_USER_AGENT"))
-                .body(body::Body::empty())
-                .unwrap(); //TODO Unwrap
-            let resp = self.hyper_client.request(req).await;
+                .send()
+                .await;
             let Ok(resp) = resp else {
                 warn!("Samply.PKI: Unable to communicate to vault: {}; retrying (failed attempt #{})", resp.unwrap_err(), tries+2);
                 self.report_vault_health(VaultStatus::Unreachable).await;
@@ -165,8 +155,8 @@ impl GetCertsFromPki {
                 }
                 code if code.is_client_error() || code.is_redirection() => {
                     error!(
-                        "Samply.PKI: Vault reported client-side Error (code {}), not retrying.",
-                        code
+                        "Samply.PKI: Vault reported client-side Error (code {}), not retrying. Response was {}",
+                        code, resp.text().await.unwrap_or_else(|e| format!("Failed to decode failed response: {e}"))
                     );
                     self.report_vault_health(VaultStatus::OtherError).await;
                     return Err(SamplyBeamError::VaultOtherError(format!(
@@ -220,13 +210,7 @@ impl GetCerts for GetCertsFromPki {
                 Some(100),
             )
             .await?;
-        let body_bytes = body::to_bytes(resp.into_body()).await.map_err(|e| {
-            SamplyBeamError::VaultOtherError(format!(
-                "Cannot retrieve vault certificate list: {}",
-                e
-            ))
-        })?;
-        let body: PkiListResponse = serde_json::from_slice(&body_bytes).map_err(|e| {
+        let body: PkiListResponse = serde_json::from_slice(&resp.bytes().await?).map_err(|e| {
             SamplyBeamError::VaultOtherError(format!(
                 "Cannot deserialize vault certificate list: {}",
                 e
@@ -245,16 +229,7 @@ impl GetCerts for GetCertsFromPki {
                 Some(100),
             )
             .await?;
-        let body_bytes = body::to_bytes(resp.into_body()).await.map_err(|e| {
-            SamplyBeamError::VaultOtherError(format!(
-                "Cannot retrieve certificate {}: {}",
-                serial, e
-            ))
-        })?;
-        let body = String::from_utf8(body_bytes.to_vec()).map_err(|e| {
-            SamplyBeamError::VaultOtherError(format!("Cannot parse certificate {}: {}", serial, e))
-        })?;
-        return Ok(body);
+        Ok(resp.text().await?)
     }
 
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError> {
@@ -266,13 +241,7 @@ impl GetCerts for GetCertsFromPki {
                 Some(100),
             )
             .await?;
-        let body_bytes = body::to_bytes(resp.into_body()).await.map_err(|e| {
-            SamplyBeamError::VaultOtherError(format!("Cannot retrieve im-ca certificate: {}", e))
-        })?;
-        let body = String::from_utf8(body_bytes.to_vec()).map_err(|e| {
-            SamplyBeamError::VaultOtherError(format!("Cannot parse im-ca certificate: {}", e))
-        })?;
-        return Ok(body);
+        Ok(resp.text().await?)
     }
 
     async fn on_timer(&self, cache: &mut CertificateCache) -> CertificateCacheUpdate {
@@ -294,10 +263,7 @@ impl GetCerts for GetCertsFromPki {
             Some(100),
         )
         .await?;
-        let body_bytes = body::to_bytes(resp.into_body()).await.map_err(|e| {
-            SamplyBeamError::VaultOtherError(format!("Cannot retrieve crl: {}", e))
-        })?;
-        parse_crl(&body_bytes).map(Some)
+        parse_crl(&resp.bytes().await?).map(Some)
     }
 }
 
@@ -307,23 +273,6 @@ pub(crate) fn build_cert_getter(
     GetCertsFromPki::new(sender)
 }
 
-pub(crate) fn pki_url_builder(location: &str) -> Uri {
-    Uri::builder()
-        .scheme(
-            config::CONFIG_CENTRAL
-                .pki_address
-                .scheme()
-                .unwrap()
-                .as_str(),
-        )
-        .authority(
-            config::CONFIG_CENTRAL
-                .pki_address
-                .authority()
-                .unwrap()
-                .to_owned(),
-        )
-        .path_and_query(format!("/v1/{}", location))
-        .build()
-        .unwrap() // TODO Unwrap
+pub(crate) fn pki_url_builder(location: &str) -> Url {
+    config::CONFIG_CENTRAL.pki_address.join(&format!("/v1/{location}")).unwrap()
 }

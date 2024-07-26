@@ -4,7 +4,7 @@ use anyhow::{Result, bail, anyhow};
 use async_sse::Event;
 use beam_lib::TaskResult;
 use futures::{StreamExt, TryStreamExt};
-use http::{Method, header, HeaderValue};
+use reqwest::{header::{self, HeaderValue}, Method};
 
 use crate::{CLIENT1, task_test};
 

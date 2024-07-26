@@ -3,11 +3,7 @@ use std::collections::HashMap;
 use axum::{
     async_trait,
     extract::{FromRequest, FromRequestParts},
-    http::request::Parts,
-};
-use hyper::{
-    header::{self, HeaderName},
-    Request, StatusCode,
+    http::{header::{self, HeaderName}, request::Parts, Request, StatusCode},
 };
 use beam_lib::{AppId, AppOrProxyId};
 use shared::{

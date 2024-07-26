@@ -4,10 +4,9 @@ use std::{
     time::{Duration, SystemTime}, collections::HashMap, sync::Arc, convert::Infallible,
 };
 
-use axum::{response::{IntoResponse, sse::Event, Sse}, Json};
+use axum::{response::{IntoResponse, sse::Event, Sse}, Json, http::StatusCode};
 use dashmap::DashMap;
 use futures_core::Stream;
-use hyper::StatusCode;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde_json::json;
