@@ -13,6 +13,7 @@ This major release of Beam 0.8 features many changes "under the hood", such as t
 * New functions in beam lib to create sockets with metadata.
 * Added `beam_lib::RawString`, a string wrapper to prevent beam lib from json encoding the string again. This is useful for beam_lib clients that handle serializing and deserializing types outside of beam_lib.
 * Added a dedicated `beam_lib::Error::InvalidReceivers` error variant holding all invalid receivers when trying to create a task with invalid recipients.
+* Use new Samply CI/CD workflow for Github Actions.
 
 ## Bugfixes
 

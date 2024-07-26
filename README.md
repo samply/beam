@@ -6,7 +6,7 @@ Samply.Beam is a distributed task broker designed for efficient communication ac
 
 ## Latest version: Samply.Beam 0.8.0 – 2024-07-26
 
-This new major version includes some bugfixes, dependency upgrades and improvements to `beam-lib`. Please check the [Changelog](CHANGELOG.md) for more details.
+This new major version includes some bugfixes, dependency upgrades and improvements to `beam-lib`. Please check the [Changelog](CHANGELOG.md) for details.
 
 Find info on all previous versions in the [Changelog](CHANGELOG.md).
 
@@ -524,7 +524,7 @@ Initialize a socket connection with an Beam application, e.g. with AppId `app2.p
 Method: `POST`  
 URL: `/v1/sockets/<app_id>`  
 Header `Upgrade` is required, e.g. 'Upgrade: tls'
-Optionally takes a `metadata` header which is expected to be serialized json value.
+Optionally takes a `metadata` header which is expected to be a serialized json value.
 This corresponds to the `metadata` field on [Socket task](#socket-task).
 
 This request will automatically lead to a connection to the other app, after it answers this request.
