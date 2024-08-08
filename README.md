@@ -576,7 +576,7 @@ Alternatively, you can run the services in the background and get the logs as fo
 
 ```shell
 ./dev/beamdev start_bg
-docker-compose logs -f
+docker compose logs -f
 ```
 
 Confirm that your setup works by running `./dev/test noci`, which runs the tests against your instances.
