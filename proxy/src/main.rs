@@ -11,6 +11,7 @@ use shared::crypto::CryptoPublicPortion;
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
 use shared::{config, config_proxy::Config};
+use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 use tryhard::{backoff_strategies::ExponentialBackoff, RetryFuture, RetryFutureConfig};
 
@@ -131,6 +132,8 @@ async fn get_broker_health(
 fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
     const RETRY_INTERVAL: Duration = Duration::from_secs(60);
     tokio::spawn(async move {
+        let mut retries_this_min = 0;
+        let mut reset_interval = std::pin::pin!(tokio::time::sleep(Duration::from_secs(60)));
         loop {
             let body = EncryptedMessage::MsgEmpty(MsgEmpty {
                 from: AppOrProxyId::Proxy(config.proxy_id.clone()),
@@ -149,8 +152,15 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
                         StatusCode::OK => {
                             // Process control task
                         },
-                        StatusCode::GATEWAY_TIMEOUT => {
-                            debug!("Connection to broker timed out; retrying.");
+                        status @ (StatusCode::GATEWAY_TIMEOUT | StatusCode::BAD_GATEWAY) => {
+                            if retries_this_min < 10 {
+                                retries_this_min += 1;
+                                debug!("Connection to broker timed out; retrying.");
+                            } else {
+                                warn!("Retried more then 10 times in one minute getting status code: {status}");
+                                tokio::time::sleep(RETRY_INTERVAL).await;
+                                continue;
+                            }
                         },
                         other => {
                             warn!("Got unexpected status getting control tasks from broker: {other}");
@@ -166,6 +176,10 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
                     tokio::time::sleep(RETRY_INTERVAL).await;
                 }
             };
+            if reset_interval.is_elapsed() {
+                retries_this_min = 0;
+                reset_interval.as_mut().reset(Instant::now() + Duration::from_secs(60));
+            }
         }
     });
 }
