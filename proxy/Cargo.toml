@@ -18,7 +18,7 @@ httpdate = "1.0"
 
 # Error handling
 anyhow = "1"
-backoff = { version = "0.4", features = ["tokio"] }
+tryhard = "0.5"
 
 # Subscriber is imported through shared
 tracing = "0.1"
