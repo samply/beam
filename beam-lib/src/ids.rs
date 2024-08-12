@@ -71,18 +71,10 @@ impl AppOrProxyId {
         self.as_ref().ends_with(other.as_ref())
     }
 
-    pub fn hide_broker(&self) -> String {
+    pub fn hide_broker(&self) -> &str {
         match self {
-            AppOrProxyId::App(app) => {
-                let without_broker = strip_broker_id(&app.0).expect("Is valid id");
-                without_broker[..without_broker.len() - 1].to_owned()
-            }
-            AppOrProxyId::Proxy(proxy) => proxy
-                .0
-                .split_once('.')
-                .map(|(proxy, _broker)| proxy)
-                .unwrap_or_default()
-                .to_string(),
+            AppOrProxyId::App(app) => app.hide_broker_name(),
+            AppOrProxyId::Proxy(proxy) => proxy.proxy_name(),
         }
     }
 }
@@ -137,7 +129,7 @@ pub(crate) enum BeamIdType {
     BrokerId,
 }
 
-macro_rules! impl_new {
+macro_rules! impl_id {
     ($id:ident) => {
         impl $id {
             #[cfg(feature = "strict-ids")]
@@ -161,11 +153,23 @@ macro_rules! impl_new {
                 self.as_ref().ends_with(other.as_ref())
             }
         }
+
+        impl AsRef<str> for $id {
+            fn as_ref(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl Display for $id {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(&self.0)
+            }
+        }
     };
 }
 
-impl_new!(AppId);
-impl_new!(ProxyId);
+impl_id!(AppId);
+impl_id!(ProxyId);
 
 #[cfg(feature = "strict-ids")]
 fn get_id_type(id: &str) -> Result<BeamIdType, BeamIdError> {
@@ -209,32 +213,32 @@ impl AppId {
             .expect("AppId should be valid");
         ProxyId(proxy_id.to_string())
     }
-}
 
-impl AsRef<str> for AppId {
-    fn as_ref(&self) -> &str {
-        &self.0
+    /// Returns the AppId as a string slice without the broker part of the string
+    /// ## Example
+    /// app1.proxy1.broker => app1.proxy1
+    #[cfg(feature = "strict-ids")]
+    pub fn hide_broker_name(&self) -> &str {
+        let without_broker = strip_broker_id(&self.0).expect("Is valid id");
+        &without_broker[..without_broker.len() - 1]
     }
 }
 
-impl Display for AppId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub struct ProxyId(String);
 
-impl AsRef<str> for ProxyId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
+impl ProxyId {
 
-impl Display for ProxyId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
+    /// Returns the proxies name without the broker id
+    /// ## Example
+    /// proxy1.broker => proxy1
+    #[cfg(feature = "strict-ids")]
+    pub fn proxy_name(&self) -> &str {
+        self.0
+            .split_once('.')
+            .map(|(proxy, _broker)| proxy)
+            .expect("This is a valid proxy id")
     }
 }
 
