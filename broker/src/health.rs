@@ -57,7 +57,8 @@ pub struct Health {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyStatus {
-    last_active: SystemTime,
+    last_connect: SystemTime,
+    last_disconnect: Option<SystemTime>,
     #[serde(skip)]
     connections: u8,
 }
@@ -68,18 +69,27 @@ impl ProxyStatus {
     }
 
     pub fn disconnect(&mut self) {
+        self.last_disconnect = Some(SystemTime::now());
         self.connections -= 1;
     }
 
     pub fn connect(&mut self) {
         self.connections += 1;
-        self.last_active = SystemTime::now();
+        self.last_connect = SystemTime::now();
+    }
+
+    pub fn _last_seen(&self) -> SystemTime {
+        if self.online() {
+            SystemTime::now()
+        } else {
+            self.last_disconnect.expect("Should always exist as the proxy is not online")
+        }
     }
 }
 
 impl ProxyStatus {
     pub fn new() -> ProxyStatus {
-        ProxyStatus { last_active: SystemTime::now(), connections: 1 }
+        ProxyStatus { last_connect: SystemTime::now(), connections: 1, last_disconnect: None }
     }
 }
 
