@@ -1,8 +1,9 @@
-use std::{sync::Arc, time::{Duration, SystemTime}};
+use std::{convert::Infallible, marker::PhantomData, sync::Arc, time::{Duration, SystemTime}};
 
-use axum::{extract::{State, Path}, http::StatusCode, routing::get, Json, Router, response::Response};
+use axum::{extract::{Path, State}, http::StatusCode, response::{sse::{Event, KeepAlive}, Response, Sse}, routing::get, Json, Router};
 use axum_extra::{headers::{authorization::Basic, Authorization}, TypedHeader};
 use beam_lib::ProxyId;
+use futures_core::Stream;
 use serde::{Serialize, Deserialize};
 use shared::{crypto_jwt::Authorized, Msg, config::CONFIG_CENTRAL};
 use tokio::sync::RwLock;
@@ -46,7 +47,7 @@ async fn handler(
 }
 
 async fn get_all_proxies(State(state): State<Arc<RwLock<Health>>>) -> Json<Vec<ProxyId>> {
-    Json(state.read().await.proxies.keys().cloned().collect())
+    Json(state.read().await.proxies.iter().filter(|(_, v)| v.online()).map(|(k, _)| k).cloned().collect())
 }
 
 async fn proxy_health(
@@ -76,25 +77,32 @@ async fn proxy_health(
 async fn get_control_tasks(
     State(state): State<Arc<RwLock<Health>>>,
     proxy_auth: Authorized,
-) -> StatusCode {
+) -> Sse<ForeverStream> {
     let proxy_id = proxy_auth.get_from().proxy_id(); 
     // Once this is freed the connection will be removed from the map of connected proxies again
     // This ensures that when the connection is dropped and therefore this response future the status of this proxy will be updated
-    let _connection_remover = ConnectedGuard::connect(&proxy_id, &state).await;
+    let connect_guard = ConnectedGuard::connect(proxy_id, state).await;
 
-    // In the future, this will wait for control tasks for the given proxy
-    tokio::time::sleep(Duration::from_secs(60 * 60)).await;
-
-    StatusCode::OK
+    Sse::new(ForeverStream(connect_guard)).keep_alive(KeepAlive::new())
 }
 
-struct ConnectedGuard<'a> {
-    proxy: &'a ProxyId,
-    state: &'a Arc<RwLock<Health>>
+struct ForeverStream(#[allow(dead_code)] ConnectedGuard);
+
+impl Stream for ForeverStream {
+    type Item = Result<Event, Infallible>;
+
+    fn poll_next(self: std::pin::Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        std::task::Poll::Pending
+    }
 }
 
-impl<'a> ConnectedGuard<'a> {
-    async fn connect(proxy: &'a ProxyId, state: &'a Arc<RwLock<Health>>) -> ConnectedGuard<'a> {
+struct ConnectedGuard {
+    proxy: ProxyId,
+    state: Arc<RwLock<Health>>
+}
+
+impl ConnectedGuard {
+    async fn connect(proxy: ProxyId, state: Arc<RwLock<Health>>) -> ConnectedGuard {
         {
             state.write().await.proxies
                 .entry(proxy.clone())
@@ -105,7 +113,7 @@ impl<'a> ConnectedGuard<'a> {
     }
 }
 
-impl<'a> Drop for ConnectedGuard<'a> {
+impl Drop for ConnectedGuard {
     fn drop(&mut self) {
         let proxy_id = self.proxy.clone();
         let map = self.state.clone();
