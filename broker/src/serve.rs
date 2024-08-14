@@ -20,7 +20,7 @@ use tokio::{
 };
 use tracing::{debug, info, trace, warn};
 
-use crate::{banner, crypto, health::Health, serve_health, serve_pki, serve_tasks, compare_client_server_version};
+use crate::{banner, crypto, serve_health::Health, serve_health, serve_pki, serve_tasks, compare_client_server_version};
 
 pub(crate) async fn serve(health: Arc<RwLock<Health>>) -> anyhow::Result<()> {
     let app = serve_tasks::router()

@@ -6,6 +6,7 @@ use std::time::Duration;
 use axum::http::{header, HeaderValue, StatusCode};
 use beam_lib::AppOrProxyId;
 use futures::future::Ready;
+use futures::{StreamExt, TryStreamExt};
 use shared::{reqwest, EncryptedMessage, MsgEmpty, PlainMessage};
 use shared::crypto::CryptoPublicPortion;
 use shared::errors::SamplyBeamError;
@@ -132,8 +133,12 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
     const RETRY_INTERVAL: Duration = Duration::from_secs(60);
     tokio::spawn(async move {
         let mut retries_this_min = 0;
-        let mut reset_interval = std::pin::pin!(tokio::time::sleep(Duration::from_secs(60)));
+        let mut reset_interval = Instant::now() + RETRY_INTERVAL;
         loop {
+            if reset_interval < Instant::now() {
+                retries_this_min = 0;
+                reset_interval = Instant::now() + RETRY_INTERVAL;
+            }
             let body = EncryptedMessage::MsgEmpty(MsgEmpty {
                 from: AppOrProxyId::Proxy(config.proxy_id.clone()),
             });
@@ -145,39 +150,48 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
 
             let req = sign_request(body, parts, &config, None).await.expect("Unable to sign request; this should always work");
             // In the future this will poll actual control related tasks
-            match client.execute(req).await {
-                Ok(res) => {
-                    match res.status() {
-                        StatusCode::OK => {
-                            // Process control task
-                        },
-                        status @ (StatusCode::GATEWAY_TIMEOUT | StatusCode::BAD_GATEWAY) => {
-                            if retries_this_min < 10 {
-                                retries_this_min += 1;
-                                debug!("Connection to broker timed out; retrying.");
-                            } else {
-                                warn!("Retried more then 10 times in one minute getting status code: {status}");
-                                tokio::time::sleep(RETRY_INTERVAL).await;
-                                continue;
-                            }
-                        },
-                        other => {
-                            warn!("Got unexpected status getting control tasks from broker: {other}");
-                            tokio::time::sleep(RETRY_INTERVAL).await;
-                        }
-                    };
+            let res = match client.execute(req).await {
+                Ok(res) if res.status() == StatusCode::CONFLICT => {
+                    error!("A beam proxy with the same id is already running!");
+                    std::process::exit(409);
                 },
-                Err(e) if e.is_timeout() => {
-                    debug!("Connection to broker timed out; retrying: {e}");
-                },
+                Ok(res) if res.status() != StatusCode::OK => {
+                    if retries_this_min < 10 {
+                        retries_this_min += 1;
+                        debug!("Unexpected status code getting control tasks from broker: {}", res.status());
+                    } else {
+                        warn!("Retried more then 10 times in one minute getting status code: {}", res.status());
+                        tokio::time::sleep(RETRY_INTERVAL).await;
+                    }
+                    continue;
+                }
+                Ok(res) => res,
                 Err(e) => {
                     warn!("Error getting control tasks from broker; retrying in {}s: {e}", RETRY_INTERVAL.as_secs());
                     tokio::time::sleep(RETRY_INTERVAL).await;
+                    continue;
                 }
             };
-            if reset_interval.is_elapsed() {
-                retries_this_min = 0;
-                reset_interval.as_mut().reset(Instant::now() + Duration::from_secs(60));
+            let incoming = res
+                .bytes_stream()
+                .map(|result| result.map_err(|error| {
+                    let kind = error.is_timeout().then_some(std::io::ErrorKind::TimedOut).unwrap_or(std::io::ErrorKind::Other);
+                    std::io::Error::new(kind, format!("IO Error: {error}"))
+                }))
+                .into_async_read();
+            let mut reader = async_sse::decode(incoming);
+            while let Some(ev) = reader.next().await {
+                match ev {
+                    Ok(_)=> (),
+                    Err(e) if e.downcast_ref::<std::io::Error>().unwrap().kind() == std::io::ErrorKind::TimedOut => {
+                        debug!("SSE connection timed out");
+                        break;
+                    },
+                    Err(err) => {
+                        error!("Got error reading SSE stream: {err}");
+                        break;
+                    }
+                };
             }
         }
     });

@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokio::{sync::RwLock, time::timeout};
 use tracing::{debug, error, warn, info};
 
-use crate::health::{self, Health, VaultStatus};
+use crate::serve_health::{Health, VaultStatus};
 
 pub struct GetCertsFromPki {
     pki_realm: String,
