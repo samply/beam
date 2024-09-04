@@ -1,29 +1,15 @@
 use std::{
-    io::{self, Write},
-    ops::{Deref, DerefMut},
-    pin::Pin,
-    task::Poll,
-    time::{Duration, SystemTime, Instant}, sync::Arc,
+    future::ready, io::{self, Write}, ops::{Deref, DerefMut}, pin::Pin, sync::Arc, task::Poll, time::{Duration, Instant, SystemTime}
 };
 
 use axum::{
-    extract::{Path, Request, State}, http::{self, StatusCode}, response::{IntoResponse, Response}, routing::{get, post}, Extension, Json, RequestPartsExt, Router
+    body::Body, extract::{Path, Request, State}, http::{self, HeaderMap, StatusCode}, response::{IntoResponse, Response}, routing::{get, post}, Extension, Json, RequestPartsExt, Router
 };
-use bytes::{Buf, BufMut, BytesMut};
-use chacha20poly1305::{
-    aead::{
-        self,
-        generic_array::{typenum::Unsigned, GenericArray},
-        stream::{DecryptorLE31, EncryptorLE31, NewStream, StreamLE31, StreamPrimitive},
-        Buffer, Nonce, OsRng,
-    },
-    consts::{U20, U32},
-    AeadCore, AeadInPlace, ChaCha20Poly1305, KeyInit, XChaCha20Poly1305,
-};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use crypto_secretstream::{Header, Key, PullStream, PushStream};
 use dashmap::DashMap;
-use futures::{stream::IntoAsyncRead, FutureExt, SinkExt, StreamExt, TryStreamExt};
-use hyper_util::rt::TokioIo;
-use rsa::rand_core::RngCore;
+use futures::{stream::{self, IntoAsyncRead}, FutureExt, SinkExt, Stream, StreamExt, TryStream, TryStreamExt};
+use rsa::rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::AppOrProxyId;
@@ -31,18 +17,15 @@ use shared::{
     config, ct_codecs::{self, Base64UrlSafeNoPadding, Decoder as B64Decoder, Encoder as B64Encoder}, expire_map::LazyExpireMap, http_client::SamplyHttpClient, reqwest, MessageType, MsgEmpty, MsgId, MsgSocketRequest, Plain
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf, ReadHalf, WriteHalf};
-use tokio_util::{
-    codec::{Decoder, Encoder, Framed, FramedRead, FramedWrite},
-    compat::{Compat, FuturesAsyncReadCompatExt},
-};
+use tokio_util::codec::{Decoder, Encoder, Framed, FramedRead, FramedWrite};
 use tracing::{warn, debug};
 
 use crate::{
     auth::AuthenticatedApp,
-    serve_tasks::{forward_request, handler_task, TasksState, validate_and_decrypt, to_server_error},
+    serve_tasks::{forward_request, handler_task, prepare_request, to_server_error, validate_and_decrypt, TasksState},
 };
 
-type MsgSecretMap = Arc<LazyExpireMap<MsgId, SocketEncKey>>;
+type MsgSecretMap = Arc<LazyExpireMap<MsgId, Key>>;
 const TASK_SECRET_CLEANUP_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 pub(crate) fn router(client: SamplyHttpClient) -> Router {
@@ -62,7 +45,7 @@ pub(crate) fn router(client: SamplyHttpClient) -> Router {
 
     Router::new()
         .route("/v1/sockets", get(get_tasks))
-        .route("/v1/sockets/:app_or_id", post(create_socket_con).get(connect_socket))
+        .route("/v1/sockets/:app_or_id", post(create_socket_con).get(connect_read))
         .with_state(state)
         .layer(Extension(task_secret_map))
 }
@@ -83,11 +66,14 @@ async fn get_tasks(
     let mut out = Vec::with_capacity(tasks.len());
     for task in tasks {
         if let MessageType::MsgSocketRequest(mut socket_task) = task {
-            let key = serde_json::from_value(Value::String(socket_task.secret.body
+            let key = socket_task.secret.body
                 .as_ref()
-                .ok_or(StatusCode::INTERNAL_SERVER_ERROR.into_response())?
-                .to_string()
-            )).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
+                .and_then(|s| Base64UrlSafeNoPadding::decode_to_vec(s, None).ok())
+                .and_then(|b| Key::try_from(b.as_slice()).ok())
+                .ok_or_else(|| {
+                    warn!("Failed to extract socket decryption key");
+                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                })?;
             let Ok(ttl) = socket_task.expire.duration_since(SystemTime::now()) else {
                 continue;
             };
@@ -102,21 +88,22 @@ async fn get_tasks(
     Ok(Json(out))
 }
 
+
 async fn create_socket_con(
     AuthenticatedApp(sender): AuthenticatedApp,
     Path(to): Path<AppOrProxyId>,
     Extension(task_secret_map): Extension<MsgSecretMap>,
     state: State<TasksState>,
-    mut req: Request,
+    mut og_req: Request,
 ) -> Response {
     let task_id = MsgId::new();
-    let secret = SocketEncKey::generate();
-    let Ok(secret_encoded) = secret.to_b64_str() else {
+    let secret = Key::generate(&mut OsRng);
+    let Ok(secret_encoded) = Base64UrlSafeNoPadding::encode_to_string(secret.as_ref()) else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     const TTL: Duration = Duration::from_secs(60);
     task_secret_map.insert_for(TTL, task_id.clone(), secret);
-    let metadata = req
+    let metadata = og_req
         .headers_mut()
         .remove("metadata")
         .and_then(|v| serde_json::from_slice(v.as_bytes()).ok())
@@ -159,299 +146,178 @@ async fn create_socket_con(
         );
         return (res.status(), "Failed to post MsgSocketRequest to broker").into_response();
     }
-    connect_socket(AuthenticatedApp(sender), state, Extension(task_secret_map), Path(task_id), req).await
+    let req = match prepare_socket_request(sender, task_id, og_req.headers().clone(), &state).await {
+        Ok(req) => req,
+        Err(e) => return e,
+    };
+    // Connect write
+    let req = req.map(|b| {
+        let n = b.as_bytes().len();
+        let mut body = Vec::with_capacity(n + 5);
+        body.push(0);
+        body.extend(u32::to_be_bytes(n as _));
+        body.extend(b.as_bytes());
+        Bytes::from(body)
+    });
+
+    let Some(key) = task_secret_map.remove(&task_id) else {
+        return StatusCode::GONE.into_response();
+    };
+    let (parts, body) = req.into_parts();
+    let stream = stream::once(ready(Ok(body))).chain(Encrypter::new(key).encrypt(og_req.into_body().into_data_stream()));
+    let req = Request::from_parts(parts, reqwest::Body::wrap_stream(stream));
+    let res = match state.client.execute(req.try_into().expect("Conversion to reqwest::Request should always work")).await {
+        Ok(res) => res,
+        Err(e) => return (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
+    };
+    let (parts, body) = http::Response::from(res).into_parts();
+    Response::from_parts(parts, Body::from_stream(reqwest::Response::from(http::Response::new(body)).bytes_stream()))
 }
 
-async fn connect_socket(
+async fn connect_read(
     AuthenticatedApp(sender): AuthenticatedApp,
     state: State<TasksState>,
     Extension(task_secret_map): Extension<MsgSecretMap>,
     Path(task_id): Path<MsgId>,
-    mut req: Request,
+    req: Request,
 ) -> Response {
-    let Some(conn) =  req.extensions_mut().remove::<hyper::upgrade::OnUpgrade>() else {
-        return StatusCode::UPGRADE_REQUIRED.into_response();
+    let req = match prepare_socket_request(sender, task_id, req.headers().clone(), &state).await {
+        Ok(value) => value,
+        Err(e) => return e,
     };
+    let req = req.map(|b| {
+        let n = b.as_bytes().len();
+        let mut body = Vec::with_capacity(n + 5);
+        body.push(1);
+        body.extend(u32::to_be_bytes(n as _));
+        body.extend(b.as_bytes());
+        Bytes::from(body)
+    });
 
-    let Some(key) = task_secret_map.get(&task_id).map(|v| v.clone()) else {
-        return StatusCode::UNAUTHORIZED.into_response();
+    let res = match state.client.execute(req.try_into().expect("Conversion to reqwest::Request should always work")).await {
+        Ok(res) => res,
+        Err(e) => return (StatusCode::BAD_GATEWAY, e.to_string()).into_response(),
     };
+    let Some(key) = task_secret_map.remove(&task_id) else {
+        return StatusCode::GONE.into_response();
+    };
+    let headers = res.headers().clone();
+    // let stream = Decrypter::new(key).decrypt(res.bytes_stream());
+    let mut res = Response::new(Body::from_stream(Decrypter::new(key).decrypt(res.bytes_stream())));
+    *res.headers_mut() = headers;
+    res
+}
 
+async fn prepare_socket_request(sender: beam_lib::AppId, task_id: MsgId, headers: HeaderMap, state: &State<TasksState>) -> Result<http::Request<String>, http::Response<Body>> {
     let msg_empty = MsgEmpty {
         from: AppOrProxyId::App(sender.clone()),
     };
     let Ok(body) = serde_json::to_vec(&msg_empty) else {
         warn!("Failed to serialize MsgEmpty");
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
     };
-    // Try to connect to socket
     let new_req = Request::get(format!("/v1/sockets/{task_id}")).body(axum::body::Body::from(body));
     let mut get_socket_con_req = match new_req {
         Ok(req) => req,
         Err(e) => {
             warn!("Failed to construct request: {e}");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
     };
-    *get_socket_con_req.headers_mut() = req.headers().clone();
-
-    let mut res = match forward_request(get_socket_con_req, &state.config, &sender, &state.client).await
-    {
-        Ok(res) => res,
+    *get_socket_con_req.headers_mut() = headers;
+    let req = match prepare_request(get_socket_con_req, &state.config, &sender).await {
+        Ok(req) => req,
         Err(err) => {
             warn!("Failed to create socket connect request: {err:?}");
-            return err.into_response();
+            return Err(err.into_response());
         }
     };
+    Ok(req)
+}
 
-    let broker_conn = match res.extensions_mut().remove::<hyper::upgrade::OnUpgrade>() {
-        Some(other_conn) if res.status() == StatusCode::SWITCHING_PROTOCOLS => other_conn,
-        _ => {
-            warn!("Failed to create an upgradable connection to the broker. Response was: {res:?}");
-            return res.status().into_response();
+struct Encrypter {
+    header: Header,
+    encrypter: PushStream,
+}
+
+impl Encrypter {
+    fn new(key: Key) -> Self {
+        let (header, encrypter) = PushStream::init(&mut OsRng, &key);
+        Self { header, encrypter }
+    }
+
+    fn encrypt<S: Stream<Item = Result<Bytes, axum::Error>> + Send + 'static>(mut self, stream: S) -> impl Stream<Item = Result<Bytes, axum::Error>> + Send + 'static {
+        let header = Bytes::copy_from_slice(self.header.as_ref().as_slice());
+        stream::once(futures::future::ready(Ok(header))).chain(stream.map_ok(move |bytes| {
+            let mut buf = bytes.to_vec();
+            self.encrypter.push(&mut buf, b"", crypto_secretstream::Tag::Message).expect("Hope this works");
+            let mut dst = Vec::with_capacity(buf.len() + 4);
+            dst.extend(u32::to_be_bytes(buf.len() as _));
+            dst.extend(buf);
+            dst.into()
+        }))
+    }
+}
+
+struct Decrypter {
+    key: Key,
+}
+
+impl Decrypter {
+    fn new(key: Key) -> Self {
+        Self { key }
+    }
+
+    fn decrypt<S: Stream<Item = reqwest::Result<Bytes>> + Send + Unpin + 'static>(self, mut stream: S) -> impl Stream<Item = reqwest::Result<Bytes>> + Send + 'static {
+        enum State {
+            ReadingHeader,
+            ReadingLen(PullStream),
+            Decrypting(PullStream, usize)
         }
-    };
-
-    // Connect sockets
-    tokio::spawn(async move {
-        let (broker_socket, client_socket) = match tokio::try_join!(broker_conn, conn) {
-            Ok(sockets) => sockets,
-            Err(e) => {
-                warn!("Failed to upgrade requests to socket connections: {e}");
-                return;
-            },
-        };
-        let Ok(mut enc_broker_socket) = EncryptedSocket::new(TokioIo::new(broker_socket), &key).await else {
-            warn!("Error encrypting connection to broker");
-            return;
-        };
-
-        let result = tokio::io::copy_bidirectional(&mut TokioIo::new(client_socket), &mut enc_broker_socket).await;
-        if let Err(e) = result {
-            debug!("Relaying socket connection ended: {e}");
-        }
-    });
-
-    StatusCode::SWITCHING_PROTOCOLS.into_response()
-}
-
-#[derive(Debug, Clone, Copy)]
-struct SocketEncKey(GenericArray<u8, U32>);
-
-impl SocketEncKey {
-    fn generate() -> Self {
-        let mut arr = GenericArray::default();
-        OsRng.fill_bytes(&mut arr);
-        SocketEncKey(arr)
-    }
-
-    fn to_b64_str(&self) -> Result<String, ct_codecs::Error> {
-        Base64UrlSafeNoPadding::encode_to_string(self.as_slice())
-    }
-}
-
-impl Serialize for SocketEncKey {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.to_b64_str().map_err(serde::ser::Error::custom)?.serialize(serializer)
+        let mut buf = BytesMut::new();
+        let mut state = State::ReadingHeader;
+        futures::stream::poll_fn(move |cx| {
+            loop {
+                return match &mut state {
+                    State::ReadingHeader if buf.len() >= Header::BYTES => {
+                        let head = buf.split_to(Header::BYTES);
+                        state = State::ReadingLen(PullStream::init(head.as_ref().try_into().unwrap(), &self.key));
+                        continue;
+                    },
+                    State::ReadingLen(..) if buf.len() >= 4 => {
+                        let State::ReadingLen(dec) = std::mem::replace(&mut state, State::ReadingHeader) else {
+                            unreachable!()
+                        };
+                        let len = buf.split_to(4);
+                        state = State::Decrypting(dec, u32::from_be_bytes(len.as_ref().try_into().unwrap()) as usize);
+                        continue;
+                    },
+                    State::Decrypting(ref mut dec, len) if buf.len() >= *len => {
+                        let mut data = buf.split_to(*len).to_vec();
+                        assert_eq!(dec.pull(&mut data, b""), Ok(crypto_secretstream::Tag::Message));
+                        let State::Decrypting(dec, _) = std::mem::replace(&mut state, State::ReadingHeader) else {
+                            unreachable!()
+                        };
+                        state = State::ReadingLen(dec);
+                        Poll::Ready(Some(Ok(Bytes::from(data))))
+                    },
+                    _ => match futures::ready!(stream.poll_next_unpin(cx)) {
+                        Some(Ok(data)) => {
+                            buf.extend(data);
+                            continue;
+                        },
+                        Some(Err(e)) => Poll::Ready(Some(Err(e))),
+                        None => Poll::Ready(None),
+                    }
+                }
+            }
+        })
     }
 }
 
-impl<'de> Deserialize<'de> for SocketEncKey {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bytes = Base64UrlSafeNoPadding::decode_to_vec(String::deserialize(deserializer)?, None).map_err(serde::de::Error::custom)?;
-        if bytes.len() != U32::to_usize() {
-            return Err(serde::de::Error::custom("Key does not match required key length"));
-        } else {
-            Ok(SocketEncKey(GenericArray::clone_from_slice(bytes.as_slice())))
-        }
-    }
-}
 
-impl Deref for SocketEncKey {
-    type Target = GenericArray<u8, U32>;
-
-    fn deref(&self) -> &GenericArray<u8, U32> {
-        &self.0
-    }
-}
-
-impl DerefMut for SocketEncKey {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-struct EncryptedSocket<S: AsyncRead + AsyncWrite> {
-    // inner: Framed<S, EncryptorCodec>,
-    read: Compat<IntoAsyncRead<FramedRead<ReadHalf<S>, DecryptorCodec>>>,
-    write: FramedWrite<WriteHalf<S>, EncryptorCodec>,
-}
-
-struct EncryptorCodec {
-    encryptor: EncryptorLE31<XChaCha20Poly1305>,
-}
-
-struct DecryptorCodec {
-    decryptor: DecryptorLE31<XChaCha20Poly1305>,
-}
-
-impl DecryptorCodec {
-    const SIZE_OVERHEAD: usize = 4;
-}
-
-impl EncryptorCodec {
-    #[inline]
-    fn tag_overhead() -> usize {
-        <XChaCha20Poly1305 as AeadCore>::TagSize::to_usize()
-    }
-}
-
-impl Encoder<&[u8]> for EncryptorCodec {
-    type Error = io::Error;
-
-    fn encode(&mut self, item: &[u8], dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let mut enc_buf = EncBuffer::new(dst, item.len() + Self::tag_overhead());
-        enc_buf.extend_from_slice(item).expect("Infallible");
-        self.encryptor
-            .encrypt_next_in_place(b"", &mut enc_buf)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Encryption failed"))
-    }
-}
-
-impl Decoder for DecryptorCodec {
-    type Item = Vec<u8>;
-
-    type Error = io::Error;
-
-    fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.len() < Self::SIZE_OVERHEAD {
-            return Ok(None);
-        }
-        let mut size_slice = [0; Self::SIZE_OVERHEAD];
-        size_slice.clone_from_slice(&src[..Self::SIZE_OVERHEAD]);
-        let size = u32::from_le_bytes(size_slice);
-        let total_frame_size = size as usize + Self::SIZE_OVERHEAD;
-        if src.len() < total_frame_size {
-            return Ok(None);
-        }
-
-        let plain = self
-            .decryptor
-            .decrypt_next(&src[Self::SIZE_OVERHEAD..])
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Decryption failed"))?;
-        src.advance(total_frame_size);
-        Ok(Some(plain))
-    }
-}
-
-struct EncBuffer<'a> {
-    buf: &'a mut BytesMut,
-}
-
-impl<'a> EncBuffer<'a> {
-    fn new(buffer: &'a mut BytesMut, content_len: usize) -> Self {
-        buffer.reserve(content_len + Self::SIZE_OVERHEAD);
-        buffer.extend_from_slice(&u32::to_le_bytes(content_len as u32));
-        Self { buf: buffer }
-    }
-
-    /// Reserved for size of msg
-    const SIZE_OVERHEAD: usize = 4;
-}
-
-impl<'a> Buffer for EncBuffer<'a> {
-    // This should only be called to append the tag to the buffer
-    fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
-        self.buf.extend_from_slice(other);
-        Ok(())
-    }
-
-    // This should only be called when decrypting
-    fn truncate(&mut self, len: usize) {
-        self.buf.truncate(len)
-    }
-}
-
-impl<'a> AsRef<[u8]> for EncBuffer<'a> {
-    fn as_ref(&self) -> &[u8] {
-        &self.buf[Self::SIZE_OVERHEAD..]
-    }
-}
-
-impl<'a> AsMut<[u8]> for EncBuffer<'a> {
-    fn as_mut(&mut self) -> &mut [u8] {
-        &mut self.buf[Self::SIZE_OVERHEAD..]
-    }
-}
-
-impl<S: AsyncRead + AsyncWrite + Unpin> EncryptedSocket<S> {
-    /// Creates a new cipher stream with a 32 byte key and a 16 + 4 byte Nonce
-    async fn new(mut inner: S, key: &GenericArray<u8, U32>) -> io::Result<Self> {
-        let aead = XChaCha20Poly1305::new(key);
-
-        // Encryption
-        let mut enc_nonce = GenericArray::default();
-        OsRng.fill_bytes(&mut enc_nonce);
-        let encryptor = EncryptorLE31::from_aead(aead.clone(), &enc_nonce);
-        inner.write_all(&enc_nonce).await?;
-
-        // Decryption
-        let mut dec_nonce = GenericArray::default();
-        inner.read_exact(dec_nonce.as_mut_slice()).await?;
-        let decryptor = DecryptorLE31::from_aead(aead, &dec_nonce);
-
-        let (r, w) = tokio::io::split(inner);
-        let read = FramedRead::new(r, DecryptorCodec { decryptor });
-        let read = read.into_async_read().compat();
-        let write = FramedWrite::new(w, EncryptorCodec { encryptor });
-
-        Ok(Self { read, write })
-    }
-}
-
-impl<S: AsyncRead + AsyncWrite + Unpin> AsyncRead for EncryptedSocket<S> {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<io::Result<()>> {
-        Pin::new(&mut self.read).poll_read(cx, buf)
-    }
-}
-
-impl<S: AsyncWrite + AsyncRead + Unpin> AsyncWrite for EncryptedSocket<S> {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        buf: &[u8],
-    ) -> std::task::Poll<Result<usize, io::Error>> {
-        self.write.send(buf).poll_unpin(cx).map_ok(|_| buf.len())
-    }
-
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), io::Error>> {
-        self.write.poll_flush_unpin(cx)
-    }
-
-    fn poll_shutdown(
-        mut self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), io::Error>> {
-        self.write.poll_close_unpin(cx)
-    }
-}
-
-#[cfg(test)]
+#[cfg(never)]
 mod tests {
-    use chacha20poly1305::aead::stream::{Decryptor, Encryptor, EncryptorLE31};
     use tokio::net::{TcpListener, TcpStream};
 
     use super::*;

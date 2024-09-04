@@ -146,7 +146,7 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
 
             let req = sign_request(body, parts, &config, None).await.expect("Unable to sign request; this should always work");
             // In the future this will poll actual control related tasks
-            match client.execute(req).await {
+            match client.execute(req.try_into().unwrap()).await {
                 Ok(res) => {
                     match res.status() {
                         StatusCode::OK => {

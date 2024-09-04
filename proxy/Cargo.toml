@@ -37,13 +37,11 @@ async-sse = "5.1"
 async-stream = "0.3"
 
 # Socket dependencies
-chacha20poly1305 = { version = "0.10", features = ["stream"], optional = true }
+crypto_secretstream = { version = "0.2", optional = true }
 dashmap =  { version = "6.0", optional = true}
-hyper = { version = "1", default-features = false, optional = true }
-hyper-util = { version = "0.1", default-features = false, features = ["tokio"], optional = true}
 
 [features]
-sockets = ["dep:chacha20poly1305", "dep:dashmap", "tokio-util/codec", "tokio-util/compat", "shared/sockets", "shared/expire_map", "dep:hyper", "dep:hyper-util"]
+sockets = ["dep:crypto_secretstream", "dep:dashmap", "shared/sockets", "shared/expire_map"]
 
 [build-dependencies]
 build-data = "0"

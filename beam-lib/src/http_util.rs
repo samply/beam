@@ -7,6 +7,8 @@ use thiserror::Error;
 use crate::{AddressingId, TaskRequest, MsgId, TaskResult, ProxyId};
 #[cfg(feature = "sockets")]
 use crate::SocketTask;
+#[cfg(feature = "sockets")]
+use futures_core::{Stream, TryStream};
 
 /// A client used for communicating with the beam network
 #[derive(Debug, Clone)]
@@ -187,33 +189,42 @@ impl BeamClient {
     /// Create a socket task for some other application to connect to
     /// For this to work both the beam proxy and beam broker need to have the sockets feature enabled.
     #[cfg(feature = "sockets")]
-    pub async fn create_socket(&self, destination: &AddressingId) -> Result<reqwest::Upgraded> {
-        self.create_socket_with_metadata(destination, serde_json::Value::Null).await
+    pub async fn create_socket<S>(&self, destination: &AddressingId, data_stream: S) -> Result<reqwest::Response>
+    where
+        // Trait bound from Body::wrap_stream
+        S: TryStream + Send + 'static,
+        S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        bytes::Bytes: From<S::Ok>
+    {
+        self.create_socket_with_metadata(destination, data_stream, serde_json::Value::Null).await
     }
 
     /// Same as `create_socket` but with associated (unencrypted) metadata.
     #[cfg(feature = "sockets")]
-    pub async fn create_socket_with_metadata(&self, destination: &AddressingId, metadata: impl Serialize) -> Result<reqwest::Upgraded> {
+    pub async fn create_socket_with_metadata<S>(&self, destination: &AddressingId, data_stream: S, metadata: impl Serialize) -> Result<reqwest::Response>
+    where
+        // Trait bound from Body::wrap_stream
+        S: TryStream + Send + 'static,
+        S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+        bytes::Bytes: From<S::Ok>
+    {
         const METADATA_HEADER: HeaderName = HeaderName::from_static("metadata");
         let url = self.beam_proxy_url
             .join(&format!("/v1/sockets/{destination}"))
             .expect("The proxy url is valid");
         let response = self.client
             .post(url)
-            .header(header::UPGRADE, "tcp")
             .header(
                 METADATA_HEADER,
                 HeaderValue::try_from(serde_json::to_string(&metadata).map_err(BeamError::other)?).map_err(BeamError::other)?
             )
+            .body(reqwest::Body::wrap_stream(data_stream))
             .send().await?
             .handle_invalid_receivers().await?;
-        if response.status() != StatusCode::SWITCHING_PROTOCOLS {
-            Err(BeamError::UnexpectedStatus(response.status()))
+        if response.status().is_success() {
+            Ok(response)
         } else {
-            response
-                .upgrade()
-                .await
-                .map_err(Into::into)
+            Err(BeamError::UnexpectedStatus(response.status()))
         }
     }
 
@@ -245,22 +256,18 @@ impl BeamClient {
 
     /// Connect to a socket by its socket task id
     #[cfg(feature = "sockets")]
-    pub async fn connect_socket(&self, socket_task_id: &MsgId) -> Result<reqwest::Upgraded> {
+    pub async fn connect_socket(&self, socket_task_id: &MsgId) -> Result<impl Stream<Item = reqwest::Result<bytes::Bytes>>> {
         let url = self.beam_proxy_url
             .join(&format!("/v1/sockets/{socket_task_id}"))
             .expect("The proxy url is valid");
         let response = self.client
             .get(url)
-            .header(header::UPGRADE, "tcp")
             .send().await?
             .handle_invalid_receivers().await?;
-        if response.status() != StatusCode::SWITCHING_PROTOCOLS {
-            Err(BeamError::UnexpectedStatus(response.status()))
+        if response.status().is_success() {
+            Ok(response.bytes_stream())
         } else {
-            response
-                .upgrade()
-                .await
-                .map_err(Into::into)
+            Err(BeamError::UnexpectedStatus(response.status()))
         }
     }
 }

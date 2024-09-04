@@ -36,7 +36,7 @@ impl GetCertsFromBroker {
         let req = sign_request(body, parts, &self.config, Some(&self.crypto_conf))
             .await
             .map_err(|(_, msg)| SamplyBeamError::SignEncryptError(msg.into()))?;
-        Ok(self.client.execute(req).await?.into())
+        Ok(self.client.execute(req.try_into().unwrap()).await?.into())
     }
 
     async fn query(&self, path: &str) -> Result<String, SamplyBeamError> {

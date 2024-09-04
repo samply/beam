@@ -1,27 +1,25 @@
-use rand::RngCore;
-use tokio::io::{AsyncWriteExt, AsyncReadExt, AsyncRead, AsyncWrite};
+use std::{convert::Infallible, time::Duration};
+
+use futures::{stream, StreamExt};
 use anyhow::Result;
 use crate::*;
 
-async fn test_connection<T: AsyncRead + AsyncWrite + Unpin>(mut a: T, mut b: T) -> Result<()> {
-    const N: usize = 2_usize.pow(13);
-    let test_data: &mut [u8; N] = &mut [0; N];
-    rand::thread_rng().fill_bytes(test_data);
-    let mut read_buf = [0; N];
-    a.write_all(test_data).await?;
-    a.flush().await?;
-    b.read_exact(&mut read_buf).await?;
-    assert_eq!(test_data, &read_buf);
-    Ok(())
-}
-
 #[tokio::test]
 async fn test_full() -> Result<()> {
-    let metadata = serde_json::json!({
+    let metadata: &'static _ = Box::leak(Box::new(serde_json::json!({
         "foo": vec![1, 2, 3],
-    });
-    let app1 = async {
-        CLIENT1.create_socket_with_metadata(&APP2, &metadata).await.map_err(anyhow::Error::from)
+    })));
+    let range = 1..10_000;
+    let stream = stream::iter(range.clone())
+        .map(|i| Ok::<_, Infallible>(u32::to_be_bytes(i).to_vec()))
+        .then(|b| async {
+            tokio::time::sleep(Duration::from_millis(2)).await;
+            b
+        });
+    let app1 = async move {
+        let res = tokio::time::timeout(Duration::from_secs(60), CLIENT1.create_socket_with_metadata(&APP2, stream, metadata)).await??;
+        assert!(res.status().is_success());
+        Ok(())
     };
     let app2 = async {
         let task = CLIENT2
@@ -29,10 +27,18 @@ async fn test_full() -> Result<()> {
             .await?
             .pop()
             .ok_or(anyhow::anyhow!("Failed to get a socket task"))?;
-        assert_eq!(&task.metadata, &metadata);
-        Ok(CLIENT2.connect_socket(&task.id).await?)
+        assert_eq!(&task.metadata, metadata);
+        let s = CLIENT2.connect_socket(&task.id).await?;
+        let expected = range.map(u32::to_be_bytes).flatten().collect::<Vec<_>>();
+        let mut buf = Vec::with_capacity(expected.len());
+        s.for_each(|b| {
+            buf.extend(b.unwrap());
+            futures::future::ready(())
+        }).await;
+        assert_eq!(buf, expected);
+        anyhow::Ok(())
     };
 
-    let (app1, app2) = tokio::try_join!(app1, app2)?;
-    test_connection(app1, app2).await
+    tokio::try_join!(app1, app2)?;
+    Ok(())
 }

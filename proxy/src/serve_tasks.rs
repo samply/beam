@@ -5,7 +5,7 @@ use std::{
 };
 
 use axum::{
-    body::Bytes, extract::{FromRef, Request, State}, http::{header, request::Parts, HeaderMap, HeaderValue, StatusCode, Uri}, response::{sse::Event, IntoResponse, Response, Sse}, routing::{any, get, put}, Json, RequestExt, Router
+    body::Bytes, extract::{FromRef, Request, State}, http::{self, header, request::Parts, HeaderMap, HeaderValue, StatusCode, Uri}, response::{sse::Event, IntoResponse, Response, Sse}, routing::{any, get, put}, Json, RequestExt, Router
 };
 use futures::{
     stream::{StreamExt, TryStreamExt},
@@ -61,29 +61,13 @@ const ERR_FAKED_FROM: (StatusCode, &str) = (
 );
 
 pub(crate) async fn forward_request(
-    mut req: Request<axum::body::Body>,
+    req: Request<axum::body::Body>,
     config: &config_proxy::Config,
     sender: &AppId,
     client: &SamplyHttpClient,
 ) -> Result<reqwest::Response, Response> {
-    // Create uri to contact broker
-    let path = req.uri().path();
-    let path_query = req
-        .uri()
-        .path_and_query()
-        .map(|v| v.as_str())
-        .unwrap_or(path);
-    let target_uri =
-        Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
-            .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried.").into_response())?;
-    *req.uri_mut() = target_uri;
-
-    req.headers_mut().append(
-        header::VIA,
-        HeaderValue::from_static(env!("SAMPLY_USER_AGENT")),
-    );
-    let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
-    let req = sign_request(encrypted_msg, parts, &config, None).await.map_err(IntoResponse::into_response)?;
+    let req = prepare_request(req, config, sender).await?;
+    let req = req.try_into().expect("http::Request to reqwest::Request conversion should always work");
     trace!("Requesting: {:?}", req);
     let resp = client.execute(req).await.map_err(|e| {
         if e.is_timeout() {
@@ -95,6 +79,25 @@ pub(crate) async fn forward_request(
         }.into_response()
     })?;
     Ok(resp)
+}
+
+pub(crate) async fn prepare_request(mut req: Request<axum::body::Body>, config: &config_proxy::Config, sender: &AppId) -> Result<http::Request<String>, http::Response<axum::body::Body>> {
+    let path = req.uri().path();
+    let path_query = req
+        .uri()
+        .path_and_query()
+        .map(|v| v.as_str())
+        .unwrap_or(path);
+    let target_uri =
+        Uri::try_from(config.broker_uri.to_string() + path_query.trim_start_matches('/'))
+            .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid path queried.").into_response())?;
+    *req.uri_mut() = target_uri;
+    req.headers_mut().append(
+        header::VIA,
+        HeaderValue::from_static(env!("SAMPLY_USER_AGENT")),
+    );
+    let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
+    sign_request(encrypted_msg, parts, &config, None).await.map_err(IntoResponse::into_response)
 }
 
 pub(crate) async fn handler_task(
@@ -320,7 +323,7 @@ pub async fn sign_request(
     mut parts: Parts,
     config: &config_proxy::Config,
     private_crypto: Option<&ConfigCrypto>,
-) -> Result<reqwest::Request, (StatusCode, &'static str)> {
+) -> Result<http::Request<String>, (StatusCode, &'static str)> {
     let from = body.get_from();
 
     let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, private_crypto)
@@ -353,7 +356,7 @@ pub async fn sign_request(
             error!("Crypto failed: {}", e);
             ERR_INTERNALCRYPTO
         })?;
-    let body: reqwest::Body = token_without_extended_signature.into();
+    let body = token_without_extended_signature;
     let mut auth_header = String::from("SamplyJWT ");
     auth_header.push_str(&token_with_extended_signature);
     headers_mut.insert(header::HOST, config.broker_host_header.clone());
@@ -369,7 +372,7 @@ pub async fn sign_request(
     );
     parts.headers = headers_mut;
     let req = Request::from_parts(parts, body);
-    Ok(req.try_into().expect("Uri to Url conversion should work"))
+    Ok(req)
 }
 
 // This requires rustc 1.77

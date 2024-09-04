@@ -1,12 +1,14 @@
-use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref, time::Duration};
+use std::{borrow::Cow, collections::{HashMap, HashSet}, ops::Deref, sync::Arc, time::Duration};
 
-use axum::{extract::{Path, Request, State}, http::{header, request::Parts, StatusCode}, response::{IntoResponse, Response}, routing::get, RequestExt, Router};
-use bytes::BufMut;
-use hyper_util::rt::TokioIo;
+use axum::{body::{Body, BodyDataStream}, extract::{Path, Request, State}, http::{header, request::Parts, StatusCode}, response::{IntoResponse, Response}, routing::get, RequestExt, Router};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use dashmap::mapref::entry::Entry;
+use futures_core::TryStream;
+use futures_util::{stream, StreamExt};
 use serde::{Serialize, Serializer, ser::SerializeSeq};
-use shared::{config::{CONFIG_CENTRAL, CONFIG_SHARED}, crypto_jwt::Authorized, expire_map::LazyExpireMap, serde_helpers::DerefSerializer, Encrypted, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned, MsgSocketRequest};
-use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
-use tracing::{debug, log::error, warn};
+use shared::{config::{CONFIG_CENTRAL, CONFIG_SHARED}, crypto_jwt::Authorized, errors::SamplyBeamError, expire_map::LazyExpireMap, serde_helpers::DerefSerializer, Encrypted, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned, MsgSocketRequest};
+use tokio::{sync::{broadcast::{self, Sender}, oneshot, RwLock}, time::Instant};
+use tracing::{debug, log::error, warn, Span};
 
 use crate::task_manager::{TaskManager, Task};
 
@@ -14,8 +16,15 @@ use crate::task_manager::{TaskManager, Task};
 #[derive(Clone)]
 struct SocketState {
     task_manager: Arc<TaskManager<MsgSocketRequest<Encrypted>>>,
-    waiting_connections: Arc<LazyExpireMap<MsgId, oneshot::Sender<hyper::upgrade::OnUpgrade>>>
+    waiting_connections: Arc<LazyExpireMap<MsgId, ConnectionState>>
 }
+
+enum ConnectionState {
+    ReadHalfConnected(oneshot::Sender<SocketStream>),
+    WriteHalfConnected(oneshot::Receiver<SocketStream>),
+}
+
+type SocketStream = stream::BoxStream<'static, Result<Bytes, axum::Error>>;
 
 impl SocketState {
     const WAITING_CONNECTIONS_TIMEOUT: Duration = Duration::from_secs(60);
@@ -78,14 +87,17 @@ async fn post_socket_request(
     ))
 }
 
+// TODO: Instrument with task_id
 async fn connect_socket(
     state: State<SocketState>,
     Path(task_id): Path<MsgId>,
     mut parts: Parts,
-    body: String,
+    body: Body,
     // This Result is just an Either type. An error value does not mean something went wrong
 ) -> Result<Response, StatusCode> {
-    let result = shared::crypto_jwt::verify_with_extended_header::<MsgEmpty>(&mut parts, &body).await;
+    let mut body_stream = body.into_data_stream();
+    let (is_read, token, remaining) = read_header(&mut body_stream).await?;
+    let result = shared::crypto_jwt::verify_with_extended_header::<MsgEmpty>(&mut parts, String::from_utf8_lossy(&token).as_ref()).await;
     let msg = match result {
         Ok(msg) => msg.msg,
         Err(e) => return Ok(e.into_response()),
@@ -97,39 +109,100 @@ async fn connect_socket(
             return Err(StatusCode::UNAUTHORIZED);
         }
     }
-
-    let Some(conn) = parts.extensions.remove::<hyper::upgrade::OnUpgrade>() else {
-        return Err(StatusCode::UPGRADE_REQUIRED);
-    };
-
-    if let Some(req_sender) = state.waiting_connections.remove(&task_id) {
-        if let Err(_) = req_sender.send(conn) {
-            warn!("Error sending socket connection to tunnel. Receiver has been dropped");
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    if is_read {
+        let recv = match state.waiting_connections.entry(task_id) {
+            Entry::Occupied(e) => {
+                match e.remove().0 {
+                    ConnectionState::ReadHalfConnected(_) => {
+                        warn!("Reader connected twice");
+                        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                    },
+                    ConnectionState::WriteHalfConnected(recv) => recv,
+                }
+            },
+            Entry::Vacant(empty) => {
+                let (tx, rx) = oneshot::channel();
+                empty.insert((ConnectionState::ReadHalfConnected(tx), Instant::now() + SocketState::WAITING_CONNECTIONS_TIMEOUT));
+                rx
+            },
+        };
+        debug!(%task_id, "Read waiting on write");
+        let recv_res = recv.await;
+        _ = state.task_manager.remove(&task_id);
+        match recv_res {
+            Ok(s) => Ok(Body::from_stream(s).into_response()),
+            Err(_) => {
+                warn!(%task_id, "Socket connection expired");
+                Err(StatusCode::GONE)
+            },
         }
     } else {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        state.waiting_connections.insert_for(SocketState::WAITING_CONNECTIONS_TIMEOUT, task_id, tx);
-        let Ok(other_con) = rx.await else {
-            debug!("Socket expired because nobody connected");
+        let sender = match state.waiting_connections.entry(task_id) {
+            Entry::Occupied(e) => {
+                match e.remove().0 {
+                    ConnectionState::ReadHalfConnected(send_read) => send_read,
+                    ConnectionState::WriteHalfConnected(_) => {
+                        warn!("Sender connected twice");
+                        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                    },
+                }
+            },
+            Entry::Vacant(empty) => {
+                let (tx, rx) = oneshot::channel();
+                empty.insert((ConnectionState::WriteHalfConnected(rx), Instant::now() + SocketState::WAITING_CONNECTIONS_TIMEOUT));
+                tx
+            },
+        };
+        let (tx, rx) = oneshot::channel::<()>();
+        let mut wrapped = Some(tx);
+        let send_res = sender.send(stream::once(futures_util::future::ready(Ok(remaining.freeze()))).chain(body_stream).chain(stream::poll_fn(move |_| {
+            _ = wrapped.take().unwrap().send(());
+            std::task::Poll::Ready(None)
+        })).boxed());
+        let Ok(()) = send_res else {
+            warn!(%task_id, "Failed to send socket body. Reciever dropped");
             return Err(StatusCode::GONE);
         };
-        // We don't care if the task expired by now
-        _ = state.task_manager.remove(&task_id);
-        tokio::spawn(async move {
-            let (socket1, socket2) = match tokio::try_join!(conn, other_con) {
-                Ok(sockets) => sockets,
-                Err(e) => {
-                    warn!("Failed to upgrade requests to socket connections: {e}");
-                    return;
-                },
-            };
-
-            let result = tokio::io::copy_bidirectional(&mut TokioIo::new(socket1), &mut TokioIo::new(socket2)).await;
-            if let Err(e) = result {
-                debug!("Relaying socket connection ended: {e}");
-            }
-        });
+        debug!("Write half over stream");
+        _ = rx.await;
+        Err(StatusCode::OK)
     }
-    Err(StatusCode::SWITCHING_PROTOCOLS)
+}
+
+async fn read_header(s: &mut BodyDataStream) -> Result<(bool, Bytes, BytesMut), StatusCode> {
+    async fn next(s: &mut BodyDataStream) -> Result<Option<Bytes>, StatusCode> {
+        s.next().await.transpose().map_err(|e| {
+            warn!(%e, "Failed to read init for sockets");
+            StatusCode::BAD_GATEWAY
+        })
+    }
+    let mut buf = BytesMut::new();
+    #[derive(Debug)]
+    enum ReadState {
+        ReadingHeader,
+        ReadingMessage { is_read: bool, len: usize },
+    }
+    let mut state = ReadState::ReadingHeader;
+    while let Some(mut packet) = next(s).await?  {
+        loop {
+            match state {
+                ReadState::ReadingHeader if buf.len() + packet.len() >= 5 => {
+                    buf.put(packet.split_to(packet.len()));
+                    debug_assert!(packet.is_empty());
+                    let is_read = buf.split_to(1)[0] == 1;
+                    let len = u32::from_be_bytes(buf.split_to(4).as_ref().try_into().unwrap());
+                    state = ReadState::ReadingMessage { is_read, len: len as usize };
+                    continue;
+                },
+                ReadState::ReadingMessage { is_read, len } if buf.len() + packet.len() >= len => {
+                    buf.put(packet);
+                    return Ok((is_read, buf.split_to(len).freeze(), buf))
+                },
+                _ => break,
+            }
+        }
+        buf.put(packet);
+    }
+    dbg!("Not enough data?", state, buf);
+    Err(StatusCode::BAD_GATEWAY)
 }
