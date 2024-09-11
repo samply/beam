@@ -13,22 +13,22 @@ async fn test_full() -> Result<()> {
     let stream = stream::iter(range.clone())
         .map(|i| Ok::<_, Infallible>(u32::to_be_bytes(i).to_vec()))
         .then(|b| async {
-            tokio::time::sleep(Duration::from_millis(2)).await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
             b
         });
     let app1 = async move {
-        let res = tokio::time::timeout(Duration::from_secs(60), CLIENT1.create_socket_with_metadata(&APP2, stream, metadata)).await??;
+        let res = tokio::time::timeout(Duration::from_secs(60), client1().create_socket_with_metadata(&APP2, stream, metadata)).await??;
         assert!(res.status().is_success());
         Ok(())
     };
     let app2 = async {
-        let task = CLIENT2
+        let task = client2()
             .get_socket_tasks(&beam_lib::BlockingOptions::from_count(1))
             .await?
             .pop()
             .ok_or(anyhow::anyhow!("Failed to get a socket task"))?;
         assert_eq!(&task.metadata, metadata);
-        let s = CLIENT2.connect_socket(&task.id).await?;
+        let s = client2().connect_socket(&task.id).await?;
         let expected = range.map(u32::to_be_bytes).flatten().collect::<Vec<_>>();
         let mut buf = Vec::with_capacity(expected.len());
         s.for_each(|b| {
