@@ -30,17 +30,17 @@ async fn test_full() -> Result<()> {
         "id": id
     });
     let app1 = async {
-        CLIENT1.create_socket_with_metadata(&APP2, &metadata).await.map_err(anyhow::Error::from)
+        client1().create_socket_with_metadata(&APP2, &metadata).await.map_err(anyhow::Error::from)
     };
     let app2 = async {
-        let task = CLIENT2
-            .get_socket_tasks(&BlockingOptions::from_time(Duration::from_secs(1)))
+        let task = client2()
+            .get_socket_tasks(&beam_lib::BlockingOptions::from_count(1))
             .await?
             .into_iter()
             .find(|t| t.metadata["id"].as_str() == Some(&id_str))
             .ok_or(anyhow::anyhow!("Failed to get a socket task"))?;
         assert_eq!(&task.metadata, &metadata);
-        Ok(CLIENT2.connect_socket(&task.id).await?)
+        Ok(client2().connect_socket(&task.id).await?)
     };
 
     let (app1, app2) = tokio::try_join!(app1, app2)?;
