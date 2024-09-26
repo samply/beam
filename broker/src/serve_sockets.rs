@@ -96,8 +96,8 @@ async fn connect_socket(
     // This Result is just an Either type. An error value does not mean something went wrong
 ) -> Result<Response, StatusCode> {
     let mut body_stream = body.into_data_stream();
-    let (is_read, token, remaining) = read_header(&mut body_stream).await?;
-    let result = shared::crypto_jwt::verify_with_extended_header::<MsgEmpty>(&mut parts, String::from_utf8_lossy(&token).as_ref()).await;
+    let (is_read, jwt, remaining) = read_header(&mut body_stream).await?;
+    let result = shared::crypto_jwt::verify_with_extended_header::<MsgEmpty>(&mut parts, String::from_utf8_lossy(&jwt).as_ref()).await;
     let msg = match result {
         Ok(msg) => msg.msg,
         Err(e) => return Ok(e.into_response()),
@@ -153,18 +153,19 @@ async fn connect_socket(
                 tx
             },
         };
-        let (tx, rx) = oneshot::channel::<()>();
-        let mut wrapped = Some(tx);
+        let (tx, write_done) = oneshot::channel::<()>();
+        let mut notify_write_done = Some(tx);
         let send_res = sender.send(stream::once(futures_util::future::ready(Ok(remaining.freeze()))).chain(body_stream).chain(stream::poll_fn(move |_| {
-            _ = wrapped.take().unwrap().send(());
+            _ = notify_write_done.take().unwrap().send(());
             std::task::Poll::Ready(None)
         })).boxed());
         let Ok(()) = send_res else {
             warn!(%task_id, "Failed to send socket body. Reciever dropped");
             return Err(StatusCode::GONE);
         };
-        debug!("Write half over stream");
-        _ = rx.await;
+        debug!("Write half send the stream to the read half");
+        _ = write_done.await;
+        debug!("Write half has written all its data");
         Err(StatusCode::OK)
     }
 }
@@ -203,6 +204,6 @@ async fn read_header(s: &mut BodyDataStream) -> Result<(bool, Bytes, BytesMut), 
         }
         buf.put(packet);
     }
-    dbg!("Not enough data?", state, buf);
+    warn!(?state, ?buf, "Failed to read header");
     Err(StatusCode::BAD_GATEWAY)
 }

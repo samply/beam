@@ -2,6 +2,7 @@ use std::{convert::Infallible, time::Duration};
 
 use futures::{stream, StreamExt};
 use anyhow::Result;
+use rand::{Rng, RngCore};
 use crate::*;
 
 #[tokio::test]
@@ -9,11 +10,17 @@ async fn test_full() -> Result<()> {
     let metadata: &'static _ = Box::leak(Box::new(serde_json::json!({
         "foo": vec![1, 2, 3],
     })));
-    let range = 1..10_000;
-    let stream = stream::iter(range.clone())
-        .map(|i| Ok::<_, Infallible>(u32::to_be_bytes(i).to_vec()))
-        .then(|b| async {
-            tokio::time::sleep(Duration::from_millis(1)).await;
+    let data = Vec::from_iter((0..1000).map(|_| {
+        let mut chunk = vec![0; 1024];
+        rand::thread_rng().fill_bytes(&mut chunk);
+        chunk
+    }));
+    let stream = stream::iter(data.clone())
+        .map(Ok::<_, Infallible>)
+        .then(move |b| async {
+            if rand::thread_rng().gen_ratio(1, 10) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
             b
         });
     let app1 = async move {
@@ -29,7 +36,7 @@ async fn test_full() -> Result<()> {
             .ok_or(anyhow::anyhow!("Failed to get a socket task"))?;
         assert_eq!(&task.metadata, metadata);
         let s = client2().connect_socket(&task.id).await?;
-        let expected = range.map(u32::to_be_bytes).flatten().collect::<Vec<_>>();
+        let expected = data.into_iter().flatten().collect::<Vec<_>>();
         let mut buf = Vec::with_capacity(expected.len());
         s.for_each(|b| {
             buf.extend(b.unwrap());
