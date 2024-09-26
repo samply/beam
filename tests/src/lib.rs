@@ -1,14 +1,13 @@
+#![cfg(test)]
 
 use once_cell::sync::Lazy;
 use beam_lib::{AddressingId, set_broker_id, AppOrProxyId, BeamClient};
 
-#[cfg(all(feature = "sockets", test))]
+#[cfg(feature = "sockets")]
 mod socket_test;
 
-#[cfg(test)]
 mod task_test;
 
-#[cfg(test)]
 mod test_sse;
 
 pub static APP1: Lazy<AddressingId> = Lazy::new(|| {

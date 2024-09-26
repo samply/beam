@@ -31,7 +31,6 @@ serde_json = "1"
 rsa = "0.9"
 
 # Server-sent Events (SSE) support
-tokio-util = { version = "0.7", features = ["io"] }
 futures = "0.3"
 async-sse = "5.1"
 async-stream = "0.3"

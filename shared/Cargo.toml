@@ -21,7 +21,7 @@ axum = { version = "0.7", features = [] }
 bytes = "1.4"
 
 # HTTP client with proxy support
-reqwest = { version = "0.12", features = ["stream", "json"] }
+reqwest = { version = "0.12", features = ["stream"] }
 
 # Logging
 tracing = "0.1"
@@ -55,7 +55,7 @@ beam-lib = { workspace = true }
 
 [features]
 expire_map = ["dep:dashmap"]
-sockets = ["expire_map", "beam-lib/sockets"]
+sockets = ["expire_map", "beam-lib/sockets", "reqwest/json"]
 default = []
 config-for-proxy = []
 config-for-central = []
