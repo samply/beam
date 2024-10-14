@@ -155,6 +155,7 @@ async fn create_socket_con(
     };
     let (mut parts, body) = req.into_parts();
     parts.headers.append(header::TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
+    parts.headers.append(header::CONNECTION, HeaderValue::from_static("keep-alive"));
     let stream = stream::once(ready(Ok(body))).chain(Encrypter::new(key).encrypt(og_req.into_body().into_data_stream()));
     let req = Request::from_parts(parts, reqwest::Body::wrap_stream(stream));
     match state.client.execute(req.try_into().expect("Conversion to reqwest::Request should always work")).await {
