@@ -1,38 +1,51 @@
-use rand::RngCore;
-use tokio::io::{AsyncWriteExt, AsyncReadExt, AsyncRead, AsyncWrite};
-use anyhow::Result;
-use crate::*;
+use std::{convert::Infallible, time::Duration};
 
-async fn test_connection<T: AsyncRead + AsyncWrite + Unpin>(mut a: T, mut b: T) -> Result<()> {
-    const N: usize = 2_usize.pow(13);
-    let test_data: &mut [u8; N] = &mut [0; N];
-    rand::thread_rng().fill_bytes(test_data);
-    let mut read_buf = [0; N];
-    a.write_all(test_data).await?;
-    a.flush().await?;
-    b.read_exact(&mut read_buf).await?;
-    assert_eq!(test_data, &read_buf);
-    Ok(())
-}
+use futures::{stream, StreamExt};
+use anyhow::Result;
+use rand::{Rng, RngCore};
+use crate::*;
 
 #[tokio::test]
 async fn test_full() -> Result<()> {
-    let metadata = serde_json::json!({
+    let metadata: &'static _ = Box::leak(Box::new(serde_json::json!({
         "foo": vec![1, 2, 3],
-    });
-    let app1 = async {
-        CLIENT1.create_socket_with_metadata(&APP2, &metadata).await.map_err(anyhow::Error::from)
+    })));
+    let data = Vec::from_iter((0..1000).map(|_| {
+        let mut chunk = vec![0; 1024];
+        rand::thread_rng().fill_bytes(&mut chunk);
+        chunk
+    }));
+    let stream = stream::iter(data.clone())
+        .map(Ok::<_, Infallible>)
+        .then(move |b| async {
+            if rand::thread_rng().gen_ratio(1, 10) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            b
+        });
+    let app1 = async move {
+        let res = tokio::time::timeout(Duration::from_secs(60), client1().create_socket_with_metadata(&APP2, stream, metadata)).await??;
+        assert!(res.status().is_success());
+        Ok(())
     };
     let app2 = async {
-        let task = CLIENT2
+        let task = client2()
             .get_socket_tasks(&beam_lib::BlockingOptions::from_count(1))
             .await?
             .pop()
             .ok_or(anyhow::anyhow!("Failed to get a socket task"))?;
-        assert_eq!(&task.metadata, &metadata);
-        Ok(CLIENT2.connect_socket(&task.id).await?)
+        assert_eq!(&task.metadata, metadata);
+        let s = client2().connect_socket(&task.id).await?;
+        let expected = data.into_iter().flatten().collect::<Vec<_>>();
+        let mut buf = Vec::with_capacity(expected.len());
+        s.for_each(|b| {
+            buf.extend(b.unwrap());
+            futures::future::ready(())
+        }).await;
+        assert_eq!(buf, expected);
+        anyhow::Ok(())
     };
 
-    let (app1, app2) = tokio::try_join!(app1, app2)?;
-    test_connection(app1, app2).await
+    tokio::try_join!(app1, app2)?;
+    Ok(())
 }

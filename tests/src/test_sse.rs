@@ -6,12 +6,12 @@ use beam_lib::TaskResult;
 use futures::{StreamExt, TryStreamExt};
 use reqwest::{header::{self, HeaderValue}, Method};
 
-use crate::{CLIENT1, task_test};
+use crate::{client1, task_test};
 
 #[tokio::test]
 async fn test_sse() -> Result<()> {
     let id = task_test::post_task("test").await?;
-    let res = CLIENT1
+    let res = client1()
         .raw_beam_request(
             Method::GET,
             &format!("v1/tasks/{id}/results?wait_count=1"),

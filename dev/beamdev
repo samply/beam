@@ -259,6 +259,8 @@ check_prereqs
 if [ "$1" == "--tag" ]; then
     TAG="$2"
     shift 2
+else
+    TAG="localbuild"
 fi
 
 case "$1" in

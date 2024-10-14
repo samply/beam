@@ -6,7 +6,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use tokio::sync::oneshot;
 
-use crate::{CLIENT1, APP1, APP2, CLIENT2};
+use crate::{client1, APP1, APP2, client2};
 
 #[tokio::test]
 async fn test_full_task_cycle() -> Result<()> {
@@ -52,7 +52,7 @@ async fn test_task_claiming() -> Result<()> {
 
 pub async fn post_task<T: Serialize + 'static>(body: T) -> Result<MsgId> {
     let id = MsgId::new();
-    CLIENT1.post_task(&TaskRequest {
+    client1().post_task(&TaskRequest {
         id,
         from: APP1.clone(),
         to: vec![APP2.clone()],
@@ -65,7 +65,7 @@ pub async fn post_task<T: Serialize + 'static>(body: T) -> Result<MsgId> {
 }
 
 pub async fn poll_task<T: DeserializeOwned + 'static>(expected_id: MsgId) -> Result<TaskRequest<T>> {
-    CLIENT2.poll_pending_tasks::<Value>(&BlockingOptions::from_time(Duration::from_secs(1)))
+    client2().poll_pending_tasks::<Value>(&BlockingOptions::from_time(Duration::from_secs(1)))
         .await?
         .into_iter()
         .find(|t| t.id == expected_id)
@@ -77,14 +77,14 @@ pub async fn poll_task<T: DeserializeOwned + 'static>(expected_id: MsgId) -> Res
 }
 
 pub async fn poll_result<T: DeserializeOwned + 'static>(task_id: MsgId, block: &BlockingOptions) -> Result<TaskResult<T>> {
-    CLIENT1.poll_results(&task_id, block)
+    client1().poll_results(&task_id, block)
         .await?
         .pop()
         .ok_or(anyhow::anyhow!("Got no task"))
 }
 
 pub async fn put_result<T: Serialize + 'static>(task_id: MsgId, body: T, status: Option<beam_lib::WorkStatus>) -> Result<()> {
-    CLIENT2.put_result(&TaskResult {
+    client2().put_result(&TaskResult {
         from: APP2.clone(),
         to: vec![APP1.clone()],
         task: task_id,

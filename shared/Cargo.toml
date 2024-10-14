@@ -55,7 +55,7 @@ beam-lib = { workspace = true }
 
 [features]
 expire_map = ["dep:dashmap"]
-sockets = ["expire_map", "beam-lib/sockets"]
+sockets = ["expire_map", "beam-lib/sockets", "reqwest/json"]
 default = []
 config-for-proxy = []
 config-for-central = []
