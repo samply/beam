@@ -3,7 +3,7 @@ use std::{
 };
 
 use axum::{
-    body::Body, extract::{Path, Request, State}, http::{self, header, HeaderMap, HeaderValue, StatusCode}, response::{IntoResponse, Response}, routing::{get, post}, Extension, Json, RequestPartsExt, Router
+    body::Body, extract::{Path, Request, State}, http::{self, header, HeaderMap, HeaderName, HeaderValue, Method, StatusCode}, response::{IntoResponse, Response}, routing::{get, post}, Extension, Json, RequestPartsExt, Router
 };
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use crypto_secretstream::{Header, Key, PullStream, PushStream};
@@ -136,15 +136,13 @@ async fn create_socket_con(
         );
         return (res.status(), "Failed to post MsgSocketRequest to broker").into_response();
     }
-    let req = match prepare_socket_request(sender, task_id, &state).await {
+    let req = match prepare_socket_request(false, sender, task_id, &state).await {
         Ok(req) => req,
         Err(e) => return e,
     };
     let req = req.map(|b| {
         let n = b.as_bytes().len();
-        let mut body = Vec::with_capacity(n + 5);
-        // This 0 signals write interest
-        body.push(0);
+        let mut body = Vec::with_capacity(n + 4);
         body.extend(u32::to_be_bytes(n as _));
         body.extend(b.as_bytes());
         Bytes::from(body)
@@ -155,7 +153,6 @@ async fn create_socket_con(
     };
     let (mut parts, body) = req.into_parts();
     parts.headers.append(header::TRANSFER_ENCODING, HeaderValue::from_static("chunked"));
-    parts.headers.append(header::CONNECTION, HeaderValue::from_static("keep-alive"));
     let stream = stream::once(ready(Ok(body))).chain(Encrypter::new(key).encrypt(og_req.into_body().into_data_stream()));
     let req = Request::from_parts(parts, reqwest::Body::wrap_stream(stream));
     match state.client.execute(req.try_into().expect("Conversion to reqwest::Request should always work")).await {
@@ -173,15 +170,13 @@ async fn connect_read(
     Extension(task_secret_map): Extension<MsgSecretMap>,
     Path(task_id): Path<MsgId>,
 ) -> Response {
-    let req = match prepare_socket_request(sender, task_id, &state).await {
+    let req = match prepare_socket_request(true, sender, task_id, &state).await {
         Ok(value) => value,
         Err(e) => return e,
     };
     let req = req.map(|b| {
         let n = b.as_bytes().len();
-        let mut body = Vec::with_capacity(n + 4 + 1);
-        // This 1 signals read interest
-        body.push(1);
+        let mut body = Vec::with_capacity(n + 4);
         body.extend(u32::to_be_bytes(n as _));
         body.extend(b.as_bytes());
         Bytes::from(body)
@@ -200,7 +195,7 @@ async fn connect_read(
     Response::new(Body::from_stream(Decrypter::new(key).decrypt(res.bytes_stream())))
 }
 
-async fn prepare_socket_request(sender: beam_lib::AppId, task_id: MsgId, state: &State<TasksState>) -> Result<http::Request<String>, http::Response<Body>> {
+async fn prepare_socket_request(is_read: bool, sender: beam_lib::AppId, task_id: MsgId, state: &State<TasksState>) -> Result<http::Request<String>, http::Response<Body>> {
     let msg_empty = MsgEmpty {
         from: AppOrProxyId::App(sender.clone()),
     };
@@ -208,7 +203,14 @@ async fn prepare_socket_request(sender: beam_lib::AppId, task_id: MsgId, state: 
         warn!("Failed to serialize MsgEmpty");
         return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
     };
-    let new_req = Request::get(format!("/v1/sockets/{task_id}")).body(axum::body::Body::from(body));
+    let new_req = Request::builder()
+        .method(if is_read {
+            Method::GET
+        } else {
+            Method::POST
+        })
+        .uri(format!("/v1/sockets/{task_id}"))
+        .body(axum::body::Body::from(body));
     let get_socket_con_req = match new_req {
         Ok(req) => req,
         Err(e) => {

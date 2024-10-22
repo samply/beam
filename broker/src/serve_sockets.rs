@@ -1,12 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
-use axum::{body::{Body, BodyDataStream}, extract::{Path, State}, http::{header, request::Parts, StatusCode}, response::{IntoResponse, Response}, routing::get, Router};
+use axum::{body::{Body, BodyDataStream}, extract::{Path, State}, http::{header, request::Parts, Method, StatusCode}, response::{IntoResponse, Response}, routing::get, Router};
 use bytes::{BufMut, Bytes, BytesMut};
 use dashmap::mapref::entry::Entry;
 use futures_util::{stream, StreamExt};
 use shared::{expire_map::LazyExpireMap, serde_helpers::DerefSerializer, Encrypted, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned, MsgSocketRequest};
 use tokio::{sync::oneshot, time::Instant};
-use tracing::{debug, warn};
+use tracing::{debug, warn, Span};
 
 use crate::task_manager::TaskManager;
 
@@ -49,7 +49,7 @@ impl Default for SocketState {
 pub(crate) fn router() -> Router {
     Router::new()
         .route("/v1/sockets", get(get_socket_requests).post(post_socket_request))
-        .route("/v1/sockets/:id", get(connect_socket))
+        .route("/v1/sockets/:id", get(connect_socket).post(connect_socket))
         .with_state(SocketState::default())
 }
 
@@ -85,16 +85,19 @@ async fn post_socket_request(
     ))
 }
 
-// TODO: Instrument with task_id
+#[tracing::instrument(skip(method, state, parts, body), fields(is_read))]
 async fn connect_socket(
+    method: Method,
     state: State<SocketState>,
     Path(task_id): Path<MsgId>,
     mut parts: Parts,
     body: Body,
     // This Result is just an Either type. An error value does not mean something went wrong
 ) -> Result<Response, StatusCode> {
+    let is_read = method == Method::GET;
+    Span::current().record("is_read", is_read);
     let mut body_stream = body.into_data_stream();
-    let (is_read, jwt, remaining) = read_header(&mut body_stream).await?;
+    let (jwt, remaining) = read_header(&mut body_stream).await?;
     let result = shared::crypto_jwt::verify_with_extended_header::<MsgEmpty>(&mut parts, String::from_utf8_lossy(&jwt).as_ref()).await;
     let msg = match result {
         Ok(msg) => msg.msg,
@@ -124,13 +127,13 @@ async fn connect_socket(
                 rx
             },
         };
-        debug!(%task_id, "Read waiting on write");
+        debug!("Read waiting on write");
         let recv_res = recv.await;
         _ = state.task_manager.remove(&task_id);
         match recv_res {
             Ok(s) => Ok(Body::from_stream(s).into_response()),
             Err(_) => {
-                warn!(%task_id, "Socket connection expired");
+                warn!("Socket connection expired");
                 Err(StatusCode::GONE)
             },
         }
@@ -158,7 +161,7 @@ async fn connect_socket(
             std::task::Poll::Ready(None)
         })).boxed());
         let Ok(()) = send_res else {
-            warn!(%task_id, "Failed to send socket body. Reciever dropped");
+            warn!("Failed to send socket body. Reciever dropped");
             return Err(StatusCode::GONE);
         };
         debug!("Write half send the stream to the read half");
@@ -168,7 +171,7 @@ async fn connect_socket(
     }
 }
 
-async fn read_header(s: &mut BodyDataStream) -> Result<(bool, Bytes, BytesMut), StatusCode> {
+async fn read_header(s: &mut BodyDataStream) -> Result<(Bytes, BytesMut), StatusCode> {
     async fn next(s: &mut BodyDataStream) -> Result<Option<Bytes>, StatusCode> {
         s.next().await.transpose().map_err(|e| {
             warn!(%e, "Failed to read init for sockets");
@@ -179,23 +182,22 @@ async fn read_header(s: &mut BodyDataStream) -> Result<(bool, Bytes, BytesMut), 
     #[derive(Debug)]
     enum ReadState {
         ReadingHeader,
-        ReadingMessage { is_read: bool, len: usize },
+        ReadingMessage { len: usize },
     }
     let mut state = ReadState::ReadingHeader;
     while let Some(mut packet) = next(s).await?  {
         loop {
             match state {
-                ReadState::ReadingHeader if buf.len() + packet.len() >= 5 => {
+                ReadState::ReadingHeader if buf.len() + packet.len() >= 4 => {
                     buf.put(packet.split_to(packet.len()));
                     debug_assert!(packet.is_empty());
-                    let is_read = buf.split_to(1)[0] == 1;
                     let len = u32::from_be_bytes(buf.split_to(4).as_ref().try_into().unwrap());
-                    state = ReadState::ReadingMessage { is_read, len: len as usize };
+                    state = ReadState::ReadingMessage { len: len as usize };
                     continue;
                 },
-                ReadState::ReadingMessage { is_read, len } if buf.len() + packet.len() >= len => {
+                ReadState::ReadingMessage { len } if buf.len() + packet.len() >= len => {
                     buf.put(packet);
-                    return Ok((is_read, buf.split_to(len).freeze(), buf))
+                    return Ok((buf.split_to(len).freeze(), buf))
                 },
                 _ => break,
             }
