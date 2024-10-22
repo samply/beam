@@ -117,7 +117,14 @@ impl<T: HasWaitId<MsgId> + Task + Msg + Send + Sync + 'static> TaskManager<T> {
 impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
 
     pub fn get(&self, task_id: &MsgId) -> Result<impl Deref<Target = MsgSigned<T>> + '_, TaskManagerError> {
-        self.tasks.get(task_id).ok_or(TaskManagerError::NotFound)
+        self.tasks
+            .get(task_id)
+            .ok_or(TaskManagerError::NotFound)
+            .and_then(|entry| if entry.msg.is_expired() {
+                Err(TaskManagerError::Gone)
+            } else {
+                Ok(entry)
+            })
     }
 
     pub fn remove(&self, task_id: &MsgId) -> Result<MsgSigned<T>, TaskManagerError> {
