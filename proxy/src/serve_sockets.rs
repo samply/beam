@@ -7,7 +7,7 @@ use std::{
 };
 
 use axum::{
-    extract::{Path, Request, State}, http::{self, StatusCode}, response::{IntoResponse, Response}, routing::{get, post}, Extension, Json, RequestPartsExt, Router
+    extract::{Path, Request, State}, http::{self, header, HeaderValue, StatusCode}, response::{IntoResponse, Response}, routing::{get, post}, Extension, Json, RequestPartsExt, Router
 };
 use bytes::{Buf, BufMut, BytesMut};
 use chacha20poly1305::{
@@ -193,7 +193,8 @@ async fn connect_socket(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
-    *get_socket_con_req.headers_mut() = req.headers().clone();
+    get_socket_con_req.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("upgrade"));
+    get_socket_con_req.headers_mut().insert(header::UPGRADE, HeaderValue::from_static("tcp"));
 
     let mut res = match forward_request(get_socket_con_req, &state.config, &sender, &state.client).await
     {
@@ -207,8 +208,10 @@ async fn connect_socket(
     let broker_conn = match res.extensions_mut().remove::<hyper::upgrade::OnUpgrade>() {
         Some(other_conn) if res.status() == StatusCode::SWITCHING_PROTOCOLS => other_conn,
         _ => {
-            warn!("Failed to create an upgradable connection to the broker. Response was: {res:?}");
-            return res.status().into_response();
+            let s = res.status();
+            let res = res.text().await.unwrap_or_else(|_| "<Failed to read body>".into());
+            warn!("Failed to create an upgradable connection to the broker. {s}: {res}");
+            return s.into_response();
         }
     };
 
@@ -232,7 +235,10 @@ async fn connect_socket(
         }
     });
 
-    StatusCode::SWITCHING_PROTOCOLS.into_response()
+    ([
+        (header::UPGRADE, HeaderValue::from_static("tcp")),
+        (header::CONNECTION, HeaderValue::from_static("upgrade"))
+    ], StatusCode::SWITCHING_PROTOCOLS).into_response()
 }
 
 #[derive(Debug, Clone, Copy)]
