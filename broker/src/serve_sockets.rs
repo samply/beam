@@ -1,6 +1,6 @@
 use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref, time::Duration};
 
-use axum::{extract::{Path, Request, State}, http::{header, request::Parts, StatusCode}, response::{IntoResponse, Response}, routing::get, RequestExt, Router};
+use axum::{extract::{Path, Request, State}, http::{header, request::Parts, HeaderValue, StatusCode}, response::{IntoResponse, Response}, routing::get, RequestExt, Router};
 use bytes::BufMut;
 use hyper_util::rt::TokioIo;
 use serde::{Serialize, Serializer, ser::SerializeSeq};
@@ -131,5 +131,8 @@ async fn connect_socket(
             }
         });
     }
-    Err(StatusCode::SWITCHING_PROTOCOLS)
+    Ok(([
+        (header::UPGRADE, HeaderValue::from_static("tcp")),
+        (header::CONNECTION, HeaderValue::from_static("upgrade"))
+    ], StatusCode::SWITCHING_PROTOCOLS).into_response())
 }
