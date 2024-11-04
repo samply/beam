@@ -99,6 +99,7 @@ async fn connect_socket(
     }
 
     let Some(conn) = parts.extensions.remove::<hyper::upgrade::OnUpgrade>() else {
+        warn!("Failed to upgrade connection: {:#?}", parts.headers);
         return Err(StatusCode::UPGRADE_REQUIRED);
     };
 
