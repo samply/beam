@@ -179,7 +179,9 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         }
         let max_receivers = task.get_to().len();
         self.tasks.insert(id.clone(), task);
-        let (results_sender, _) = broadcast::channel(1.max(max_receivers));
+        // Create a large enough buffer that all receivers can at least create one claimed result and a successfull result
+        // while the receiver channel is not being polled filling up the buffer and causing the channel to lag
+        let (results_sender, _) = broadcast::channel(1.max(max_receivers) * 2);
         self.new_results.insert(id.clone(), results_sender);
         // We dont care if noone is listening
         _ = self.new_tasks.send(id);
