@@ -19,7 +19,7 @@ axum = { version = "0.7", features = [ "query" ] }
 dashmap =  "6.0"
 
 anyhow = "1"
-thiserror = "1"
+thiserror = "2"
 
 # Subscriber is setup through shared
 tracing = "0.1"
