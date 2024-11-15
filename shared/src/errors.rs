@@ -37,7 +37,7 @@ pub enum SamplyBeamError {
     ConfigurationFailed(String),
     #[error("Internal synchronization error: {0}")]
     InternalSynchronizationError(String),
-    #[error("Error executing HTTP request: {0}")]
+    #[error("Error executing HTTP request: {0:?}")]
     HttpRequestError(#[from] reqwest::Error),
     // #[error("Error building HTTP request: {0}")]
     // HttpRequestBuildError(#[from] http::Error),
