@@ -158,7 +158,8 @@ function defaults {
     echo "Broker $BROKER_ID at http://localhost:8080 (this would not be valid in production)"
     echo "$PROXY1_ID at $P1"
     echo "$PROXY2_ID at $P2"
-    echo "Authenticate via header: [ Authorization: ApiKey $APP_ID_SHORT.$PROXY1_ID $APP_KEY ]"
+    echo "Authenticate via header: [ Authorization: ApiKey $APP1_ID_SHORT.$PROXY1_ID $APP_KEY ]"
+    echo "Authenticate via header: [ Authorization: ApiKey $APP1_ID_SHORT.$PROXY2_ID $APP_KEY ]"
 }
 
 function stop {
