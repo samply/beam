@@ -33,7 +33,7 @@ rsa = "0.9"
 sha2 = "0.10"
 openssl = "0.10"
 chacha20poly1305 = "0.10"
-itertools = "0.13.0"
+itertools = "0.14.0"
 jwt-simple = "0.11"
 
 # Global variables
