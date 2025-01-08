@@ -40,8 +40,8 @@ pub(crate) fn router() -> Router {
     let state = TasksState::default();
     Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
-        .route("/v1/tasks/:task_id/results", get(get_results_for_task))
-        .route("/v1/tasks/:task_id/results/:app_id", put(put_result))
+        .route("/v1/tasks/{task_id}/results", get(get_results_for_task))
+        .route("/v1/tasks/{task_id}/results/{app_id}", put(put_result))
         .with_state(state)
 }
 
@@ -82,7 +82,7 @@ async fn get_results_for_task(
     }
 }
 
-// GET /v1/tasks/:task_id/results
+// GET /v1/tasks/{task_id}/results
 async fn get_results_for_task_nostream(
     addr: SocketAddr,
     state: TasksState,
@@ -354,7 +354,7 @@ async fn post_task(
     ))
 }
 
-// PUT /v1/tasks/:task_id/results/:app_id
+// PUT /v1/tasks/{task_id}/results/{app_id}
 async fn put_result(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path((task_id, app_id)): Path<(MsgId, AppOrProxyId)>,

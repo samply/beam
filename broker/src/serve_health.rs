@@ -19,7 +19,7 @@ struct HealthOutput {
 pub(crate) fn router(health: Arc<RwLock<Health>>) -> Router {
     Router::new()
         .route("/v1/health", get(handler))
-        .route("/v1/health/proxies/:proxy_id", get(proxy_health))
+        .route("/v1/health/proxies/{proxy_id}", get(proxy_health))
         .route("/v1/health/proxies", get(get_all_proxies))
         .route("/v1/control", get(get_control_tasks).layer(axum::middleware::from_fn(log_version_mismatch)))
         .with_state(health)
