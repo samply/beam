@@ -1,6 +1,5 @@
 #![allow(unused_imports)]
 
-use axum::async_trait;
 use beam_lib::{AppId, AppOrProxyId, ProxyId, FailureStrategy, WorkStatus};
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
@@ -34,6 +33,7 @@ use crate::{crypto_jwt::JWT_VERIFICATION_OPTIONS, serde_helpers::*};
 // Reexport b64 implementation
 pub use jwt_simple::reexports::ct_codecs;
 pub use reqwest;
+pub use async_trait::async_trait;
 
 pub type MsgId = beam_lib::MsgId;
 pub type MsgType = String;

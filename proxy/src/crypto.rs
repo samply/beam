@@ -1,7 +1,7 @@
-use axum::{async_trait, body::Bytes, http::{header, request, Method, Request, StatusCode, Uri}, response::Response, Json};
+use axum::{body::Bytes, http::{header, request, Method, Request, StatusCode, Uri}, response::Response, Json};
 use beam_lib::AppOrProxyId;
 use shared::{
-    config, config_proxy::Config, config_shared::ConfigCrypto, crypto::GetCerts, errors::{CertificateInvalidReason, SamplyBeamError}, http_client::SamplyHttpClient, reqwest, EncryptedMessage, MsgEmpty
+    async_trait, config, config_proxy::Config, config_shared::ConfigCrypto, crypto::GetCerts, errors::{CertificateInvalidReason, SamplyBeamError}, http_client::SamplyHttpClient, reqwest, EncryptedMessage, MsgEmpty
 };
 use tracing::{debug, info, warn, error};
 

@@ -1,15 +1,9 @@
 use std::{future::Future, mem::discriminant};
 
-use axum::{
-    async_trait,
-    http::{header, method, uri::Scheme, Method, Request, StatusCode, Uri},
-};
+use axum::http::{header, method, uri::Scheme, Method, Request, StatusCode, Uri};
 use serde::{Deserialize, Serialize};
 use shared::{
-    config,
-    crypto::{parse_crl, CertificateCache, CertificateCacheUpdate, GetCerts},
-    errors::SamplyBeamError,
-    http_client::{self, SamplyHttpClient}, openssl::x509::X509Crl, reqwest::{self, Url},
+    async_trait, config, crypto::{parse_crl, CertificateCache, CertificateCacheUpdate, GetCerts}, errors::SamplyBeamError, http_client::{self, SamplyHttpClient}, openssl::x509::X509Crl, reqwest::{self, Url}
 };
 use std::time::Duration;
 use tokio::time::timeout;

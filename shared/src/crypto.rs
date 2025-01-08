@@ -1,4 +1,5 @@
-use axum::{async_trait, body::Body, http::Request, Json};
+use async_trait::async_trait;
+use axum::{body::Body, http::Request, Json};
 
 use itertools::Itertools;
 use once_cell::sync::{Lazy, OnceCell};

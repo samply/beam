@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use axum::{
-    async_trait,
     extract::{FromRequest, FromRequestParts},
     http::{header::{self, HeaderName}, request::Parts, Request, StatusCode},
 };
@@ -14,7 +13,6 @@ use tracing::{debug, Span, debug_span, warn};
 
 pub(crate) struct AuthenticatedApp(pub(crate) AppId);
 
-#[async_trait]
 impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedApp {
     type Rejection = (StatusCode, [(HeaderName, &'static str); 1]);
 

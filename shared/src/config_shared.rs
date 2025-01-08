@@ -8,7 +8,6 @@ use crate::{
     },
     SamplyBeamError,
 };
-use axum::async_trait;
 use clap::Parser;
 use jwt_simple::prelude::RS256KeyPair;
 use openssl::{
