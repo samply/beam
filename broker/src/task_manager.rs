@@ -1,7 +1,5 @@
 use std::{
-    borrow::Cow,
-    ops::Deref,
-    time::{Duration, SystemTime}, collections::HashMap, sync::Arc, convert::Infallible,
+    borrow::Cow, collections::{hash_map::Entry, HashMap}, convert::Infallible, ops::Deref, sync::Arc, time::{Duration, SystemTime}
 };
 
 use axum::{response::{IntoResponse, sse::Event, Sse}, Json, http::StatusCode};
@@ -35,7 +33,18 @@ impl<State: MsgState> Task for MsgTaskRequest<State> {
     type Result = MsgSigned<MsgTaskResult<State>>;
 
     fn insert_result(&mut self, result: Self::Result) -> bool {
-        self.results.insert(result.get_from().clone(), result).is_some()
+        match self.results.entry(result.get_from().clone()) {
+            // Don't override a successful result. See tests::task_test::test_claim_after_success for more details
+            Entry::Occupied(prev) if prev.get().msg.status == WorkStatus::Succeeded && result.msg.status == WorkStatus::Claimed => false,
+            Entry::Occupied(mut prev) => {
+                prev.insert(result);
+                true
+            },
+            Entry::Vacant(empty) => {
+                empty.insert(result);
+                false
+            },
+        }
     }
 
     fn get_results(&self) -> &HashMap<AppOrProxyId, Self::Result> {
@@ -179,7 +188,7 @@ impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
         }
         let max_receivers = task.get_to().len();
         self.tasks.insert(id.clone(), task);
-        // Create a large enough buffer that all receivers can at least create one claimed result and a successfull result
+        // Create a large enough buffer that all receivers can at least create one claimed result and a successful result
         // while the receiver channel is not being polled filling up the buffer and causing the channel to lag
         let (results_sender, _) = broadcast::channel(1.max(max_receivers) * 2);
         self.new_results.insert(id.clone(), results_sender);
