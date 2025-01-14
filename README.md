@@ -399,13 +399,13 @@ Date: Mon, 27 Jun 2022 14:26:45 GMT
 
 As part of making this API performant, all reading endpoints support long-polling as an efficient alternative to regular (repeated) polling. Using this function requires the following parameters:
 
-- `wait_count`: The API call will block until this many results are available ...
+- `wait_count`: The API call will block until at least this many results are available. If there are more matching tasks/results avalible all of them will be returned.
 - `wait_time`: ... or this time has passed (if not stated differently, e.g., by adding 'm', 'h', 'ms', ..., this is interpreted as seconds), whichever comes first.
 
 For example, retrieving a task's results:
 
 - `GET /v1/tasks/<task_id>/results` will return immediately with however many results are available,
-- `GET /v1/tasks/<task_id>/results?wait_count=5` will block forever until 5 results are available,
+- `GET /v1/tasks/<task_id>/results?wait_count=5` will block until at least 5 results are available,
 - `GET /v1/tasks/<task_id>/results?wait_count=5&wait_time=30s` will block until 5 results are available or 30 seconds have passed (whichever comes first). In the latter case, HTTP code `206 (Partial Content)` is returned to indicate that the result is incomplete.
 
 ### Server-sent Events (SSE) API (experimental)

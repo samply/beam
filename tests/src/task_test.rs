@@ -65,6 +65,15 @@ async fn test_claim_after_success() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_polling_tasks_yields_more_than_specified_wait_count() -> Result<()> {
+    let id1 = post_task(()).await?;
+    let id2 = post_task(()).await?;
+    let tasks = client2().poll_pending_tasks::<Value>(&BlockingOptions::from_count(1)).await?;
+    assert_eq!(tasks.iter().filter(|t| [id1, id2].contains(&t.id)).count(), 2);
+    Ok(())
+}
+
 pub async fn post_task<T: Serialize + 'static>(body: T) -> Result<MsgId> {
     let id = MsgId::new();
     client1().post_task(&TaskRequest {
