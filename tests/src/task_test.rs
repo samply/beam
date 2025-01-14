@@ -50,6 +50,21 @@ async fn test_task_claiming() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_claim_after_success() -> Result<()> {
+    // We dont want to update a successful result to claimed which is almost always a http race condition where we select on claiming and answerering a task at the same time.
+    // Example:
+    // We might claim a task and have not gotten a response yet so the future is still not completed and might be at some unfair proxy.
+    // In parallel we are computing the result of that task and finished it so we drop the future thats waiting on the response and imidiatly send the successful result.
+    // This result might end up arriving before the request that claims the task so when the claiming request arrived we should not override the result.
+    let id = post_task(()).await?;
+    put_result(id, (), Some(WorkStatus::Succeeded)).await?;
+    put_result(id, (), Some(WorkStatus::Claimed)).await?;
+    let res = tokio::time::timeout(Duration::from_secs(10), poll_result::<()>(id, &BlockingOptions::from_count(1))).await??;
+    assert_eq!(res.status, WorkStatus::Succeeded);
+    Ok(())
+}
+
 pub async fn post_task<T: Serialize + 'static>(body: T) -> Result<MsgId> {
     let id = MsgId::new();
     client1().post_task(&TaskRequest {
