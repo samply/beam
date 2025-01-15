@@ -58,7 +58,7 @@ pub(crate) fn router(client: SamplyHttpClient) -> Router {
 
     Router::new()
         .route("/v1/sockets", get(get_tasks))
-        .route("/v1/sockets/:app_or_id", post(create_socket_con).get(connect_socket))
+        .route("/v1/sockets/{app_or_id}", post(create_socket_con).get(connect_socket))
         .with_state(state)
         .layer(Extension(task_secret_map))
 }

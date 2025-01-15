@@ -39,8 +39,8 @@ pub(crate) fn router(client: &SamplyHttpClient) -> Router {
     Router::new()
         // We need both path variants so the server won't send us into a redirect loop (/tasks, /tasks/, ...)
         .route("/v1/tasks", get(handler_task).post(handler_task))
-        .route("/v1/tasks/:task_id/results", get(handler_task))
-        .route("/v1/tasks/:task_id/results/:app_id", put(handler_task))
+        .route("/v1/tasks/{task_id}/results", get(handler_task))
+        .route("/v1/tasks/{task_id}/results/{app_id}", put(handler_task))
         .with_state(state)
 }
 

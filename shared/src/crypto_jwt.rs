@@ -8,7 +8,7 @@ use crate::{
     errors::{CertificateInvalidReason, SamplyBeamError},
     Msg, MsgEmpty, MsgId, MsgSigned,
 };
-use axum::{async_trait, body::HttpBody, extract::{{FromRequest, ConnectInfo, FromRequestParts}, Request}, http::{header, request::Parts, uri::PathAndQuery, HeaderMap, HeaderName, Method, StatusCode, Uri}, BoxError, RequestExt};
+use axum::{body::HttpBody, extract::{{FromRequest, ConnectInfo, FromRequestParts}, Request}, http::{header, request::Parts, uri::PathAndQuery, HeaderMap, HeaderName, Method, StatusCode, Uri}, BoxError, RequestExt};
 use jwt_simple::{
     claims::JWTClaims,
     prelude::{
@@ -30,7 +30,6 @@ const ERR_FROM: (StatusCode, &str) = (
     "\"from\" field in message does not match your certificate.",
 );
 
-#[async_trait]
 impl<S: Send + Sync, T> FromRequest<S> for MsgSigned<T>
 where
     // these trait bounds are copied from `impl FromRequest for axum::Json`

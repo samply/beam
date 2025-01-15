@@ -1,6 +1,5 @@
 use std::{collections::HashSet, ops::Deref, time::Duration};
 
-use axum::async_trait;
 use axum::http::{Request, Response, Uri};
 use itertools::Itertools;
 use once_cell::sync::OnceCell;

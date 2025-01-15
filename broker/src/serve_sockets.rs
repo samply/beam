@@ -42,7 +42,7 @@ impl Default for SocketState {
 pub(crate) fn router() -> Router {
     Router::new()
         .route("/v1/sockets", get(get_socket_requests).post(post_socket_request))
-        .route("/v1/sockets/:id", get(connect_socket))
+        .route("/v1/sockets/{id}", get(connect_socket))
         .with_state(SocketState::default())
 }
 
