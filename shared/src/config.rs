@@ -36,11 +36,3 @@ pub static CONFIG_SHARED: Lazy<config_shared::Config> = Lazy::new(|| {
 });
 
 pub(crate) static CONFIG_SHARED_CRYPTO: OnceCell<ConfigCrypto> = OnceCell::new();
-
-pub fn prepare_env() {
-    for var in ["http_proxy", "https_proxy", "all_proxy", "no_proxy"] {
-        for (k, v) in std::env::vars().filter(|(k, _)| k.to_lowercase() == var) {
-            std::env::set_var(k.to_uppercase(), v);
-        }
-    }
-}
