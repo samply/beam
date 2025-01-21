@@ -14,9 +14,11 @@ mod compare_client_server_version;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use health::{Senders, InitStatus};
+use crypto::GetCertsFromPki;
+use health::{Health, InitStatus};
+use once_cell::sync::Lazy;
 use shared::{config::CONFIG_CENTRAL, *, errors::SamplyBeamError};
-use tokio::sync::{RwLock, watch};
+use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 #[tokio::main]
@@ -24,25 +26,27 @@ pub async fn main() -> anyhow::Result<()> {
     shared::logger::init_logger()?;
     banner::print_banner();
 
-    let (Senders { init: init_status_sender, vault: vault_status_sender}, health) = health::Health::make();
-    let cert_getter = crypto::build_cert_getter(vault_status_sender)?;
+    let health = Arc::new(RwLock::new(Health::default()));
+    let cert_getter = GetCertsFromPki::new(health.clone())?;
 
     shared::crypto::init_cert_getter(cert_getter);
-    tokio::task::spawn(init_broker_ca_chain(init_status_sender));
+    tokio::task::spawn(init_broker_ca_chain(health.clone()));
     #[cfg(debug_assertions)]
     if shared::examples::print_example_objects() {
         return Ok(());
     }
 
-    let _ = config::CONFIG_CENTRAL.bind_addr; // Initialize config
+    Lazy::force(&config::CONFIG_CENTRAL); // Initialize config
 
     serve::serve(health).await?;
 
     Ok(())
 }
 
-async fn init_broker_ca_chain(sender: watch::Sender<InitStatus>) {
-    sender.send_replace(health::InitStatus::FetchingIntermediateCert);
+async fn init_broker_ca_chain(health: Arc<RwLock<Health>>) {
+    {
+        health.write().await.initstatus = health::InitStatus::FetchingIntermediateCert
+    }
     shared::crypto::init_ca_chain().await.expect("Failed to init broker ca chain");
-    sender.send_replace(health::InitStatus::Done);
+    health.write().await.initstatus = health::InitStatus::Done;
 }
