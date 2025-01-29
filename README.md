@@ -399,7 +399,7 @@ Date: Mon, 27 Jun 2022 14:26:45 GMT
 
 As part of making this API performant, all reading endpoints support long-polling as an efficient alternative to regular (repeated) polling. Using this function requires the following parameters:
 
-- `wait_count`: The API call will block until at least this many results are available. If there are more matching tasks/results avalible all of them will be returned.
+- `wait_count`: The API call will block until at least this many results are available. If there are more matching tasks/results available all of them will be returned.
 - `wait_time`: ... or this time has passed (if not stated differently, e.g., by adding 'm', 'h', 'ms', ..., this is interpreted as seconds), whichever comes first.
 
 For example, retrieving a task's results:
@@ -628,6 +628,12 @@ Both the Broker and the Proxy respect the log level in the `RUST_LOG` environmen
 Samply.Beam encrypts all information in the `body` fields of both Tasks and Results. The data is encryted in the Samply.Proxy before forwarding to the Beam.Broker. Similarly, the decryption takes place in the Beam.Proxy as well. This is in addition to the transport encryption (TLS) and different in that even the broker is unable to decipher the message's content fields.
 
 The data is symmetrically encrypted using the Authenticated Encryption with Authenticated Data (AEAD) algorithm "XChaCha20Poly1305", a widespread algorithm (e.g., mandatory for the TLS protocol), regarded as highly secure by experts. The used [chacha20poly1305 library](https://docs.rs/chacha20poly1305/latest/chacha20poly1305/) was sublected to a [security audit](https://research.nccgroup.com/2020/02/26/public-report-rustcrypto-aes-gcm-and-chacha20poly1305-implementation-review/), with no significant findings. The randomly generated symmetric keys are encapsulated in a RSA encrypted ciphertext using OAEP Padding. This ensures, that only the intended recipients can decrypt the key and subsequently the transferred data.
+
+### Health check connection
+
+The beam proxy tries to keep a permanent connection to the broker to make it possible to see which sites are currently connected.
+This also allows us to detected invalid connection states such as multiple proxies with the same proxy id connecting simultaneously.
+In that case the second proxy trying to connect will receive a 409 status code and shut down.
 
 ## Roadmap
 

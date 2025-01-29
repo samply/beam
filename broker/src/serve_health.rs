@@ -1,19 +1,72 @@
-use std::{sync::Arc, time::{Duration, SystemTime}};
+use std::{collections::HashMap, convert::Infallible, marker::PhantomData, sync::Arc, time::{Duration, SystemTime}};
 
-use axum::{extract::{State, Path}, http::StatusCode, routing::get, Json, Router, response::Response};
+use axum::{extract::{Path, State}, http::StatusCode, response::{sse::{Event, KeepAlive}, Response, Sse}, routing::get, Json, Router};
 use axum_extra::{headers::{authorization::Basic, Authorization}, TypedHeader};
 use beam_lib::ProxyId;
+use futures_core::Stream;
 use serde::{Serialize, Deserialize};
 use shared::{crypto_jwt::Authorized, Msg, config::CONFIG_CENTRAL};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 
-use crate::{health::{Health, VaultStatus, Verdict, ProxyStatus, InitStatus}, compare_client_server_version::log_version_mismatch};
+use crate::compare_client_server_version::log_version_mismatch;
 
 #[derive(Serialize)]
 struct HealthOutput {
     summary: Verdict,
     vault: VaultStatus,
     init_status: InitStatus
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Verdict {
+    Healthy,
+    Unhealthy,
+    Unknown,
+}
+
+impl Default for Verdict {
+    fn default() -> Self {
+        Verdict::Unknown
+    }
+}
+
+#[derive(Debug, Serialize, Clone, Copy, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum VaultStatus {
+    Ok,
+    #[default]
+    Unknown,
+    OtherError,
+    LockedOrSealed,
+    Unreachable,
+}
+
+#[derive(Debug, Serialize, Clone, Copy, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum InitStatus {
+    #[default]
+    Unknown,
+    FetchingIntermediateCert,
+    Done
+}
+
+#[derive(Debug, Default)]
+pub struct Health {
+    pub vault: VaultStatus,
+    pub initstatus: InitStatus,
+    proxies: HashMap<ProxyId, ProxyStatus>
+}
+
+#[derive(Debug, Clone, Default)]
+struct ProxyStatus {
+    online_guard: Arc<Mutex<Option<SystemTime>>>
+}
+
+impl ProxyStatus {
+    pub fn is_online(&self) -> bool {
+        self.online_guard.try_lock().is_err()
+    }
 }
 
 pub(crate) fn router(health: Arc<RwLock<Health>>) -> Router {
@@ -46,14 +99,14 @@ async fn handler(
 }
 
 async fn get_all_proxies(State(state): State<Arc<RwLock<Health>>>) -> Json<Vec<ProxyId>> {
-    Json(state.read().await.proxies.keys().cloned().collect())
+    Json(state.read().await.proxies.iter().filter(|(_, v)| v.is_online()).map(|(k, _)| k).cloned().collect())
 }
 
 async fn proxy_health(
     State(state): State<Arc<RwLock<Health>>>,
     Path(proxy): Path<ProxyId>,
     auth: TypedHeader<Authorization<Basic>>
-) -> Result<(StatusCode, Json<ProxyStatus>), StatusCode> {
+) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
     let Some(ref monitoring_key) = CONFIG_CENTRAL.monitoring_api_key else {
         return Err(StatusCode::NOT_IMPLEMENTED);
     };
@@ -63,10 +116,12 @@ async fn proxy_health(
     }
 
     if let Some(reported_back) = state.read().await.proxies.get(&proxy) {
-        if reported_back.online() {
-            Err(StatusCode::OK)
+        if let Ok(last_disconnect) = reported_back.online_guard.try_lock().as_deref().copied() {
+            Ok((StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
+                "last_disconnect": last_disconnect
+            }))))
         } else {
-            Ok((StatusCode::SERVICE_UNAVAILABLE, Json(reported_back.clone())))
+            Err(StatusCode::OK)
         }
     } else {
         Err(StatusCode::NOT_FOUND)
@@ -76,48 +131,38 @@ async fn proxy_health(
 async fn get_control_tasks(
     State(state): State<Arc<RwLock<Health>>>,
     proxy_auth: Authorized,
-) -> StatusCode {
+) -> Result<Sse<ForeverStream>, StatusCode> {
     let proxy_id = proxy_auth.get_from().proxy_id(); 
     // Once this is freed the connection will be removed from the map of connected proxies again
     // This ensures that when the connection is dropped and therefore this response future the status of this proxy will be updated
-    let _connection_remover = ConnectedGuard::connect(&proxy_id, &state).await;
+    let status_mutex = state
+        .write()
+        .await
+        .proxies
+        .entry(proxy_id)
+        .or_default()
+        .online_guard
+        .clone();
+    let Ok(connect_guard) = tokio::time::timeout(Duration::from_secs(60), status_mutex.lock_owned()).await
+    else {
+        return Err(StatusCode::CONFLICT);
+    };
 
-    // In the future, this will wait for control tasks for the given proxy
-    tokio::time::sleep(Duration::from_secs(60 * 60)).await;
-
-    StatusCode::OK
+    Ok(Sse::new(ForeverStream(connect_guard)).keep_alive(KeepAlive::new()))
 }
 
-struct ConnectedGuard<'a> {
-    proxy: &'a ProxyId,
-    state: &'a Arc<RwLock<Health>>
-}
+struct ForeverStream(OwnedMutexGuard<Option<SystemTime>>);
 
-impl<'a> ConnectedGuard<'a> {
-    async fn connect(proxy: &'a ProxyId, state: &'a Arc<RwLock<Health>>) -> ConnectedGuard<'a> {
-        {
-            state.write().await.proxies
-                .entry(proxy.clone())
-                .and_modify(ProxyStatus::connect)
-                .or_insert(ProxyStatus::new());
-        }
-        Self { proxy, state }
+impl Stream for ForeverStream {
+    type Item = Result<Event, Infallible>;
+
+    fn poll_next(self: std::pin::Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        std::task::Poll::Pending
     }
 }
 
-impl<'a> Drop for ConnectedGuard<'a> {
+impl Drop for ForeverStream {
     fn drop(&mut self) {
-        let proxy_id = self.proxy.clone();
-        let map = self.state.clone();
-        tokio::spawn(async move {
-            // We wait here for one second to give the client a bit of time to reconnect incrementing the connection count so that it will be one again after the decrement
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            map.write()
-                .await
-                .proxies
-                .get_mut(&proxy_id)
-                .expect("Has to exist as we don't remove items and the constructor of this type inserts the entry")
-                .disconnect();
-        });
+        *self.0 = Some(SystemTime::now());
     }
 }

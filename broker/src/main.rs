@@ -2,7 +2,6 @@
 
 mod banner;
 mod crypto;
-mod health;
 mod serve;
 mod serve_health;
 mod serve_pki;
@@ -15,7 +14,7 @@ mod compare_client_server_version;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use crypto::GetCertsFromPki;
-use health::{Health, InitStatus};
+use serve_health::{Health, InitStatus};
 use once_cell::sync::Lazy;
 use shared::{config::CONFIG_CENTRAL, *, errors::SamplyBeamError};
 use tokio::sync::RwLock;
@@ -45,8 +44,8 @@ pub async fn main() -> anyhow::Result<()> {
 
 async fn init_broker_ca_chain(health: Arc<RwLock<Health>>) {
     {
-        health.write().await.initstatus = health::InitStatus::FetchingIntermediateCert
+        health.write().await.initstatus = InitStatus::FetchingIntermediateCert
     }
     shared::crypto::init_ca_chain().await.expect("Failed to init broker ca chain");
-    health.write().await.initstatus = health::InitStatus::Done;
+    health.write().await.initstatus = InitStatus::Done;
 }
