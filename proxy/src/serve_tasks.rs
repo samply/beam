@@ -160,7 +160,7 @@ async fn handler_tasks_nostream(
         } else {
             warn!(
                 "Answer is no valid JSON; returning as-is to client: \"{}\". Headers: {:?}",
-                std::str::from_utf8(&bytes).unwrap_or("(unable to parse)"),
+                String::from_utf8_lossy(&bytes),
                 parts
             );
         }
