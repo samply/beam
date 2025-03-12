@@ -1,6 +1,6 @@
 [package]
 name = "beam-proxy"
-version = "0.8.0"
+version = { workspace = true }
 edition = "2021"
 license = "Apache-2.0"
 documentation = "https://github.com/samply/beam"
@@ -12,13 +12,13 @@ shared = { path = "../shared", features = ["config-for-proxy"] }
 beam-lib = { workspace = true }
 
 tokio = { version = "1", features = ["full"] }
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.8", features = ["macros"] }
 bytes = { version = "1" }
 httpdate = "1.0"
 
 # Error handling
 anyhow = "1"
-backoff = { version = "0.4", features = ["tokio"] }
+tryhard = "0.5"
 
 # Subscriber is imported through shared
 tracing = "0.1"
@@ -38,7 +38,7 @@ async-stream = "0.3"
 
 # Socket dependencies
 chacha20poly1305 = { version = "0.10", features = ["stream"], optional = true }
-dashmap =  { version = "5.5", optional = true}
+dashmap =  { version = "6.0", optional = true}
 hyper = { version = "1", default-features = false, optional = true }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"], optional = true}
 
@@ -47,3 +47,6 @@ sockets = ["dep:chacha20poly1305", "dep:dashmap", "tokio-util/codec", "tokio-uti
 
 [build-dependencies]
 build-data = "0"
+
+[dev-dependencies]
+rand = "0.8.5"

@@ -1,13 +1,14 @@
+use std::net::{SocketAddr, IpAddr};
+
 use beam_lib::{AppOrProxyId, ProxyId};
 use crate::{
     config,
     config_shared::ConfigCrypto,
     crypto::{self, CryptoPublicPortion},
     errors::{CertificateInvalidReason, SamplyBeamError},
-    middleware::{LoggingInfo, ProxyLogger},
     Msg, MsgEmpty, MsgId, MsgSigned,
 };
-use axum::{async_trait, body::HttpBody, extract::{FromRequest, Request}, http::{header, request::Parts, uri::PathAndQuery, HeaderMap, HeaderName, Method, StatusCode, Uri}, BoxError, RequestExt};
+use axum::{body::HttpBody, extract::{{FromRequest, ConnectInfo, FromRequestParts}, Request}, http::{header, request::Parts, uri::PathAndQuery, HeaderMap, HeaderName, Method, StatusCode, Uri}, BoxError, RequestExt};
 use jwt_simple::{
     claims::JWTClaims,
     prelude::{
@@ -20,7 +21,7 @@ use once_cell::unsync::Lazy;
 use openssl::base64;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, warn, Span, info_span};
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -29,7 +30,6 @@ const ERR_FROM: (StatusCode, &str) = (
     "\"from\" field in message does not match your certificate.",
 );
 
-#[async_trait]
 impl<S: Send + Sync, T> FromRequest<S> for MsgSigned<T>
 where
     // these trait bounds are copied from `impl FromRequest for axum::Json`
@@ -126,7 +126,6 @@ pub const JWT_VERIFICATION_OPTIONS: Lazy<VerificationOptions> = Lazy::new(|| Ver
     ..Default::default()
 });
 
-#[tracing::instrument(skip(token_without_extended_signature))]
 /// This verifys a Msg from sent to the Broker
 /// The Message is encoded in the JWT Claims of the body which is a JWT.
 /// There is never really a [`MsgSigned`] involved in Deserializing the message as the signature is just copied from the body JWT.
@@ -135,22 +134,18 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
     req: &mut Parts,
     token_without_extended_signature: &str,
 ) -> Result<MsgSigned<M>, (StatusCode, &'static str)> {
-    let token_with_extended_signature = std::str::from_utf8(
-        req.headers
-            .get(header::AUTHORIZATION)
-            .ok_or_else(|| {
-                warn!("Missing Authorization header (in verify_with_extended_header)");
-                ERR_SIG
-            })?
-            .as_bytes(),
-    )
-    .map_err(|e| {
-        warn!(
-            "Unable to parse existing Authorization header (in verify_with_extended_header): {}",
-            e
-        );
-        ERR_SIG
-    })?;
+    let ip = get_ip(req).await;
+    let token_with_extended_signature = req.headers
+        .get(header::AUTHORIZATION)
+        .ok_or_else(|| {
+            warn!(%ip, "Missing Authorization header");
+            ERR_SIG
+        })?
+        .to_str()
+        .map_err(|e| {
+            warn!(%ip, "Unable to parse existing Authorization header: {e}");
+            ERR_SIG
+        })?;
     let token_with_extended_signature =
         token_with_extended_signature.trim_start_matches("SamplyJWT ");
 
@@ -158,19 +153,11 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
         extract_jwt::<HeaderClaim>(token_with_extended_signature)
             .await
             .map_err(|e| {
-                warn!(
-                    "Unable to extract header JWT: {}. The full JWT was: {}. The header was: {:?}",
-                    e, token_with_extended_signature, req
-                );
+                warn!(%ip, "Unable to extract header JWT: {e}. The full JWT was: {token_with_extended_signature}");
                 ERR_SIG
             })?;
 
-    req.extensions
-        .remove::<ProxyLogger>()
-        .expect("Should be set by middleware")
-        .send(header_claims.custom.from.clone())
-        .await
-        .expect("Receiver still lives in middleware");
+    Span::current().record("from", header_claims.custom.from.hide_broker());
 
     // Check extra digest
 
@@ -312,4 +299,15 @@ pub fn make_extra_fields_digest(
         sig: digest,
         from: from.to_owned(),
     })
+}
+
+async fn get_ip(parts: &mut Parts) -> IpAddr {
+    let source_ip = ConnectInfo::<SocketAddr>::from_request_parts(parts, &()).await.expect("The server is configured to keep connect info").0.ip();
+    const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
+    parts.headers
+        .get(X_FORWARDED_FOR)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(source_ip)
 }

@@ -1,6 +1,6 @@
 use std::{sync::Arc, collections::{HashMap, HashSet}, ops::Deref, time::Duration};
 
-use axum::{extract::{Path, Request, State}, http::{header, request::Parts, StatusCode}, response::{IntoResponse, Response}, routing::get, RequestExt, Router};
+use axum::{extract::{Path, Request, State}, http::{header, request::Parts, HeaderValue, StatusCode}, response::{IntoResponse, Response}, routing::get, RequestExt, Router};
 use bytes::BufMut;
 use hyper_util::rt::TokioIo;
 use serde::{Serialize, Serializer, ser::SerializeSeq};
@@ -42,7 +42,7 @@ impl Default for SocketState {
 pub(crate) fn router() -> Router {
     Router::new()
         .route("/v1/sockets", get(get_socket_requests).post(post_socket_request))
-        .route("/v1/sockets/:id", get(connect_socket))
+        .route("/v1/sockets/{id}", get(connect_socket))
         .with_state(SocketState::default())
 }
 
@@ -99,6 +99,7 @@ async fn connect_socket(
     }
 
     let Some(conn) = parts.extensions.remove::<hyper::upgrade::OnUpgrade>() else {
+        warn!("Failed to upgrade connection: {:#?}", parts.headers);
         return Err(StatusCode::UPGRADE_REQUIRED);
     };
 
@@ -131,5 +132,8 @@ async fn connect_socket(
             }
         });
     }
-    Err(StatusCode::SWITCHING_PROTOCOLS)
+    Ok(([
+        (header::UPGRADE, HeaderValue::from_static("tcp")),
+        (header::CONNECTION, HeaderValue::from_static("upgrade"))
+    ], StatusCode::SWITCHING_PROTOCOLS).into_response())
 }

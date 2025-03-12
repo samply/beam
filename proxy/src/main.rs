@@ -1,16 +1,20 @@
 #![allow(unused_imports)]
 
+use std::future::Future;
 use std::time::Duration;
 
 use axum::http::{header, HeaderValue, StatusCode};
-use backoff::{future::retry_notify, ExponentialBackoff};
 use beam_lib::AppOrProxyId;
+use futures::future::Ready;
+use futures::{StreamExt, TryStreamExt};
 use shared::{reqwest, EncryptedMessage, MsgEmpty, PlainMessage};
 use shared::crypto::CryptoPublicPortion;
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
 use shared::{config, config_proxy::Config};
+use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
+use tryhard::{backoff_strategies::ExponentialBackoff, RetryFuture, RetryFutureConfig};
 
 use crate::serve_tasks::sign_request;
 
@@ -27,7 +31,6 @@ pub(crate) const PROXY_TIMEOUT: u64 = 120;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
-    shared::config::prepare_env();
     shared::logger::init_logger()?;
     banner::print_banner();
 
@@ -38,38 +41,18 @@ pub async fn main() -> anyhow::Result<()> {
         Some(Duration::from_secs(20)),
     )?;
 
-    if let Err(err) = retry_notify(
-        ExponentialBackoff::default(),
-        || async { Ok(get_broker_health(&config, &client).await?) },
-        |err, dur: Duration| {
-            warn!(
-                "Still trying to reach Broker: {}. Retrying in {}s",
-                err,
-                dur.as_secs()
-            );
-        },
-    )
-    .await
-    {
-        error!("Giving up reaching Broker: {}", err);
+    if let Err(err) = retry_notify(|| get_broker_health(&config, &client), |err, dur| {
+        warn!("Still trying to reach Broker: {err}. Retrying in {}s", dur.as_secs());
+    }).await {
+        error!("Giving up reaching Broker: {err}");
         std::process::exit(1);
     } else {
         info!("Connected to Broker: {}", &config.broker_uri);
     }
 
-    if let Err(err) = retry_notify(
-        ExponentialBackoff::default(),
-        || async { Ok(init_crypto(config.clone(), client.clone()).await?) },
-        |err, dur: Duration| {
-            warn!(
-                "Still trying to initialize certificate chain: {}. Retrying in {}s",
-                err,
-                dur.as_secs()
-            );
-        },
-    )
-    .await
-    {
+    if let Err(err) = retry_notify(|| init_crypto(config.clone(), client.clone()), |err, dur| {
+        warn!("Still trying to initialize certificate chain: {err}. Retrying in {}s", dur.as_secs());
+    }).await {
         error!("Giving up on initializing certificate chain: {}", err);
         std::process::exit(1);
     } else {
@@ -79,6 +62,20 @@ pub async fn main() -> anyhow::Result<()> {
 
     serve::serve(config, client).await?;
     Ok(())
+}
+
+fn retry_notify<F, T, Fut, E, Cb>(f: F, on_error: Cb) -> RetryFuture<F, Fut, ExponentialBackoff, Box<dyn Fn(u32, Option<Duration>, &E) -> Ready<()>>>
+where 
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, E>>,
+    Cb: Fn(&E, Duration) + 'static,
+    
+{
+    tryhard::retry_fn(f)
+        .retries(100)
+        .exponential_backoff(Duration::from_secs(1))
+        .max_delay(Duration::from_secs(120))
+        .on_retry(Box::new(move |_, b, e| futures::future::ready(on_error(e, b.unwrap_or(Duration::MAX)))))
 }
 
 async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(), SamplyBeamError> {
@@ -117,28 +114,11 @@ async fn get_broker_health(
     let uri = config.broker_uri
         .join("/v1/health")
         .expect("Uri to be constructed correctly");
-
-    let resp = retry_notify(
-        backoff::ExponentialBackoffBuilder::default()
-            .with_max_interval(Duration::from_secs(10))
-            .with_max_elapsed_time(Some(Duration::from_secs(30)))
-            .build(),
-        || async {
-            Ok(client
-                .get(uri.clone())
-                .header(header::USER_AGENT, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")))
-                .send()
-                .await?)
-        },
-        |err, b: Duration| {
-            warn!(
-                "Unable to connect to Broker: {}. Retrying in {}s",
-                err,
-                b.as_secs()
-            );
-        },
-    )
-    .await?;
+    let resp = client
+        .get(uri.clone())
+        .header(header::USER_AGENT, HeaderValue::from_static(env!("SAMPLY_USER_AGENT")))
+        .send()
+        .await?;
 
     match resp.status() {
         StatusCode::OK => Ok(()),
@@ -152,7 +132,13 @@ async fn get_broker_health(
 fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
     const RETRY_INTERVAL: Duration = Duration::from_secs(60);
     tokio::spawn(async move {
+        let mut retries_this_min = 0;
+        let mut reset_interval = Instant::now() + RETRY_INTERVAL;
         loop {
+            if reset_interval < Instant::now() {
+                retries_this_min = 0;
+                reset_interval = Instant::now() + RETRY_INTERVAL;
+            }
             let body = EncryptedMessage::MsgEmpty(MsgEmpty {
                 from: AppOrProxyId::Proxy(config.proxy_id.clone()),
             });
@@ -164,29 +150,49 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
 
             let req = sign_request(body, parts, &config, None).await.expect("Unable to sign request; this should always work");
             // In the future this will poll actual control related tasks
-            match client.execute(req).await {
-                Ok(res) => {
-                    match res.status() {
-                        StatusCode::OK => {
-                            // Process control task
-                        },
-                        StatusCode::GATEWAY_TIMEOUT => {
-                            debug!("Connection to broker timed out; retrying.");
-                        },
-                        other => {
-                            warn!("Got unexpected status getting control tasks from broker: {other}");
-                            tokio::time::sleep(RETRY_INTERVAL).await;
-                        }
-                    };
+            let res = match client.execute(req).await {
+                Ok(res) if res.status() == StatusCode::CONFLICT => {
+                    error!("A beam proxy with the same id is already running!");
+                    std::process::exit(409);
                 },
-                Err(e) if e.is_timeout() => {
-                    debug!("Connection to broker timed out; retrying: {e}");
-                },
+                Ok(res) if res.status() != StatusCode::OK => {
+                    if retries_this_min < 10 {
+                        retries_this_min += 1;
+                        debug!("Unexpected status code getting control tasks from broker: {}", res.status());
+                    } else {
+                        warn!("Retried more then 10 times in one minute getting status code: {}", res.status());
+                        tokio::time::sleep(RETRY_INTERVAL).await;
+                    }
+                    continue;
+                }
+                Ok(res) => res,
                 Err(e) => {
                     warn!("Error getting control tasks from broker; retrying in {}s: {e}", RETRY_INTERVAL.as_secs());
                     tokio::time::sleep(RETRY_INTERVAL).await;
+                    continue;
                 }
             };
+            let incoming = res
+                .bytes_stream()
+                .map(|result| result.map_err(|error| {
+                    let kind = error.is_timeout().then_some(std::io::ErrorKind::TimedOut).unwrap_or(std::io::ErrorKind::Other);
+                    std::io::Error::new(kind, format!("IO Error: {error}"))
+                }))
+                .into_async_read();
+            let mut reader = async_sse::decode(incoming);
+            while let Some(ev) = reader.next().await {
+                match ev {
+                    Ok(_)=> (),
+                    Err(e) if e.downcast_ref::<std::io::Error>().unwrap().kind() == std::io::ErrorKind::TimedOut => {
+                        debug!("SSE connection timed out");
+                        break;
+                    },
+                    Err(err) => {
+                        error!("Got error reading SSE stream: {err}");
+                        break;
+                    }
+                };
+            }
         }
     });
 }

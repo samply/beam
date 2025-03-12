@@ -4,9 +4,6 @@ on:
   push:
   workflow_dispatch:
   pull_request:
-  schedule:
-    # Fetch new base image updates every night at 1am
-    - cron: '0 1 * * *'
 
 jobs:
   build-with-samply:

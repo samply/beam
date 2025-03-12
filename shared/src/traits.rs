@@ -1,5 +1,4 @@
 use axum::{
-    async_trait,
     extract::{self, FromRequest, FromRequestParts, Path, Query},
     http::{request::Parts, StatusCode},
     BoxError, RequestPartsExt,
@@ -22,7 +21,6 @@ fn test_duration_parsing() {
     assert_eq!(Duration::try_from(parser.parse("1234").unwrap()).unwrap().as_millis(), 1234);
 }
 
-#[async_trait]
 impl<S> FromRequestParts<S> for HowLongToBlock
 where
     S: Send + Sync,

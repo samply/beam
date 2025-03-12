@@ -6,7 +6,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use tokio::sync::oneshot;
 
-use crate::{CLIENT1, APP1, APP2, CLIENT2};
+use crate::{client1, APP1, APP2, client2};
 
 #[tokio::test]
 async fn test_full_task_cycle() -> Result<()> {
@@ -50,9 +50,33 @@ async fn test_task_claiming() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test]
+async fn test_claim_after_success() -> Result<()> {
+    // We dont want to update a successful result to claimed which is almost always a http race condition where we select on claiming and answerering a task at the same time.
+    // Example:
+    // We might claim a task and have not gotten a response yet so the future is still not completed and might be at some unfair proxy.
+    // In parallel we are computing the result of that task and finished it so we drop the future thats waiting on the response and imidiatly send the successful result.
+    // This result might end up arriving before the request that claims the task so when the claiming request arrived we should not override the result.
+    let id = post_task(()).await?;
+    put_result(id, (), Some(WorkStatus::Succeeded)).await?;
+    put_result(id, (), Some(WorkStatus::Claimed)).await?;
+    let res = tokio::time::timeout(Duration::from_secs(10), poll_result::<()>(id, &BlockingOptions::from_count(1))).await??;
+    assert_eq!(res.status, WorkStatus::Succeeded);
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_polling_tasks_yields_more_than_specified_wait_count() -> Result<()> {
+    let id1 = post_task(()).await?;
+    let id2 = post_task(()).await?;
+    let tasks = client2().poll_pending_tasks::<Value>(&BlockingOptions::from_count(1)).await?;
+    assert_eq!(tasks.iter().filter(|t| [id1, id2].contains(&t.id)).count(), 2);
+    Ok(())
+}
+
 pub async fn post_task<T: Serialize + 'static>(body: T) -> Result<MsgId> {
     let id = MsgId::new();
-    CLIENT1.post_task(&TaskRequest {
+    client1().post_task(&TaskRequest {
         id,
         from: APP1.clone(),
         to: vec![APP2.clone()],
@@ -65,7 +89,7 @@ pub async fn post_task<T: Serialize + 'static>(body: T) -> Result<MsgId> {
 }
 
 pub async fn poll_task<T: DeserializeOwned + 'static>(expected_id: MsgId) -> Result<TaskRequest<T>> {
-    CLIENT2.poll_pending_tasks::<Value>(&BlockingOptions::from_time(Duration::from_secs(1)))
+    client2().poll_pending_tasks::<Value>(&BlockingOptions::from_time(Duration::from_secs(1)))
         .await?
         .into_iter()
         .find(|t| t.id == expected_id)
@@ -77,14 +101,14 @@ pub async fn poll_task<T: DeserializeOwned + 'static>(expected_id: MsgId) -> Res
 }
 
 pub async fn poll_result<T: DeserializeOwned + 'static>(task_id: MsgId, block: &BlockingOptions) -> Result<TaskResult<T>> {
-    CLIENT1.poll_results(&task_id, block)
+    client1().poll_results(&task_id, block)
         .await?
         .pop()
         .ok_or(anyhow::anyhow!("Got no task"))
 }
 
 pub async fn put_result<T: Serialize + 'static>(task_id: MsgId, body: T, status: Option<beam_lib::WorkStatus>) -> Result<()> {
-    CLIENT2.put_result(&TaskResult {
+    client2().put_result(&TaskResult {
         from: APP2.clone(),
         to: vec![APP1.clone()],
         task: task_id,

@@ -1,26 +1,20 @@
-use std::{future::Future, mem::discriminant};
+use std::{future::Future, mem::discriminant, sync::Arc};
 
-use axum::{
-    async_trait,
-    http::{header, method, uri::Scheme, Method, Request, StatusCode, Uri},
-};
+use axum::http::{header, method, uri::Scheme, Method, Request, StatusCode, Uri};
 use serde::{Deserialize, Serialize};
 use shared::{
-    config,
-    crypto::{parse_crl, CertificateCache, CertificateCacheUpdate, GetCerts},
-    errors::SamplyBeamError,
-    http_client::{self, SamplyHttpClient}, openssl::x509::X509Crl, reqwest::{self, Url},
+    async_trait, config, crypto::{parse_crl, CertificateCache, CertificateCacheUpdate, GetCerts}, errors::SamplyBeamError, http_client::{self, SamplyHttpClient}, openssl::x509::X509Crl, reqwest::{self, Url}
 };
 use std::time::Duration;
-use tokio::time::timeout;
+use tokio::{sync::RwLock, time::timeout};
 use tracing::{debug, error, warn, info};
 
-use crate::health::{self, VaultStatus};
+use crate::serve_health::{Health, VaultStatus};
 
 pub struct GetCertsFromPki {
     pki_realm: String,
     hyper_client: SamplyHttpClient,
-    health_report_sender: tokio::sync::watch::Sender<health::VaultStatus>,
+    health: Arc<RwLock<Health>>,
 }
 
 #[derive(Debug, Deserialize, Clone, Hash)]
@@ -41,7 +35,7 @@ struct PkiListResponse {
 
 impl GetCertsFromPki {
     pub(crate) fn new(
-        health_report_sender: tokio::sync::watch::Sender<health::VaultStatus>,
+        health: Arc<RwLock<Health>>,
     ) -> Result<Self, SamplyBeamError> {
         let mut certs: Vec<String> = Vec::new();
         if let Some(dir) = &config::CONFIG_CENTRAL.tls_ca_certificates_dir {
@@ -67,19 +61,12 @@ impl GetCertsFromPki {
         Ok(Self {
             pki_realm,
             hyper_client,
-            health_report_sender,
+            health,
         })
     }
 
     async fn report_vault_health(&self, status: VaultStatus) {
-        self.health_report_sender.send_if_modified(|val| {
-            if discriminant(val) != discriminant(&status) {
-                *val = status;
-                true
-            } else {
-                false
-            }
-        });
+        self.health.write().await.vault = status;
     }
 
     pub(crate) async fn check_vault_health(&self) -> Result<(), SamplyBeamError> {
@@ -267,12 +254,6 @@ impl GetCerts for GetCertsFromPki {
     }
 }
 
-pub(crate) fn build_cert_getter(
-    sender: tokio::sync::watch::Sender<VaultStatus>,
-) -> Result<GetCertsFromPki, SamplyBeamError> {
-    GetCertsFromPki::new(sender)
-}
-
-pub(crate) fn pki_url_builder(location: &str) -> Url {
+fn pki_url_builder(location: &str) -> Url {
     config::CONFIG_CENTRAL.pki_address.join(&format!("/v1/{location}")).unwrap()
 }

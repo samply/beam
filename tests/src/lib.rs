@@ -35,8 +35,12 @@ pub const APP_KEY: &str = match option_env!("APP_KEY") {
     None => "App1Secret"
 };
 
-pub static CLIENT1: Lazy<BeamClient> = Lazy::new(|| BeamClient::new(&APP1, APP_KEY, PROXY1.parse().unwrap()));
-pub static CLIENT2: Lazy<BeamClient> = Lazy::new(|| BeamClient::new(&APP2, APP_KEY, PROXY2.parse().unwrap()));
+pub fn client1() -> BeamClient {
+    BeamClient::new(&APP1, APP_KEY, PROXY1.parse().unwrap())
+}
+pub fn client2() -> BeamClient {
+    BeamClient::new(&APP2, APP_KEY, PROXY2.parse().unwrap())
+}
 
 #[tokio::test]
 async fn test_time_out() {

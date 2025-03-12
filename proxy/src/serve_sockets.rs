@@ -1,13 +1,9 @@
 use std::{
-    io::{self, Write},
-    ops::{Deref, DerefMut},
-    pin::Pin,
-    task::Poll,
-    time::{Duration, SystemTime, Instant}, sync::Arc,
+    io::{self, Write}, ops::{Deref, DerefMut}, pin::Pin, sync::{atomic::AtomicUsize, Arc}, task::Poll, time::{Duration, Instant, SystemTime}
 };
 
 use axum::{
-    extract::{Path, Request, State}, http::{self, StatusCode}, response::{IntoResponse, Response}, routing::{get, post}, Extension, Json, RequestPartsExt, Router
+    extract::{Path, Request, State}, http::{self, header, HeaderValue, StatusCode}, response::{IntoResponse, Response}, routing::{get, post}, Extension, Json, RequestPartsExt, Router
 };
 use bytes::{Buf, BufMut, BytesMut};
 use chacha20poly1305::{
@@ -33,7 +29,7 @@ use shared::{
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf, ReadHalf, WriteHalf};
 use tokio_util::{
     codec::{Decoder, Encoder, Framed, FramedRead, FramedWrite},
-    compat::{Compat, FuturesAsyncReadCompatExt},
+    compat::{Compat, FuturesAsyncReadCompatExt}, io::SinkWriter,
 };
 use tracing::{warn, debug};
 
@@ -62,7 +58,7 @@ pub(crate) fn router(client: SamplyHttpClient) -> Router {
 
     Router::new()
         .route("/v1/sockets", get(get_tasks))
-        .route("/v1/sockets/:app_or_id", post(create_socket_con).get(connect_socket))
+        .route("/v1/sockets/{app_or_id}", post(create_socket_con).get(connect_socket))
         .with_state(state)
         .layer(Extension(task_secret_map))
 }
@@ -193,7 +189,8 @@ async fn connect_socket(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
-    *get_socket_con_req.headers_mut() = req.headers().clone();
+    get_socket_con_req.headers_mut().insert(header::CONNECTION, HeaderValue::from_static("upgrade"));
+    get_socket_con_req.headers_mut().insert(header::UPGRADE, HeaderValue::from_static("tcp"));
 
     let mut res = match forward_request(get_socket_con_req, &state.config, &sender, &state.client).await
     {
@@ -207,8 +204,10 @@ async fn connect_socket(
     let broker_conn = match res.extensions_mut().remove::<hyper::upgrade::OnUpgrade>() {
         Some(other_conn) if res.status() == StatusCode::SWITCHING_PROTOCOLS => other_conn,
         _ => {
-            warn!("Failed to create an upgradable connection to the broker. Response was: {res:?}");
-            return res.status().into_response();
+            let s = res.status();
+            let res = res.text().await.unwrap_or_else(|_| "<Failed to read body>".into());
+            warn!("Failed to create an upgradable connection to the broker. {s}: {res}");
+            return s.into_response();
         }
     };
 
@@ -232,7 +231,10 @@ async fn connect_socket(
         }
     });
 
-    StatusCode::SWITCHING_PROTOCOLS.into_response()
+    ([
+        (header::UPGRADE, HeaderValue::from_static("tcp")),
+        (header::CONNECTION, HeaderValue::from_static("upgrade"))
+    ], StatusCode::SWITCHING_PROTOCOLS).into_response()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -290,7 +292,7 @@ impl DerefMut for SocketEncKey {
 struct EncryptedSocket<S: AsyncRead + AsyncWrite> {
     // inner: Framed<S, EncryptorCodec>,
     read: Compat<IntoAsyncRead<FramedRead<ReadHalf<S>, DecryptorCodec>>>,
-    write: FramedWrite<WriteHalf<S>, EncryptorCodec>,
+    write: SinkWriter<FramedWrite<WriteHalf<S>, EncryptorCodec>>,
 }
 
 struct EncryptorCodec {
@@ -306,17 +308,14 @@ impl DecryptorCodec {
 }
 
 impl EncryptorCodec {
-    #[inline]
-    fn tag_overhead() -> usize {
-        <XChaCha20Poly1305 as AeadCore>::TagSize::to_usize()
-    }
+    const TAG_SIZE: usize = <XChaCha20Poly1305 as AeadCore>::TagSize::USIZE;
 }
 
 impl Encoder<&[u8]> for EncryptorCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: &[u8], dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let mut enc_buf = EncBuffer::new(dst, item.len() + Self::tag_overhead());
+        let mut enc_buf = EncBuffer::new(dst, (item.len() + Self::TAG_SIZE).try_into().expect("item to large"));
         enc_buf.extend_from_slice(item).expect("Infallible");
         self.encryptor
             .encrypt_next_in_place(b"", &mut enc_buf)
@@ -343,7 +342,7 @@ impl Decoder for DecryptorCodec {
 
         let plain = self
             .decryptor
-            .decrypt_next(&src[Self::SIZE_OVERHEAD..])
+            .decrypt_next(&src[Self::SIZE_OVERHEAD..(Self::SIZE_OVERHEAD + size as usize)])
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Decryption failed"))?;
         src.advance(total_frame_size);
         Ok(Some(plain))
@@ -352,17 +351,20 @@ impl Decoder for DecryptorCodec {
 
 struct EncBuffer<'a> {
     buf: &'a mut BytesMut,
+    /// The index from which the inplace encryption takes place
+    enc_idx: usize,
 }
 
 impl<'a> EncBuffer<'a> {
-    fn new(buffer: &'a mut BytesMut, content_len: usize) -> Self {
-        buffer.reserve(content_len + Self::SIZE_OVERHEAD);
-        buffer.extend_from_slice(&u32::to_le_bytes(content_len as u32));
-        Self { buf: buffer }
+    fn new(buffer: &'a mut BytesMut, content_len: u32) -> Self {
+        let enc_idx = buffer.len() + Self::SIZE_OVERHEAD;
+        buffer.reserve(content_len as usize + Self::SIZE_OVERHEAD);
+        buffer.extend_from_slice(&u32::to_le_bytes(content_len));
+        Self { buf: buffer, enc_idx }
     }
 
     /// Reserved for size of msg
-    const SIZE_OVERHEAD: usize = 4;
+    const SIZE_OVERHEAD: usize = (u32::BITS / 8) as usize;
 }
 
 impl<'a> Buffer for EncBuffer<'a> {
@@ -374,19 +376,20 @@ impl<'a> Buffer for EncBuffer<'a> {
 
     // This should only be called when decrypting
     fn truncate(&mut self, len: usize) {
-        self.buf.truncate(len)
+        warn!("Buffer got truncated. This should never happen as it should be perfectly sized");
+        self.buf.truncate(self.enc_idx + len)
     }
 }
 
 impl<'a> AsRef<[u8]> for EncBuffer<'a> {
     fn as_ref(&self) -> &[u8] {
-        &self.buf[Self::SIZE_OVERHEAD..]
+        &self.buf[self.enc_idx..]
     }
 }
 
 impl<'a> AsMut<[u8]> for EncBuffer<'a> {
     fn as_mut(&mut self) -> &mut [u8] {
-        &mut self.buf[Self::SIZE_OVERHEAD..]
+        &mut self.buf[self.enc_idx..]
     }
 }
 
@@ -409,7 +412,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> EncryptedSocket<S> {
         let (r, w) = tokio::io::split(inner);
         let read = FramedRead::new(r, DecryptorCodec { decryptor });
         let read = read.into_async_read().compat();
-        let write = FramedWrite::new(w, EncryptorCodec { encryptor });
+        let write = SinkWriter::new(FramedWrite::new(w, EncryptorCodec { encryptor }));
 
         Ok(Self { read, write })
     }
@@ -431,27 +434,28 @@ impl<S: AsyncWrite + AsyncRead + Unpin> AsyncWrite for EncryptedSocket<S> {
         cx: &mut std::task::Context<'_>,
         buf: &[u8],
     ) -> std::task::Poll<Result<usize, io::Error>> {
-        self.write.send(buf).poll_unpin(cx).map_ok(|_| buf.len())
+        Pin::new(&mut self.write).poll_write(cx, buf)
     }
 
     fn poll_flush(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), io::Error>> {
-        self.write.poll_flush_unpin(cx)
+        Pin::new(&mut self.write).poll_flush(cx)
     }
 
     fn poll_shutdown(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<(), io::Error>> {
-        self.write.poll_close_unpin(cx)
+        Pin::new(&mut self.write).poll_shutdown(cx)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use chacha20poly1305::aead::stream::{Decryptor, Encryptor, EncryptorLE31};
+    use rand::Rng;
     use tokio::net::{TcpListener, TcpStream};
 
     use super::*;
@@ -460,20 +464,35 @@ mod tests {
     async fn test_encryption() {
         let mut key = GenericArray::default();
         OsRng.fill_bytes(&mut key);
-        const N: usize = 2_usize.pow(13);
-        let test_data: &mut [u8; N] = &mut [0; N];
-        OsRng.fill_bytes(test_data);
-        let mut read_buf = [0; N];
+        let data: Arc<Vec<_>> = (0..13337).map(|_| {
+            let mut chunk = vec![0; OsRng.gen_range(1..9999)];
+            OsRng.fill_bytes(&mut chunk);
+            chunk
+        }).collect::<Vec<_>>().into();
 
         start_test_broker().await;
         let (mut client1, mut client2) = tokio::join!(client(&key), client(&key));
 
-        client1.write_all(test_data).await.unwrap();
-        client2.read_exact(&mut read_buf).await.unwrap();
-        assert_eq!(test_data, &read_buf);
-        client2.write_all(test_data).await.unwrap();
-        client1.read_exact(&mut read_buf).await.unwrap();
-        assert_eq!(test_data, &read_buf);
+        let data_cp = data.clone();
+        let a = tokio::spawn(async move {
+            for c in data_cp.iter() {
+                client1.write_all(&c).await.unwrap();
+                client1.flush().await.unwrap();
+            }
+        });
+        let data_cp = data.clone();
+        let b = tokio::spawn(async move {
+            for (i, c) in data_cp.iter().enumerate() {
+                let mut buf = vec![0; c.len()];
+                client2.read_exact(&mut buf).await.unwrap();
+                if &buf != c {
+                    let mut remaining = Vec::new();
+                    client2.read_to_end(&mut remaining).await.unwrap();
+                    assert_eq!(&buf, c, "{i}: {remaining:?}");
+                }
+            }
+        });
+        tokio::try_join!(a, b).unwrap();
     }
 
     async fn start_test_broker() {

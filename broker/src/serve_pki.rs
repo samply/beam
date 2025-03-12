@@ -47,12 +47,12 @@ pub(crate) fn router() -> Router {
         .route("/v1/pki/certs", get(get_certificate_list))
         .route("/v1/pki/certs/im-ca", get(get_im_cert))
         .route(
-            "/v1/pki/certs/by_serial/:serial",
+            "/v1/pki/certs/by_serial/{serial}",
             get(get_certificate_by_serial),
         )
 }
 
-#[tracing::instrument(name = "/v1/pki/certs/by_serial/:serial")]
+#[tracing::instrument(name = "/v1/pki/certs/by_serial/{serial}")]
 async fn get_certificate_by_serial(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(serial): Path<String>,
