@@ -1,3 +1,21 @@
+# Samply.Beam 0.9.0 - 2025-03-12
+
+This major release of Beam 0.9 features a lot of internal changes and some bugfixes.
+
+## Breaking changes
+
+* Internal health connection now uses SSE to get around timeouts making it more reliable. This will not cause outdated beam proxies or brokers to crash but might show outdated sites as offline.
+
+## Bugfixes
+
+* Fixed a race condition where a claimed result would override a successful result.
+* Fixed a socket relaying bug causing decryption of the tunnel to fail when the chunks where to large.
+
+## Minor changes
+
+* Improved logging
+* beam-lib api improvements
+
 # Samply.Beam 0.8.0 - 2024-07-26
 
 This major release of Beam 0.8 features many changes "under the hood", such as the highly anticipated upgrade of our `hyper` dependency to version 1, as well as many bug fixes. We were able to decrease the communication overhead between Beam.Proxies and the Beam.Broker and streamlined the behavior of some endpoints to make the usage of Samply.Beam simpler.
