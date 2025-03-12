@@ -49,4 +49,4 @@ sockets = ["dep:chacha20poly1305", "dep:dashmap", "tokio-util/codec", "tokio-uti
 build-data = "0"
 
 [dev-dependencies]
-rand = "0.8.5"
+rand = "0.9.0"
