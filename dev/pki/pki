@@ -17,7 +17,7 @@ function start() {
 }
 
 function clean() {
-     rm -vf *.pem *.json *.secret
+     rm -vf *.pem *.json *.secret *.csr
      docker compose down
 }
 
@@ -95,17 +95,15 @@ function request() {
      application=$1
      cn=$2
      ttl=$3
-     data="{\"common_name\": \"$cn\", \"ttl\": \"$ttl\"}"
-     echo $data
+     openssl req -new -newkey rsa:2048 -nodes -keyout ${application}.priv.pem -out ${application}.csr -subj "/CN=${cn}"
+     data=$(jq -Rs '{common_name: "'$cn'", ttl: "'$ttl'", csr: .}' < ${application}.csr)
+     echo "$data"
      echo "Creating Certificate for domain $cn"
      curl --header "X-Vault-Token: $VAULT_TOKEN" \
           --request POST \
           --data "$data" \
           --no-progress-meter \
-     $VAULT_ADDR/v1/samply_pki/issue/hd-dot-dktk-dot-com | jq > ${application}.json
-     cat ${application}.json | jq -r .data.certificate > ${application}.crt.pem
-     cat ${application}.json | jq -r .data.ca_chain[] > ${application}.chain.pem
-     cat ${application}.json | jq -r .data.private_key > ${application}.priv.pem
+     $VAULT_ADDR/v1/samply_pki/sign/hd-dot-dktk-dot-com | jq > ${application}.json
      echo "Success: PEM files stored to ${application}*.pem"
 }
 
@@ -118,7 +116,7 @@ function setup() {
     #touch root.crt.pem # see https://github.com/docker/compose/issues/8305
     start
     while ! [ "$(curl -s $VAULT_ADDR/v1/sys/health | jq -r .sealed)" == "false" ]; do echo "Waiting ..."; sleep 0.1; done
-    docker compose exec -T vault sh -c "https_proxy=$http_proxy apk add --no-cache bash curl jq"
+    docker compose exec -T vault sh -c "https_proxy=$http_proxy apk add --no-cache bash curl jq openssl"
     docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki init"
     docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY1_ID_SHORT" "24h"
     docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY2_ID_SHORT" "24h"
