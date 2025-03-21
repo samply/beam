@@ -1,3 +1,11 @@
+# Samply.Beam 0.9.1 - 2025-03-21
+
+This minor release includes a bug for multiple connections from the same proxy.
+
+## Bugfixes
+
+* Fixed a bug where the broker did not notice a disconnect from the beam proxy sending the reconnected beam proxy a 409 status code causing it to crash. [#230](https://github.com/samply/beam/pull/230)
+
 # Samply.Beam 0.9.0 - 2025-03-12
 
 This major release of Beam 0.9 features a lot of internal changes and some bugfixes.
