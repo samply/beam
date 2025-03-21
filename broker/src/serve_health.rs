@@ -7,6 +7,7 @@ use futures_core::Stream;
 use serde::{Serialize, Deserialize};
 use shared::{crypto_jwt::Authorized, Msg, config::CONFIG_CENTRAL};
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
+use tracing::info;
 
 use crate::compare_client_server_version::log_version_mismatch;
 
@@ -145,7 +146,8 @@ async fn get_control_tasks(
         .clone();
     let Ok(connect_guard) = tokio::time::timeout(Duration::from_secs(60), status_mutex.lock_owned()).await
     else {
-        return Err(StatusCode::CONFLICT);
+        info!("Double connection!");
+        return Err(StatusCode::OK);
     };
 
     Ok(Sse::new(ForeverStream(connect_guard)).keep_alive(KeepAlive::new()))
