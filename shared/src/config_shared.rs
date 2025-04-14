@@ -4,7 +4,7 @@ use crate::{
     config::CONFIG_SHARED_CRYPTO,
     crypto::{
         self, get_all_certs_and_clients_by_cname_as_pemstr, load_certificates_from_dir,
-        CryptoPublicPortion, GetCerts,
+        CryptoPublicPortion, GetCerts, ProxyCertInfo,
     },
     SamplyBeamError,
 };
@@ -70,7 +70,6 @@ pub struct Config {
 pub struct ConfigCrypto {
     pub privkey_rs256: RS256KeyPair,
     pub privkey_rsa: RsaPrivateKey,
-    pub public: Option<CryptoPublicPortion>,
 }
 
 impl crate::config::Config for Config {
@@ -115,22 +114,16 @@ fn get_enrollment_msg(proxy_id: &Option<String>) -> String {
 }
 
 pub async fn init_public_crypto_for_proxy(
-    private_config: ConfigCrypto,
-) -> Result<(String, String), SamplyBeamError> {
+    mut config: ConfigCrypto,
+) -> Result<ProxyCertInfo, SamplyBeamError> {
     let cli_args = CliArgs::parse();
-    let crypto = load_public_crypto_for_proxy(&cli_args, private_config).await?;
+    let public_info = load_public_crypto_for_proxy(&cli_args, &mut config).await?;
 
-    let cert_info = crypto::ProxyCertInfo::try_from(
-        &crypto
-            .public
-            .as_ref()
-            .expect("Should be set by load_public_crypto_for_proxy")
-            .cert,
-    )?;
-    if CONFIG_SHARED_CRYPTO.set(crypto).is_err() {
+    let cert_info = crypto::ProxyCertInfo::try_from(&public_info.cert)?;
+    if CONFIG_SHARED_CRYPTO.set(config).is_err() {
         panic!("Tried to initialize crypto twice (init_public_crypto_for_proxy())");
     }
-    Ok((cert_info.serial, cert_info.common_name))
+    Ok(cert_info)
 }
 
 pub fn load_private_crypto_for_proxy() -> Result<ConfigCrypto, SamplyBeamError> {
@@ -163,14 +156,13 @@ pub fn load_private_crypto_for_proxy() -> Result<ConfigCrypto, SamplyBeamError> 
     Ok(ConfigCrypto {
         privkey_rs256,
         privkey_rsa,
-        public: None,
     })
 }
 
 async fn load_public_crypto_for_proxy(
     cli_args: &CliArgs,
-    mut config: ConfigCrypto,
-) -> Result<ConfigCrypto, SamplyBeamError> {
+    config: &mut ConfigCrypto,
+) -> Result<CryptoPublicPortion, SamplyBeamError> {
     let proxy_id = cli_args.proxy_id.as_ref()
         .expect("load_crypto() has been called without setting a Proxy ID (maybe in broker?). This should not happen.");
     let proxy_id = ProxyId::new(proxy_id)?;
@@ -188,9 +180,8 @@ async fn load_public_crypto_for_proxy(
         ),
     )?;
     let serial = asn_str_to_vault_str(public.cert.serial_number())?;
-    config.privkey_rs256 = config.privkey_rs256.with_key_id(&serial);
-    config.public = Some(public);
-    Ok(config)
+    config.privkey_rs256 = config.privkey_rs256.clone().with_key_id(&serial);
+    Ok(public)
 }
 
 fn asn_str_to_vault_str(asn: &Asn1IntegerRef) -> Result<String, SamplyBeamError> {

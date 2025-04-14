@@ -33,7 +33,7 @@ impl GetCertsFromBroker {
             .expect("To build request successfully")
             .into_parts();
 
-        let req = sign_request(body, parts, &self.config, Some(&self.crypto_conf))
+        let req = sign_request(body, parts, &self.config, &self.crypto_conf)
             .await
             .map_err(|(_, msg)| SamplyBeamError::SignEncryptError(msg.into()))?;
         Ok(self.client.execute(req).await?.into())
@@ -90,20 +90,6 @@ impl GetCerts for GetCertsFromBroker {
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError> {
         debug!("Retrieving intermediate CA certificate ...");
         self.query("/v1/pki/certs/im-ca").await
-    }
-
-    async fn on_cert_expired(&self, expired_cert: shared::openssl::x509::X509) {
-        // We can't use our own `ConfigCrypto` here as it is only an intermidate config for getting initial certs from the broker
-        let own_cert = shared::crypto::get_own_crypto_material()
-            .public
-            .as_ref()
-            .expect("Fatal error: Unable to read our own certificate.");
-        let own_cert = &own_cert.cert;
-        if expired_cert.serial_number() == own_cert.serial_number() {
-            // TODO Tobias will find a smart solution ;)
-            error!("Our own cert has just expired -- exiting.");
-            std::process::exit(13);
-        }
     }
 }
 
