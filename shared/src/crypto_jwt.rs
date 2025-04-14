@@ -229,19 +229,10 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
 
 pub async fn sign_to_jwt(
     input: impl Serialize,
-    crypto_conf: Option<&ConfigCrypto>,
+    privkey: &RS256KeyPair,
 ) -> Result<String, SamplyBeamError> {
     let json = serde_json::to_value(input)
         .map_err(|e| SamplyBeamError::SignEncryptError(format!("Serialization failed: {}", e)))?;
-    let privkey = if let Some(ConfigCrypto { privkey_rs256, .. }) = crypto_conf {
-        privkey_rs256
-    } else {
-        &config::CONFIG_SHARED_CRYPTO
-            .get()
-            .expect("If called by GetCertsFromBroker config needs to be provided by param")
-            .privkey_rs256
-    };
-
     let claims = Claims::with_custom_claims::<Value>(json, Duration::from_hours(1)); // TODO: Make variable
 
     let token = privkey

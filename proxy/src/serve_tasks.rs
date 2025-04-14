@@ -17,7 +17,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::{AppId, AppOrProxyId, ProxyId};
 use shared::{
-    config::{self, CONFIG_PROXY}, config_proxy, config_shared::ConfigCrypto, crypto::{self, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType, DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage
+    config::{self, CONFIG_PROXY}, config_proxy, config_shared::ConfigCrypto, crypto::{self, get_own_crypto_material, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType, DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage
 };
 use tokio::io::BufReader;
 use tracing::{debug, error, info, trace, warn};
@@ -83,7 +83,7 @@ pub(crate) async fn forward_request(
         HeaderValue::from_static(env!("SAMPLY_USER_AGENT")),
     );
     let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
-    let req = sign_request(encrypted_msg, parts, &config, None).await.map_err(IntoResponse::into_response)?;
+    let req = sign_request(encrypted_msg, parts, &config, &get_own_crypto_material()).await.map_err(IntoResponse::into_response)?;
     trace!("Requesting: {:?}", req);
     let resp = client.execute(req).await.map_err(|e| {
         if e.is_timeout() {
@@ -94,6 +94,10 @@ pub(crate) async fn forward_request(
             (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
         }.into_response()
     })?;
+    if resp.status() == StatusCode::UNAUTHORIZED {
+        error!("The Broker has rejected our request with 401 Unauthorized. This is likely because our beam certificate expired.");
+        std::process::exit(401);
+    }
     Ok(resp)
 }
 
@@ -319,11 +323,11 @@ pub async fn sign_request(
     body: EncryptedMessage,
     mut parts: Parts,
     config: &config_proxy::Config,
-    private_crypto: Option<&ConfigCrypto>,
+    private_key: &ConfigCrypto,
 ) -> Result<reqwest::Request, (StatusCode, &'static str)> {
     let from = body.get_from();
 
-    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, private_crypto)
+    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, &private_key.privkey_rs256)
         .await
         .map_err(|e| {
             error!("Crypto failed: {}", e);
@@ -347,7 +351,7 @@ pub async fn sign_request(
     let digest =
         crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig, &from)
             .map_err(|_| ERR_INTERNALCRYPTO)?;
-    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, private_crypto)
+    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, &private_key.privkey_rs256)
         .await
         .map_err(|e| {
             error!("Crypto failed: {}", e);

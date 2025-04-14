@@ -37,12 +37,12 @@ use crate::{
 
 type Serial = String;
 
-pub(crate) struct ProxyCertInfo {
-    pub(crate) proxy_name: String,
-    pub(crate) valid_since: String,
-    pub(crate) valid_until: String,
-    pub(crate) common_name: String,
-    pub(crate) serial: String,
+pub struct ProxyCertInfo {
+    pub proxy_name: String,
+    pub valid_since: String,
+    pub valid_until: String,
+    pub common_name: String,
+    pub serial: String,
 }
 
 impl TryFrom<&X509> for ProxyCertInfo {
@@ -119,7 +119,6 @@ pub trait GetCerts: Sync + Send {
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError>;
     /// A callback that runs on a timer and returns if the cache changed
     async fn on_timer(&self, _cache: &mut CertificateCache) -> CertificateCacheUpdate { CertificateCacheUpdate::UnChanged }
-    async fn on_cert_expired(&self, _expired_cert: X509) {}
     async fn get_crl(&self) -> Result<Option<X509Crl>, SamplyBeamError> { Ok(None) }
 }
 
@@ -197,7 +196,6 @@ impl CertificateCache {
             };
             *entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate);
         }
-        CERT_GETTER.get().unwrap().on_cert_expired(oldest_cert).await;
     }
 
     /// Searches cache for a certificate with the given ClientId. If not found, updates cache from central vault. If then still not found, return None
@@ -569,10 +567,6 @@ pub(crate) static CERT_CACHE: Lazy<Arc<RwLock<CertificateCache>>> = Lazy::new(||
     });
     cc
 });
-
-async fn get_cert_by_serial(serial: &str) -> Option<X509> {
-    CertificateCache::get_by_serial(serial).await
-}
 
 async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<CertificateCacheEntry> {
     CertificateCache::get_all_certs_by_cname(cname).await
