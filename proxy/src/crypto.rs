@@ -48,6 +48,7 @@ impl GetCertsFromBroker {
                 Err(CertificateInvalidReason::NotDisclosedByBroker.into())
             }
             StatusCode::OK => Ok(req.text().await?),
+            StatusCode::UNAUTHORIZED => Err(SamplyBeamError::BrokerAuthorizationFailed),
             x => Err(SamplyBeamError::VaultOtherError(format!(
                 "Got code {x}, error message: {}",
                 req.text().await?
