@@ -430,7 +430,7 @@ impl CertificateCache {
                 error!("Unable to retrieve intermediate CA certificate from broker.");
                 error!("This means that either:");
                 error!("    1. The CSR has not yet been signed by the central PKI");
-                error!("    2. The CSR has not been resigned by the central PKI after its ephemeral experation");
+                error!("    2. This Beam Proxy's certificate has expired and needs to be resigned in the central PKI.");
                 std::process::exit(17);
             }
             Err(e) => return Err(e),

@@ -33,7 +33,7 @@ pub enum SamplyBeamError {
     VaultRedirectError(StatusCode, String),
     #[error("Samply.PKI error: {0}")]
     VaultOtherError(String),
-    #[error("Broker rejected our signature")]
+    #[error("Broker rejected our authentication (cryptographic signature)")]
     BrokerAuthorizationFailed,
     #[error("Unable to read config: {0}. Please check your environment and parameters.")]
     ConfigurationFailed(String),
