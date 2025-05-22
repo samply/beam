@@ -662,7 +662,7 @@ If you created a companion tool and want it to be listed here, please open a Git
 - [x] Support TLS-terminating proxies
 - [x] Transport direct socket connections
 - [x] Crate to support the development of Rust Beam client applications
-- [ ] File transfers (with efficient support for large files)
+- [x] File transfers (with efficient support for large files)
 - [ ] Broker-side filtering of tasks using the unencrypted metadata fields (probably using JSON queries)
 - [ ] Integration of OAuth2 (in discussion)
 - [ ] Deliver usage metrics
