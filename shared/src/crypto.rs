@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use axum::{body::Body, http::Request, Json};
 
+use clap::error;
 use itertools::Itertools;
 use once_cell::sync::{Lazy, OnceCell};
 use openssl::{
@@ -423,11 +424,31 @@ impl CertificateCache {
     }
 
     pub async fn set_im_cert(&mut self) -> Result<(), SamplyBeamError> {
-        self.im_cert = Some(X509::from_pem(&get_im_cert().await.unwrap().as_bytes())?);
-        let _ = verify_cert(&self.im_cert.as_ref().expect("No IM certificate provided"), &self.root_cert.as_ref().expect("No root certificate set!"))
-            .expect(&format!("The intermediate certificate is invalid. Please send this info to the central beam admin for debugging:\n---BEGIN DEBUG---\n{}\nroot\n{}\n---END DEBUG---", 
-                             String::from_utf8(self.im_cert.as_ref().unwrap().to_text().unwrap_or("Cannot convert IM certificate to text".into())).unwrap_or("Invalid characters in IM certificate".to_string()),
-                             String::from_utf8(self.root_cert.as_ref().unwrap().to_text().unwrap_or("Cannot convert root certificate to text".into())).unwrap_or("Invalid characters in root certificate".to_string())));
+        let im_cert = match get_im_cert().await {
+            Ok(im_cert) => X509::from_pem(im_cert.as_bytes())?,
+            Err(SamplyBeamError::BrokerAuthorizationFailed) => {
+                error!("Unable to retrieve intermediate CA certificate from broker.");
+                error!("This means that either:");
+                error!("    1. The CSR has not yet been signed by the central PKI");
+                error!("    2. This Beam Proxy's certificate has expired and needs to be resigned in the central PKI.");
+                std::process::exit(17);
+            }
+            Err(e) => return Err(e),
+        };
+        let root_cert = self
+            .root_cert
+            .as_ref()
+            .expect("No root certificate set!");
+        if let Err(e) = verify_cert(&im_cert, &root_cert) {
+            error!("Intermediate certificate is invalid: {e:#}");
+            error!(
+                "Please send this info to the central beam admin for debugging:\n---BEGIN DEBUG---\n{}\nroot\n{}\n---END DEBUG---",
+                im_cert.to_text().as_deref().map(String::from_utf8_lossy).unwrap_or("Cannot convert intermediate certificate to text".into()),
+                root_cert.to_text().as_deref().map(String::from_utf8_lossy).unwrap_or("Cannot convert root certificate to text".into())
+            );
+            std::process::exit(1);
+        }
+        self.im_cert = Some(im_cert);
         Ok(())
     }
 }
