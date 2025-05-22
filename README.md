@@ -16,6 +16,7 @@ Find info on all previous versions in the [Changelog](CHANGELOG.md).
 - [Getting Started](#getting-started)
 - [JSON Data Objects](#data-objects-json)
 - [API Description](#api)
+- [Companion Tools](#companion-tools)
 - [Roadmap](#roadmap)
 
 ## Why use Samply.Beam?
@@ -635,6 +636,18 @@ The beam proxy tries to keep a permanent connection to the broker to make it pos
 This also allows us to detected invalid connection states such as multiple proxies with the same proxy id connecting simultaneously.
 In that case the second proxy trying to connect will receive a 409 status code and shut down.
 
+## Companion Tools
+
+Samply.Beam provides a somewhat low-level and focused feature set by design, following the Unix philosophy "Write programs that do one thing and do it well." (following the phrasing of Peter H. Salus). However, Samply.Beam is designed in a way, so that "companion tools" can build upon those functionalities.
+
+Here are some of the companion tools building on Samply.Beam:
+
+- [Beam.Connect](https://github.com/samply/beam-connect) emulates an HTTP proxy to tunnel arbitrary HTTP calls and APIs through Samply.Beam. It provides fine-grained routing and access control.
+- [Beam.File](https://github.com/samply/beam-file) uses the Samply.Beam network to efficiently and securely transfer files among Beam nodes.
+- [Beam.Enroll](https://github.com/samply/beam-enroll) simplifies the management of the central PKI by generating private keys and CSRs together with easy to follow user instructions.
+
+If you created a companion tool and want it to be listed here, please open a Github issue or pull request.
+
 ## Roadmap
 
 - [X] API Key authentication of local applications
@@ -649,7 +662,7 @@ In that case the second proxy trying to connect will receive a 409 status code a
 - [x] Support TLS-terminating proxies
 - [x] Transport direct socket connections
 - [x] Crate to support the development of Rust Beam client applications
-- [ ] File transfers (with efficient support for large files)
+- [x] File transfers (with efficient support for large files)
 - [ ] Broker-side filtering of tasks using the unencrypted metadata fields (probably using JSON queries)
 - [ ] Integration of OAuth2 (in discussion)
 - [ ] Deliver usage metrics
