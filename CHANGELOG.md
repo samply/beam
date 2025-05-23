@@ -1,3 +1,14 @@
+# Samply.Beam 0.9.2 - 2025-05-25
+
+## Minor changes
+
+* Improved error message when the beam certificate expired.
+* Improved Readme to mention companion tools.
+
+## Bugfixes
+
+* Fixed a bug where the proxy would crash when its beam certificate expired even if it had been resigned.
+
 # Samply.Beam 0.9.1 - 2025-03-21
 
 This minor release includes a bug for multiple connections from the same proxy.

@@ -4,9 +4,9 @@
 
 Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. It provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation on top of an easy to use REST API. In addition to task/response semantics, Samply.Beam supports high-performance applications with encrypted low-level direct socket connections.
 
-## Latest version: Samply.Beam 0.8.0 – 2024-07-26
+## Latest version: Samply.Beam 0.9.2 – 2025-05-23
 
-This new major version includes some bugfixes, dependency upgrades and improvements to `beam-lib`. Please check the [Changelog](CHANGELOG.md) for details.
+This new minor version includes better error messages for expired certificates and a bugfix. Please check the [Changelog](CHANGELOG.md) for details.
 
 Find info on all previous versions in the [Changelog](CHANGELOG.md).
 
