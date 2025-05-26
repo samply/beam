@@ -2,12 +2,12 @@
 
 ## Minor changes
 
-* Improved error message when the beam certificate expired.
-* Improved Readme to mention companion tools.
+* Improved Beam Proxy's error message when its beam certificate expired.
+* Mention Beam companion tools in Readme.
 
 ## Bugfixes
 
-* Fixed a bug where the proxy would crash when its beam certificate expired even if it had been resigned.
+* Fixed a bug where the proxy would crash when its beam certificate expired even if it had been re-signed.
 
 # Samply.Beam 0.9.1 - 2025-03-21
 
