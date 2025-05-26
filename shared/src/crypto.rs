@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use axum::{body::Body, http::Request, Json};
 
+use clap::error;
 use itertools::Itertools;
 use once_cell::sync::{Lazy, OnceCell};
 use openssl::{
@@ -37,12 +38,12 @@ use crate::{
 
 type Serial = String;
 
-pub(crate) struct ProxyCertInfo {
-    pub(crate) proxy_name: String,
-    pub(crate) valid_since: String,
-    pub(crate) valid_until: String,
-    pub(crate) common_name: String,
-    pub(crate) serial: String,
+pub struct ProxyCertInfo {
+    pub proxy_name: String,
+    pub valid_since: String,
+    pub valid_until: String,
+    pub common_name: String,
+    pub serial: String,
 }
 
 impl TryFrom<&X509> for ProxyCertInfo {
@@ -119,7 +120,6 @@ pub trait GetCerts: Sync + Send {
     async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError>;
     /// A callback that runs on a timer and returns if the cache changed
     async fn on_timer(&self, _cache: &mut CertificateCache) -> CertificateCacheUpdate { CertificateCacheUpdate::UnChanged }
-    async fn on_cert_expired(&self, _expired_cert: X509) {}
     async fn get_crl(&self) -> Result<Option<X509Crl>, SamplyBeamError> { Ok(None) }
 }
 
@@ -197,7 +197,6 @@ impl CertificateCache {
             };
             *entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate);
         }
-        CERT_GETTER.get().unwrap().on_cert_expired(oldest_cert).await;
     }
 
     /// Searches cache for a certificate with the given ClientId. If not found, updates cache from central vault. If then still not found, return None
@@ -423,11 +422,31 @@ impl CertificateCache {
     }
 
     pub async fn set_im_cert(&mut self) -> Result<(), SamplyBeamError> {
-        self.im_cert = Some(X509::from_pem(&get_im_cert().await.unwrap().as_bytes())?);
-        let _ = verify_cert(&self.im_cert.as_ref().expect("No IM certificate provided"), &self.root_cert.as_ref().expect("No root certificate set!"))
-            .expect(&format!("The intermediate certificate is invalid. Please send this info to the central beam admin for debugging:\n---BEGIN DEBUG---\n{}\nroot\n{}\n---END DEBUG---", 
-                             String::from_utf8(self.im_cert.as_ref().unwrap().to_text().unwrap_or("Cannot convert IM certificate to text".into())).unwrap_or("Invalid characters in IM certificate".to_string()),
-                             String::from_utf8(self.root_cert.as_ref().unwrap().to_text().unwrap_or("Cannot convert root certificate to text".into())).unwrap_or("Invalid characters in root certificate".to_string())));
+        let im_cert = match get_im_cert().await {
+            Ok(im_cert) => X509::from_pem(im_cert.as_bytes())?,
+            Err(SamplyBeamError::BrokerAuthorizationFailed) => {
+                error!("Unable to retrieve intermediate CA certificate from broker.");
+                error!("This means that either:");
+                error!("    1. The CSR has not yet been signed by the central PKI");
+                error!("    2. This Beam Proxy's certificate has expired and needs to be resigned in the central PKI.");
+                std::process::exit(17);
+            }
+            Err(e) => return Err(e),
+        };
+        let root_cert = self
+            .root_cert
+            .as_ref()
+            .expect("No root certificate set!");
+        if let Err(e) = verify_cert(&im_cert, &root_cert) {
+            error!("Intermediate certificate is invalid: {e:#}");
+            error!(
+                "Please send this info to the central beam admin for debugging:\n---BEGIN DEBUG---\n{}\nroot\n{}\n---END DEBUG---",
+                im_cert.to_text().as_deref().map(String::from_utf8_lossy).unwrap_or("Cannot convert intermediate certificate to text".into()),
+                root_cert.to_text().as_deref().map(String::from_utf8_lossy).unwrap_or("Cannot convert root certificate to text".into())
+            );
+            std::process::exit(1);
+        }
+        self.im_cert = Some(im_cert);
         Ok(())
     }
 }
@@ -569,10 +588,6 @@ pub(crate) static CERT_CACHE: Lazy<Arc<RwLock<CertificateCache>>> = Lazy::new(||
     });
     cc
 });
-
-async fn get_cert_by_serial(serial: &str) -> Option<X509> {
-    CertificateCache::get_by_serial(serial).await
-}
 
 async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<CertificateCacheEntry> {
     CertificateCache::get_all_certs_by_cname(cname).await

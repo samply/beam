@@ -19,8 +19,8 @@ RET=$(curl_get $APP1_P2 -v $P2/v1/tasks/70c0aa90-bfcf-4312-a6af-42cbd57dc0b8/res
 CODE=$(echo $RET | jq -r .response_code)
 BODY=$(echo $RET | jq -r .body)
 
-if [ "$CODE" != "401" ]; then
-    fail "$RET" Trying to fetch a task not belonging to me, I expected 401, got $CODE
+if [ "$CODE" != "403" ]; then
+    fail "$RET" Trying to fetch a task not belonging to me, I expected 403, got $CODE
 fi
 
 success

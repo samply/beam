@@ -1,3 +1,18 @@
+# Samply.Beam 0.10.0 - 2025-05-26
+
+## Breaking changes
+
+* Changed the status code for unauthorized access to a task or socket from `401 Unauthorized` to `403 Forbidden`.
+
+## Minor changes
+
+* Improved Beam Proxy's error message when its beam certificate expired.
+* Mention Beam companion tools in Readme.
+
+## Bugfixes
+
+* Fixed a bug where the proxy would crash when its beam certificate expired even if it had been re-signed.
+
 # Samply.Beam 0.9.1 - 2025-03-21
 
 This minor release includes a bug for multiple connections from the same proxy.

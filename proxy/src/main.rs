@@ -8,7 +8,7 @@ use beam_lib::AppOrProxyId;
 use futures::future::Ready;
 use futures::{StreamExt, TryStreamExt};
 use shared::{reqwest, EncryptedMessage, MsgEmpty, PlainMessage};
-use shared::crypto::CryptoPublicPortion;
+use shared::crypto::{get_own_crypto_material, CryptoPublicPortion, ProxyCertInfo};
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
 use shared::{config, config_proxy::Config};
@@ -96,13 +96,13 @@ async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(), Sam
                     .ok()
             })
             .collect();
-    let (serial, cname) =
+    let ProxyCertInfo { serial, common_name, .. } =
         shared::config_shared::init_public_crypto_for_proxy(private_crypto_proxy).await?;
-    if cname != config.proxy_id.to_string() {
-        return Err(SamplyBeamError::ConfigurationFailed(format!("Unable to retrieve a certificate matching your Proxy ID. Expected {}, got {}. Please check your configuration", cname, config.proxy_id.to_string())));
+    if common_name != config.proxy_id.to_string() {
+        return Err(SamplyBeamError::ConfigurationFailed(format!("Unable to retrieve a certificate matching your Proxy ID. Expected {common_name}, got {}. Please check your configuration", config.proxy_id.as_ref())));
     }
 
-    info!("Certificate retrieved for our proxy ID {cname} (serial {serial})");
+    info!("Certificate retrieved for our proxy ID {common_name} (serial {serial})");
 
     Ok(())
 }
@@ -148,7 +148,7 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
                 .expect("To build request successfully")
                 .into_parts();
 
-            let req = sign_request(body, parts, &config, None).await.expect("Unable to sign request; this should always work");
+            let req = sign_request(body, parts, &config, &get_own_crypto_material()).await.expect("Unable to sign request; this should always work");
             // In the future this will poll actual control related tasks
             let res = match client.execute(req).await {
                 Ok(res) if res.status() == StatusCode::CONFLICT => {
