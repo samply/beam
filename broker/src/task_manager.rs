@@ -354,7 +354,7 @@ where
             return Err(TaskManagerError::NotFound);
         };
         if !task.get_to().contains(result.get_from()) {
-            return Err(TaskManagerError::Unauthorized);
+            return Err(TaskManagerError::Forbidden);
         }
         let sender = result.get_from().clone();
         let is_updated = task.msg.insert_result(result);
@@ -374,7 +374,7 @@ where
 pub enum TaskManagerError {
     NotFound,
     Conflict,
-    Unauthorized,
+    Forbidden,
     Gone,
     BroadcastBufferOverflow,
 }
@@ -384,7 +384,7 @@ impl TaskManagerError {
         match self {
             TaskManagerError::NotFound => "Task not found",
             TaskManagerError::Conflict => "Task already exists",
-            TaskManagerError::Unauthorized => "Unauthorized to access this task",
+            TaskManagerError::Forbidden => "Not allowed to access this task",
             TaskManagerError::Gone => "Task expired while waiting on it",
             TaskManagerError::BroadcastBufferOverflow => "Internal server error",
         }
@@ -404,7 +404,7 @@ impl From<TaskManagerError> for StatusCode {
             TaskManagerError::NotFound => StatusCode::NOT_FOUND,
             TaskManagerError::Conflict => StatusCode::CONFLICT,
             TaskManagerError::BroadcastBufferOverflow => StatusCode::INTERNAL_SERVER_ERROR,
-            TaskManagerError::Unauthorized => StatusCode::UNAUTHORIZED,
+            TaskManagerError::Forbidden => StatusCode::FORBIDDEN,
             TaskManagerError::Gone => StatusCode::GONE,
         }
     }

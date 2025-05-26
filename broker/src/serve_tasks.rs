@@ -97,7 +97,7 @@ async fn get_results_for_task_nostream(
         block
     );
     if msg.get_from() != state.task_manager.get(&task_id)?.get_from() {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err(StatusCode::FORBIDDEN);
     }
     let filter_for_me = MsgFilterNoTask {
         from: None,
@@ -128,7 +128,7 @@ async fn get_results_for_task_stream(
     );
     let from = msg.get_from().clone();
     if &from != state.task_manager.get(&task_id)?.get_from() {
-        return Err(StatusCode::UNAUTHORIZED);
+        return Err(StatusCode::FORBIDDEN);
     }
 
     let filter = MsgFilterNoTask { from: None, to: Some(from), mode: MsgFilterMode::Or };
@@ -183,9 +183,9 @@ async fn get_tasks(
     if (from.is_some() && *from.as_ref().unwrap() != msg.msg.from)
         || (to.is_some() && *to.as_ref().unwrap() != msg.msg.from)
     {
-        // Rewrite in Rust 1.64: https://github.com/rust-lang/rust/pull/94927
+        // Rewrite in Rust 1.88
         return Err((
-            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
             "You can only list messages created by you (from) or directed to you (to).",
         ));
     }

@@ -94,7 +94,7 @@ async fn connect_socket(
         let task = state.task_manager.get(&task_id)?;
         // Allowed to connect are the issuer of the task and the recipient
         if !(task.get_from() == &msg.from || task.get_to().contains(&msg.from)) {
-            return Err(StatusCode::UNAUTHORIZED);
+            return Err(StatusCode::FORBIDDEN);
         }
     }
 
