@@ -1,4 +1,8 @@
-# Samply.Beam 0.9.2 - 2025-05-25
+# Samply.Beam 0.10.0 - 2025-05-26
+
+## Breaking changes
+
+* Changed the status code for unauthorized access to a task or socket from `401 Unauthorized` to `403 Forbidden`.
 
 ## Minor changes
 
