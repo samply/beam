@@ -53,6 +53,10 @@ struct CliArgs {
     #[clap(long, env, value_parser)]
     monitoring_api_key: Option<String>,
 
+    /// Abort if we fail to drop our root privileges (defaults to false)
+    #[clap(long, env, value_parser, default_value = "false")]
+    require_nonroot: bool,
+
     /// (included for technical reasons)
     #[clap(long, hide(true))]
     test_threads: Option<String>,

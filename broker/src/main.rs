@@ -16,7 +16,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 use crypto::GetCertsFromPki;
 use serve_health::{Health, InitStatus};
 use once_cell::sync::Lazy;
-use shared::{config::CONFIG_CENTRAL, *, errors::SamplyBeamError};
+use shared::{config::CONFIG_CENTRAL, drop_privileges::drop_privileges_or_fail, errors::SamplyBeamError, *};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
@@ -36,6 +36,8 @@ pub async fn main() -> anyhow::Result<()> {
     }
 
     Lazy::force(&config::CONFIG_CENTRAL); // Initialize config
+
+    drop_privileges_or_fail();
 
     serve::serve(health).await?;
 

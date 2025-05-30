@@ -40,6 +40,10 @@ struct CliArgs {
     #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
     rootcert_file: PathBuf,
 
+    /// Abort if we fail to drop our root privileges (defaults to false)
+    #[clap(long, env, value_parser, default_value = "false")]
+    require_nonroot: bool,
+
     // TODO: The following arguments have been added for compatibility reasons with the proxy config. Find another way to merge configs.
     /// (included for technical reasons)
     #[clap(long, env, value_parser)]
@@ -64,6 +68,7 @@ pub struct Config {
     pub broker_domain: String,
     pub root_cert: X509,
     pub tls_ca_certificates: Vec<Certificate>,
+    pub require_nonroot: bool
 }
 
 #[derive(Debug, Clone)]
@@ -98,6 +103,7 @@ impl crate::config::Config for Config {
             tls_ca_certificates_dir,
             root_cert,
             tls_ca_certificates,
+            require_nonroot: cli_args.require_nonroot,
         })
     }
 }

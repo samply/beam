@@ -1,3 +1,9 @@
+# Samply.Beam (upcoming release)
+
+## Major changes
+
+* Rootless mode: Upon startup, Beam will try to drop their privileges to the non-root `nobody` user. If this fails, Beam will issue a warning and continue with its current user. Use the new `--require-nonroot` flag to enforce non-root mode.
+
 # Samply.Beam 0.10.0 - 2025-05-26
 
 ## Breaking changes

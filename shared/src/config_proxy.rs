@@ -63,6 +63,10 @@ pub struct CliArgs {
     #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
     rootcert_file: PathBuf,
 
+    /// Abort if we fail to drop our root privileges (defaults to false)
+    #[clap(long, env, value_parser, default_value = "false")]
+    require_nonroot: bool,
+
     /// (included for technical reasons)
     #[clap(long, hide(true))]
     test_threads: Option<String>,

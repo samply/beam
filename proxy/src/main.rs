@@ -11,7 +11,7 @@ use shared::{reqwest, EncryptedMessage, MsgEmpty, PlainMessage};
 use shared::crypto::{get_own_crypto_material, CryptoPublicPortion, ProxyCertInfo};
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
-use shared::{config, config_proxy::Config};
+use shared::{config, config_proxy::Config, drop_privileges::drop_privileges_or_fail};
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 use tryhard::{backoff_strategies::ExponentialBackoff, RetryFuture, RetryFutureConfig};
@@ -58,6 +58,9 @@ pub async fn main() -> anyhow::Result<()> {
     } else {
         debug!("Certificate chain successfully initialized and validated");
     }
+
+    drop_privileges_or_fail();
+
     spawn_controller_polling(client.clone(), config.clone());
 
     serve::serve(config, client).await?;

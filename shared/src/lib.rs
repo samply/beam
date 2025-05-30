@@ -41,6 +41,7 @@ pub type TaskResponse = String;
 
 pub mod crypto;
 pub mod crypto_jwt;
+pub mod drop_privileges;
 pub mod errors;
 pub mod serde_helpers;
 pub mod logger;
