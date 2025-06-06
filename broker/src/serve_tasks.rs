@@ -38,6 +38,7 @@ pub(crate) fn router() -> Router {
     let state = TasksState::default();
     Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
+        .route("/v1/tasks/{task_id}", get(get_task_by_id))
         .route("/v1/tasks/{task_id}/results", get(get_results_for_task))
         .route("/v1/tasks/{task_id}/results/{app_id}", put(put_result))
         .with_state(state)
@@ -208,6 +209,31 @@ async fn get_tasks(
         warn!("Failed to serialize tasks: {e}");
         (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize tasks")
     })
+}
+
+async fn get_task_by_id(
+    State(state): State<TasksState>,
+    Path(task_id): Path<MsgId>,
+    mut block: HowLongToBlock,
+    msg: MsgSigned<MsgEmpty>,
+) -> Result<Response, StatusCode> {
+    if !(block.wait_count.is_none() || block.wait_count == Some(1)) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    block.wait_count = Some(1);
+    let Some(task) = state.task_manager
+        .wait_for_tasks(&block, |task| task.id() == &task_id && (msg.get_from() == task.get_from() || task.get_to().contains(msg.get_from())))
+        .await?
+        .next()
+    else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+    let body = serde_json::to_vec(&*task)
+        .map_err(|e| {
+            warn!("Failed to serialize task: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(([(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))], body).into_response())
 }
 
 trait MsgFilterTrait<M: Msg> {
