@@ -30,10 +30,6 @@ pub async fn main() -> anyhow::Result<()> {
 
     shared::crypto::init_cert_getter(cert_getter);
     tokio::task::spawn(init_broker_ca_chain(health.clone()));
-    #[cfg(debug_assertions)]
-    if shared::examples::print_example_objects() {
-        return Ok(());
-    }
 
     Lazy::force(&config::CONFIG_CENTRAL); // Initialize config
 

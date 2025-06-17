@@ -65,8 +65,6 @@ pub mod graceful_shutdown;
 pub mod http_client;
 pub mod middleware;
 
-pub mod examples;
-
 pub mod sse_event;
 
 // Reexports
