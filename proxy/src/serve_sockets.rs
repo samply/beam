@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::AppOrProxyId;
 use shared::{
-    config, ct_codecs::{self, Base64UrlSafeNoPadding, Decoder as B64Decoder, Encoder as B64Encoder}, expire_map::LazyExpireMap, http_client::SamplyHttpClient, reqwest, MessageType, MsgEmpty, MsgId, MsgSocketRequest, Plain
+    ct_codecs::{self, Base64UrlSafeNoPadding, Decoder as B64Decoder, Encoder as B64Encoder}, expire_map::LazyExpireMap, http_client::SamplyHttpClient, reqwest, MessageType, MsgEmpty, MsgId, MsgSocketRequest, Plain
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf, ReadHalf, WriteHalf};
 use tokio_util::{
@@ -34,15 +34,13 @@ use tokio_util::{
 use tracing::{warn, debug};
 
 use crate::{
-    auth::AuthenticatedApp,
-    serve_tasks::{forward_request, handler_task, TasksState, validate_and_decrypt, to_server_error},
+    auth::AuthenticatedApp, config::Config, serve_tasks::{forward_request, handler_task, to_server_error, validate_and_decrypt, TasksState}
 };
 
 type MsgSecretMap = Arc<LazyExpireMap<MsgId, SocketEncKey>>;
 const TASK_SECRET_CLEANUP_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-pub(crate) fn router(client: SamplyHttpClient) -> Router {
-    let config = config::CONFIG_PROXY.clone();
+pub(crate) fn router(client: SamplyHttpClient, config: &'static Config) -> Router {
     let state = TasksState {
         client: client.clone(),
         config,
@@ -74,7 +72,7 @@ async fn get_tasks(
         return Err(http::Response::from(res).map(axum::body::Body::new));
     }
     let enc_json = res.json().await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
-    let plain_json = to_server_error(validate_and_decrypt(enc_json).await).map_err(IntoResponse::into_response)?;
+    let plain_json = to_server_error(validate_and_decrypt(enc_json, state.config).await).map_err(IntoResponse::into_response)?;
     let tasks: Vec<MessageType<Plain>> = serde_json::from_value(plain_json).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
     let mut out = Vec::with_capacity(tasks.len());
     for task in tasks {

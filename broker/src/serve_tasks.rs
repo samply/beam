@@ -16,7 +16,7 @@ use futures_core::{stream, Stream};
 use serde::Deserialize;
 use beam_lib::WorkStatus;
 use shared::{
-    config, errors::SamplyBeamError, sse_event::SseEventType,
+    errors::SamplyBeamError, sse_event::SseEventType,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg, MsgEmpty,
     MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, EMPTY_VEC_APPORPROXYID, serde_helpers::DerefSerializer,
 };

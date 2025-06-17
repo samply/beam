@@ -8,18 +8,19 @@ use beam_lib::AppOrProxyId;
 use futures::future::Ready;
 use futures::{StreamExt, TryStreamExt};
 use shared::{reqwest, EncryptedMessage, MsgEmpty, PlainMessage};
-use shared::crypto::{get_own_crypto_material, CryptoPublicPortion, ProxyCertInfo};
+use shared::crypto::{CryptoPublicPortion, ProxyCertInfo};
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
-use shared::{config, config_proxy::Config};
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 use tryhard::{backoff_strategies::ExponentialBackoff, RetryFuture, RetryFutureConfig};
 
+use crate::config::Config;
 use crate::serve_tasks::sign_request;
 
 mod auth;
 mod banner;
+mod config;
 mod crypto;
 mod serve;
 mod serve_health;
@@ -34,9 +35,9 @@ pub async fn main() -> anyhow::Result<()> {
     shared::logger::init_logger()?;
     banner::print_banner();
 
-    let config = config::CONFIG_PROXY.clone();
+    let config = Config::load()?;
     let client = http_client::build(
-        &config::CONFIG_SHARED.tls_ca_certificates,
+        &config.tls_ca_certificates,
         Some(Duration::from_secs(PROXY_TIMEOUT)),
         Some(Duration::from_secs(20)),
     )?;
@@ -50,15 +51,23 @@ pub async fn main() -> anyhow::Result<()> {
         info!("Connected to Broker: {}", &config.broker_uri);
     }
 
-    if let Err(err) = retry_notify(|| init_crypto(config.clone(), client.clone()), |err, dur| {
+    let result = retry_notify(|| init_crypto(&config, &client), |err, dur| {
         warn!("Still trying to initialize certificate chain: {err}. Retrying in {}s", dur.as_secs());
-    }).await {
-        error!("Giving up on initializing certificate chain: {}", err);
-        std::process::exit(1);
-    } else {
-        debug!("Certificate chain successfully initialized and validated");
-    }
-    spawn_controller_polling(client.clone(), config.clone());
+    }).await;
+    let config = match result {
+        Err(err) => {
+            error!("Giving up on initializing certificate chain: {}", err);
+            std::process::exit(1);
+        }
+        Ok(crypto_config) => {
+            debug!("Certificate chain successfully initialized and validated");
+            Box::leak(Box::new(Config {
+                crypto: crypto_config,
+                ..config
+            }))
+        }
+    };
+    spawn_controller_polling(client.clone(), config);
 
     serve::serve(config, client).await?;
     Ok(())
@@ -78,14 +87,12 @@ where
         .on_retry(Box::new(move |_, b, e| futures::future::ready(on_error(e, b.unwrap_or(Duration::MAX)))))
 }
 
-async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(), SamplyBeamError> {
-    let private_crypto_proxy = shared::config_shared::load_private_crypto_for_proxy()?;
+async fn init_crypto(config: &Config, client: &SamplyHttpClient) -> Result<config::ConfigCrypto, SamplyBeamError> {
     shared::crypto::init_cert_getter(crypto::build_cert_getter(
         config.clone(),
         client.clone(),
-        private_crypto_proxy.clone(),
     )?);
-    shared::crypto::init_ca_chain().await?;
+    shared::crypto::init_ca_chain(&config.rootcert).await?;
 
     let _public_info: Vec<_> =
         shared::crypto::get_all_certs_and_clients_by_cname_as_pemstr(&config.proxy_id)
@@ -96,15 +103,15 @@ async fn init_crypto(config: Config, client: SamplyHttpClient) -> Result<(), Sam
                     .ok()
             })
             .collect();
-    let ProxyCertInfo { serial, common_name, .. } =
-        shared::config_shared::init_public_crypto_for_proxy(private_crypto_proxy).await?;
-    if common_name != config.proxy_id.to_string() {
+    let (ProxyCertInfo { serial, common_name, .. }, new_crpto) =
+        crate::crypto::init_public_crypto_for_proxy(&config).await?;
+    if &common_name != config.proxy_id.as_ref() {
         return Err(SamplyBeamError::ConfigurationFailed(format!("Unable to retrieve a certificate matching your Proxy ID. Expected {common_name}, got {}. Please check your configuration", config.proxy_id.as_ref())));
     }
 
     info!("Certificate retrieved for our proxy ID {common_name} (serial {serial})");
 
-    Ok(())
+    Ok(new_crpto)
 }
 
 async fn get_broker_health(
@@ -129,7 +136,7 @@ async fn get_broker_health(
     }
 }
 
-fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
+fn spawn_controller_polling(client: SamplyHttpClient, config: &'static Config) {
     const RETRY_INTERVAL: Duration = Duration::from_secs(60);
     tokio::spawn(async move {
         let mut retries_this_min = 0;
@@ -148,7 +155,7 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: Config) {
                 .expect("To build request successfully")
                 .into_parts();
 
-            let req = sign_request(body, parts, &config, &get_own_crypto_material()).await.expect("Unable to sign request; this should always work");
+            let req = sign_request(body, parts, &config).await.expect("Unable to sign request; this should always work");
             // In the future this will poll actual control related tasks
             let res = match client.execute(req).await {
                 Ok(res) if res.status() == StatusCode::CONFLICT => {

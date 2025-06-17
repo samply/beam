@@ -5,6 +5,8 @@ package.version = "0.10.0"
 
 [workspace.dependencies]
 beam-lib = { path = "./beam-lib", features = [ "strict-ids" ] }
+# Command Line Interface
+clap = { version = "4", features = ["env", "derive"] }
 
 [profile.release]
 #opt-level = "z"     # Optimize for size.

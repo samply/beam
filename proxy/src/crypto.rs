@@ -1,16 +1,18 @@
+use std::{fs, path::PathBuf};
+
 use axum::{body::Bytes, http::{header, request, Method, Request, StatusCode, Uri}, response::Response, Json};
-use beam_lib::AppOrProxyId;
+use beam_lib::{AppOrProxyId, ProxyId};
+use rsa::{pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey}, pkcs8::DecodePrivateKey, RsaPrivateKey, RsaPublicKey};
 use shared::{
-    async_trait, config, config_proxy::Config, config_shared::ConfigCrypto, crypto::GetCerts, errors::{CertificateInvalidReason, SamplyBeamError}, http_client::SamplyHttpClient, reqwest, EncryptedMessage, MsgEmpty
+    async_trait, crypto::{self, asn_str_to_vault_str, get_all_certs_and_clients_by_cname_as_pemstr, get_best_own_certificate, x509_cert_to_x509_public_key, CryptoPublicPortion, GetCerts, ProxyCertInfo}, errors::{CertificateInvalidReason, SamplyBeamError}, http_client::SamplyHttpClient, jwt_simple::prelude::RS256KeyPair, openssl::x509::X509, reqwest, EncryptedMessage, MsgEmpty
 };
 use tracing::{debug, info, warn, error};
 
-use crate::serve_tasks::sign_request;
+use crate::{config::{self, Config}, serve_tasks::sign_request};
 
 pub(crate) struct GetCertsFromBroker {
     client: SamplyHttpClient,
     config: Config,
-    crypto_conf: ConfigCrypto,
 }
 
 impl GetCertsFromBroker {
@@ -33,7 +35,7 @@ impl GetCertsFromBroker {
             .expect("To build request successfully")
             .into_parts();
 
-        let req = sign_request(body, parts, &self.config, &self.crypto_conf)
+        let req = sign_request(body, parts, &self.config)
             .await
             .map_err(|(_, msg)| SamplyBeamError::SignEncryptError(msg.into()))?;
         Ok(self.client.execute(req).await?.into())
@@ -96,12 +98,41 @@ impl GetCerts for GetCertsFromBroker {
 pub(crate) fn build_cert_getter(
     config: Config,
     client: SamplyHttpClient,
-    crypto_conf: ConfigCrypto,
 ) -> Result<GetCertsFromBroker, SamplyBeamError> {
     let client = client;
     Ok(GetCertsFromBroker {
         client,
         config,
-        crypto_conf,
     })
+}
+
+pub async fn init_public_crypto_for_proxy(
+    config: &Config
+) -> Result<(ProxyCertInfo, config::ConfigCrypto), SamplyBeamError> {
+    let (public_info, new_crypto) = load_public_crypto_for_proxy(config).await?;
+
+    let cert_info = ProxyCertInfo::try_from(&public_info.cert)?;
+    Ok((cert_info, new_crypto))
+}
+
+pub async fn load_public_crypto_for_proxy(
+    config: &Config,
+) -> Result<(CryptoPublicPortion, config::ConfigCrypto), SamplyBeamError> {
+    let publics: Vec<CryptoPublicPortion> = get_all_certs_and_clients_by_cname_as_pemstr(&config.proxy_id)
+        .await
+        .into_iter()
+        .filter_map(|r| {
+            r.map_err(|e| debug!("Unable to parse Certificate: {e}"))
+                .ok()
+        })
+        .collect();
+    let public = get_best_own_certificate(publics, &config.crypto.privkey_rsa).ok_or(
+        SamplyBeamError::SignEncryptError(
+            "Unable to choose valid, newest certificate for this proxy".into(),
+        ),
+    )?;
+    let serial = asn_str_to_vault_str(public.cert.serial_number())?;
+    let mut crypto_with_kid = config.crypto.clone();
+    crypto_with_kid.privkey_rs256 = crypto_with_kid.privkey_rs256.with_key_id(&serial);
+    Ok((public, crypto_with_kid))
 }
