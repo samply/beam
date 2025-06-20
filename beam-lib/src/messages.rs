@@ -1,7 +1,8 @@
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use serde_json::Value;
 use uuid::Uuid;
-use crate::AddressingId;
+
+use crate::AppId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct MsgId(Uuid);
@@ -21,8 +22,8 @@ impl std::fmt::Display for MsgId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskRequest<T> {
     pub id: MsgId,
-    pub from: AddressingId,
-    pub to: Vec<AddressingId>,
+    pub from: AppId,
+    pub to: Vec<AppId>,
     #[serde(
         with = "serde_string",
         bound(serialize = "T: Serialize + 'static", deserialize = "T: DeserializeOwned + 'static")
@@ -35,8 +36,8 @@ pub struct TaskRequest<T> {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskResult<T> {
-    pub from: AddressingId,
-    pub to: Vec<AddressingId>,
+    pub from: AppId,
+    pub to: Vec<AppId>,
     pub task: MsgId,
     pub status: WorkStatus,
     #[serde(
@@ -50,8 +51,8 @@ pub struct TaskResult<T> {
 #[cfg(feature = "sockets")]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SocketTask {
-    pub from: AddressingId,
-    pub to: Vec<AddressingId>,
+    pub from: AppId,
+    pub to: Vec<AppId>,
     pub ttl: String,
     pub id: MsgId,
     #[serde(default)]
@@ -79,7 +80,7 @@ pub enum WorkStatus {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MsgEmpty {
-    pub from: AddressingId,
+    pub from: AppId,
 }
 
 mod serde_string {
@@ -132,9 +133,6 @@ mod tests {
     use super::*;
 
     fn test_serialize_and_deserialize<T: From<&'static str> + PartialEq + Serialize + DeserializeOwned + std::fmt::Debug + 'static>() {
-        use crate::AppId;
-        #[cfg(feature = "strict-ids")]
-        crate::set_broker_id("broker.samply.de".to_string());
         let from = AppId::new_unchecked("test.broker.samply.de").into();
         let task = TaskRequest {
             id: MsgId::new(),
