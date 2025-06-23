@@ -40,8 +40,11 @@ impl AppId {
     }
 
     pub fn proxy_id(&self) -> ProxyId {
-        let proxy_id = self.as_ref().split_once('.').expect("This is a valid app id").1;
-        ProxyId(proxy_id.to_owned())
+        ProxyId(self.proxy_id_str().to_owned())
+    }
+
+    pub fn proxy_id_str(&self) -> &str {
+        self.as_ref().split_once('.').expect("This is a valid app id").1
     }
 
     /// Returns the AppId as a string slice without the broker part of the string

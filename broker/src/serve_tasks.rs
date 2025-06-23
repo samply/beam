@@ -11,10 +11,9 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
-use beam_lib::AppOrProxyId;
 use futures_core::{stream, Stream};
 use serde::Deserialize;
-use beam_lib::WorkStatus;
+use beam_lib::{AppId, WorkStatus};
 use shared::{
     errors::SamplyBeamError, sse_event::SseEventType,
     EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg, MsgEmpty,
@@ -142,10 +141,12 @@ async fn get_results_for_task_stream(
 }
 
 
+/// XXX: Breaking change find a way for the old behavior to still work.
+/// Keeping the old behavior requires differentiating between app id and proxy id which is only possible with with knowlege of all connected brokers which is gonna be part of the next commit.
 #[derive(Deserialize)]
 struct TaskFilter {
-    from: Option<AppOrProxyId>,
-    to: Option<AppOrProxyId>,
+    from: Option<AppId>,
+    to: Option<AppId>,
     filter: Option<FilterParam>,
 }
 
@@ -214,8 +215,8 @@ async fn get_tasks(
 
 trait MsgFilterTrait<M: Msg> {
     // fn new() -> Self;
-    fn from(&self) -> Option<&AppOrProxyId>;
-    fn to(&self) -> Option<&AppOrProxyId>;
+    fn from(&self) -> Option<&AppId>;
+    fn to(&self) -> Option<&AppId>;
     fn mode(&self) -> &MsgFilterMode;
 
     fn matches(&self, msg: &M) -> bool {
@@ -268,14 +269,14 @@ enum MsgFilterMode {
     And,
 }
 struct MsgFilterNoTask {
-    from: Option<AppOrProxyId>,
-    to: Option<AppOrProxyId>,
+    from: Option<AppId>,
+    to: Option<AppId>,
     mode: MsgFilterMode,
 }
 
 struct MsgFilterForTask<'a> {
     normal: MsgFilterNoTask,
-    unanswered_by: Option<&'a AppOrProxyId>,
+    unanswered_by: Option<&'a AppId>,
     workstatus_is_not: Vec<Discriminant<WorkStatus>>,
 }
 
@@ -302,11 +303,11 @@ impl<'a> MsgFilterForTask<'a> {
 }
 
 impl<'a> MsgFilterTrait<EncryptedMsgTaskRequest> for MsgFilterForTask<'a> {
-    fn from(&self) -> Option<&AppOrProxyId> {
+    fn from(&self) -> Option<&AppId> {
         self.normal.from.as_ref()
     }
 
-    fn to(&self) -> Option<&AppOrProxyId> {
+    fn to(&self) -> Option<&AppId> {
         self.normal.to.as_ref()
     }
 
@@ -320,11 +321,11 @@ impl<'a> MsgFilterTrait<EncryptedMsgTaskRequest> for MsgFilterForTask<'a> {
 }
 
 impl<'a, M: Msg> MsgFilterTrait<M> for MsgFilterNoTask {
-    fn from(&self) -> Option<&AppOrProxyId> {
+    fn from(&self) -> Option<&AppId> {
         self.from.as_ref()
     }
 
-    fn to(&self) -> Option<&AppOrProxyId> {
+    fn to(&self) -> Option<&AppId> {
         self.to.as_ref()
     }
 
@@ -357,7 +358,7 @@ async fn post_task(
 // PUT /v1/tasks/{task_id}/results/{app_id}
 async fn put_result(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    Path((task_id, app_id)): Path<(MsgId, AppOrProxyId)>,
+    Path((task_id, app_id)): Path<(MsgId, AppId)>,
     State(state): State<TasksState>,
     result: MsgSigned<EncryptedMsgTaskResult>,
 ) -> Result<StatusCode, (StatusCode, &'static str)> {

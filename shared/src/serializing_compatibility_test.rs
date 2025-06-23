@@ -3,7 +3,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use beam_lib::{set_broker_id, AppOrProxyId, MsgId};
+use beam_lib::{AppId, MsgId, ProxyId};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::json;
 
@@ -23,26 +23,24 @@ where
 
 #[test]
 fn test_msg_empty() {
-    set_broker_id("broker.samply.de".to_string());
     let internal = crate::MsgEmpty {
-        from: AppOrProxyId::new("app1.proxy1.broker.samply.de").unwrap(),
+        from: AppId::new("app1.proxy1.broker.samply.de").unwrap(),
     };
     let lib = beam_lib::MsgEmpty {
-        from: AppOrProxyId::new("app1.proxy1.broker.samply.de").unwrap(),
+        from: AppId::new("app1.proxy1.broker.samply.de").unwrap(),
     };
     assert_json_eq(internal, lib);
 }
 
 #[test]
 fn test_msg_task() {
-    set_broker_id("broker.samply.de".to_string());
     let json_data = json!({
         "foo": 1,
         "bar": true,
     });
     let id = MsgId::new();
     let internal = crate::MsgTaskRequest {
-        from: AppOrProxyId::new("app1.proxy1.broker.samply.de").unwrap(),
+        from: AppId::new("app1.proxy1.broker.samply.de").unwrap(),
         to: vec![],
         id,
         body: Plain::from(serde_json::to_string(&json_data).unwrap()),
@@ -55,7 +53,7 @@ fn test_msg_task() {
         metadata: json_data.clone(),
     };
     let lib = beam_lib::TaskRequest {
-        from: AppOrProxyId::new("app1.proxy1.broker.samply.de").unwrap(),
+        from: AppId::new("app1.proxy1.broker.samply.de").unwrap(),
         id,
         to: vec![],
         body: json_data.clone(),
@@ -71,13 +69,12 @@ fn test_msg_task() {
 
 #[test]
 fn test_task_result() {
-    set_broker_id("broker.samply.de".to_string());
     let json_data = json!({
         "foo": 1,
         "bar": true,
     });
     let task = MsgId::new();
-    let from = AppOrProxyId::new("app1.proxy1.broker.samply.de").unwrap();
+    let from = AppId::new("app1.proxy1.broker.samply.de").unwrap();
     let internal = crate::MsgTaskResult {
         from: from.clone(),
         to: vec![],
@@ -100,9 +97,8 @@ fn test_task_result() {
 #[cfg(feature = "sockets")]
 #[test]
 fn test_socket_task() {
-    set_broker_id("broker.samply.de".to_string());
     let id = MsgId::new();
-    let from = AppOrProxyId::new("app1.proxy1.broker.samply.de").unwrap();
+    let from = AppId::new("app1.proxy1.broker.samply.de").unwrap();
     let internal = crate::MsgSocketRequest {
         from: from.clone(),
         to: vec![],

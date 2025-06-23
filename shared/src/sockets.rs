@@ -1,18 +1,17 @@
 use std::time::SystemTime;
 
+use beam_lib::AppId;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{MsgState, serialize_time, MsgId, Msg, DecryptableMsg, Plain, Encrypted, EncryptableMsg, HasWaitId};
-use beam_lib::AppOrProxyId;
-
+use crate::{serialize_time, DecryptableMsg, EncryptableMsg, Encrypted, HasWaitId, Msg, MsgId, MsgState, Plain};
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct MsgSocketRequest<State>
 where State: MsgState {
-    pub from: AppOrProxyId,
+    pub from: AppId,
     // TODO: Tell serde to serialize only one
-    pub to: Vec<AppOrProxyId>,
+    pub to: Vec<AppId>,
     #[serde(with="serialize_time", rename="ttl")]
     pub expire: SystemTime,
     pub id: MsgId,
@@ -23,11 +22,11 @@ where State: MsgState {
 }
 
 impl<State: MsgState> Msg for MsgSocketRequest<State> {
-    fn get_from(&self) -> &AppOrProxyId {
+    fn get_from(&self) -> &AppId {
         &self.from
     }
 
-    fn get_to(&self) -> &Vec<AppOrProxyId> {
+    fn get_to(&self) -> &Vec<AppId> {
         &self.to
     }
 

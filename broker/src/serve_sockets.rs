@@ -4,7 +4,7 @@ use axum::{extract::{Path, Request, State}, http::{header, request::Parts, Heade
 use bytes::BufMut;
 use hyper_util::rt::TokioIo;
 use serde::{Serialize, Serializer, ser::SerializeSeq};
-use shared::{crypto_jwt::Authorized, expire_map::LazyExpireMap, serde_helpers::DerefSerializer, Encrypted, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned, MsgSocketRequest};
+use shared::{expire_map::LazyExpireMap, serde_helpers::DerefSerializer, Encrypted, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned, MsgSocketRequest};
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
 use tracing::{debug, log::error, warn};
 
@@ -85,7 +85,7 @@ async fn connect_socket(
     body: String,
     // This Result is just an Either type. An error value does not mean something went wrong
 ) -> Result<Response, StatusCode> {
-    let result = shared::crypto_jwt::verify_with_extended_header::<MsgEmpty>(&mut parts, &body).await;
+    let result = shared::crypto_jwt::verify_with_extended_header::<MsgEmpty>(&mut parts, body).await;
     let msg = match result {
         Ok(msg) => msg.msg,
         Err(e) => return Ok(e.into_response()),

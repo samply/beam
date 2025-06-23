@@ -5,6 +5,7 @@ use std::{
 use axum::{
     extract::{Path, Request, State}, http::{self, header, HeaderValue, StatusCode}, response::{IntoResponse, Response}, routing::{get, post}, Extension, Json, RequestPartsExt, Router
 };
+use beam_lib::AppId;
 use bytes::{Buf, BufMut, BytesMut};
 use chacha20poly1305::{
     aead::{
@@ -22,7 +23,6 @@ use hyper_util::rt::TokioIo;
 use rsa::rand_core::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use beam_lib::AppOrProxyId;
 use shared::{
     ct_codecs::{self, Base64UrlSafeNoPadding, Decoder as B64Decoder, Encoder as B64Encoder}, expire_map::LazyExpireMap, http_client::SamplyHttpClient, reqwest, MessageType, MsgEmpty, MsgId, MsgSocketRequest, Plain
 };
@@ -98,7 +98,7 @@ async fn get_tasks(
 
 async fn create_socket_con(
     AuthenticatedApp(sender): AuthenticatedApp,
-    Path(to): Path<AppOrProxyId>,
+    Path(to): Path<AppId>,
     Extension(task_secret_map): Extension<MsgSecretMap>,
     state: State<TasksState>,
     mut req: Request,
@@ -116,7 +116,7 @@ async fn create_socket_con(
         .and_then(|v| serde_json::from_slice(v.as_bytes()).ok())
         .unwrap_or_default();
     let socket_req = MsgSocketRequest {
-        from: AppOrProxyId::App(sender.clone()),
+        from: sender.clone(),
         to: vec![to],
         expire: SystemTime::now() + TTL,
         id: task_id,
@@ -172,7 +172,7 @@ async fn connect_socket(
     };
 
     let msg_empty = MsgEmpty {
-        from: AppOrProxyId::App(sender.clone()),
+        from: sender.clone(),
     };
     let Ok(body) = serde_json::to_vec(&msg_empty) else {
         warn!("Failed to serialize MsgEmpty");

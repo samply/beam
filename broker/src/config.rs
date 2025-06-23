@@ -68,7 +68,6 @@ pub struct Config {
 impl Config {
     pub fn load() -> Result<Self, SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        beam_lib::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
         let pki_token = read_to_string(&cli_args.pki_apikey_file)
             .map_err(|e| {
                 SamplyBeamError::ConfigurationFailed(format!(

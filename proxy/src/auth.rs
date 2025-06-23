@@ -4,7 +4,7 @@ use axum::{
     extract::{FromRef, FromRequest, FromRequestParts},
     http::{header::{self, HeaderName}, request::Parts, Request, StatusCode},
 };
-use beam_lib::{AppId, AppOrProxyId};
+use beam_lib::{AppId};
 
 use tracing::{debug, Span, debug_span, warn};
 
