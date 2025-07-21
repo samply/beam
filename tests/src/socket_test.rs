@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use beam_lib::{BlockingOptions, MsgId};
-use rand::RngCore;
+use rand::Rng;
 use tokio::io::{AsyncWriteExt, AsyncReadExt, AsyncRead, AsyncWrite};
 use anyhow::Result;
 use crate::*;
@@ -10,7 +10,7 @@ async fn test_connection<T: AsyncRead + AsyncWrite + Unpin>(mut a: T, mut b: T) 
     const N: usize = 2_usize.pow(8);
     for _ in 0..10 {
         let test_data: &mut [u8; N] = &mut [0; N];
-        rand::thread_rng().fill_bytes(test_data);
+        rand::rng().fill_bytes(test_data);
         let mut read_buf = [0; N];
         a.write_all(test_data).await?;
         a.flush().await?;

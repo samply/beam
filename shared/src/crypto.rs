@@ -825,10 +825,8 @@ pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<reqwest
 /// Checks whether or not a x509 certificate matches a private key by comparing the (public) modulus
 pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool, ErrorStack> {
     let cert_rsa = cert.public_key()?.rsa()?;
-    let cert_mod = cert_rsa.n();
-    let key_mod = key.n();
-    let key_mod_bignum = openssl::bn::BigNum::from_slice(&key_mod.to_bytes_be())?;
-    let is_equal = cert_mod.ucmp(&key_mod_bignum) == std::cmp::Ordering::Equal;
+    let cert_mod = rsa::BoxedUint::from_be_slice_vartime(&cert_rsa.n().to_vec());
+    let is_equal = cert_mod.cmp(&key.n()) == std::cmp::Ordering::Equal;
     if !is_equal {
         match ProxyCertInfo::try_from(cert) {
             Ok(x) => {
