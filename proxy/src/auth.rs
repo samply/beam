@@ -1,22 +1,25 @@
 use std::collections::HashMap;
 
 use axum::{
-    extract::{FromRequest, FromRequestParts},
+    extract::{FromRef, FromRequest, FromRequestParts},
     http::{header::{self, HeaderName}, request::Parts, Request, StatusCode},
 };
 use beam_lib::{AppId, AppOrProxyId};
-use shared::{
-    config, config_proxy
-};
 
 use tracing::{debug, Span, debug_span, warn};
 
+use crate::config::Config;
+
 pub(crate) struct AuthenticatedApp(pub(crate) AppId);
 
-impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedApp {
+impl<S> FromRequestParts<S> for AuthenticatedApp
+where
+    &'static Config: FromRef<S>,
+    S: Sync,
+{
     type Rejection = (StatusCode, [(HeaderName, &'static str); 1]);
 
-    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         const SCHEME: &str = "ApiKey";
         const UNAUTH_ERR: (StatusCode, [(HeaderName, &str); 1]) = (
             StatusCode::UNAUTHORIZED,
@@ -33,7 +36,8 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedApp {
                 warn!(auth_str, "Invalid app id");
                 return Err(UNAUTH_ERR);
             };
-            let Some(api_key_actual) = config::CONFIG_PROXY.api_keys.get(&client_id) else {
+            let config = <&'static Config>::from_ref(state);
+            let Some(api_key_actual) = config.api_keys.get(&client_id) else {
                 warn!("App {client_id} not registered in proxy");
                 return Err(UNAUTH_ERR);
             };
@@ -43,7 +47,7 @@ impl<S: Send + Sync> FromRequestParts<S> for AuthenticatedApp {
                 return Err(UNAUTH_ERR);
             }
             debug!("Request authenticated (ClientID {})", client_id);
-            Span::current().record("from", AppOrProxyId::App(client_id.clone()).hide_broker());
+            Span::current().record("from", client_id.hide_broker_name());
             Ok(Self(client_id))
         } else {
             warn!("No auth header provided");

@@ -5,11 +5,11 @@ use axum_extra::{headers::{authorization::Basic, Authorization}, TypedHeader};
 use beam_lib::ProxyId;
 use futures_core::Stream;
 use serde::{Serialize, Deserialize};
-use shared::{crypto_jwt::Authorized, Msg, config::CONFIG_CENTRAL};
+use shared::{crypto_jwt::Authorized, Msg};
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};
 use tracing::info;
 
-use crate::compare_client_server_version::log_version_mismatch;
+use crate::{compare_client_server_version::log_version_mismatch, serve::BrokerState};
 
 #[derive(Serialize)]
 struct HealthOutput {
@@ -70,13 +70,13 @@ impl ProxyStatus {
     }
 }
 
-pub(crate) fn router(health: Arc<RwLock<Health>>) -> Router {
+pub(crate) fn router(state: BrokerState) -> Router {
     Router::new()
         .route("/v1/health", get(handler))
         .route("/v1/health/proxies/{proxy_id}", get(proxy_health))
         .route("/v1/health/proxies", get(get_all_proxies))
         .route("/v1/control", get(get_control_tasks).layer(axum::middleware::from_fn(log_version_mismatch)))
-        .with_state(health)
+        .with_state(state)
 }
 
 // GET /v1/health
@@ -104,11 +104,11 @@ async fn get_all_proxies(State(state): State<Arc<RwLock<Health>>>) -> Json<Vec<P
 }
 
 async fn proxy_health(
-    State(state): State<Arc<RwLock<Health>>>,
+    State(BrokerState { health, config }): State<BrokerState>,
     Path(proxy): Path<ProxyId>,
     auth: TypedHeader<Authorization<Basic>>
 ) -> Result<(StatusCode, Json<serde_json::Value>), StatusCode> {
-    let Some(ref monitoring_key) = CONFIG_CENTRAL.monitoring_api_key else {
+    let Some(ref monitoring_key) = config.monitoring_api_key else {
         return Err(StatusCode::NOT_IMPLEMENTED);
     };
 
@@ -116,7 +116,7 @@ async fn proxy_health(
         return Err(StatusCode::UNAUTHORIZED)
     }
 
-    if let Some(reported_back) = state.read().await.proxies.get(&proxy) {
+    if let Some(reported_back) = health.read().await.proxies.get(&proxy) {
         if let Ok(last_disconnect) = reported_back.online_guard.try_lock().as_deref().copied() {
             Ok((StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
                 "last_disconnect": last_disconnect

@@ -17,21 +17,20 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::{AppId, AppOrProxyId, ProxyId};
 use shared::{
-    config::{self, CONFIG_PROXY}, config_proxy, config_shared::ConfigCrypto, crypto::{self, get_own_crypto_material, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType, DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage
+    crypto::{self, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType, DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage
 };
 use tokio::io::BufReader;
 use tracing::{debug, error, info, trace, warn};
 
-use crate::{auth::AuthenticatedApp, PROXY_TIMEOUT};
+use crate::{auth::AuthenticatedApp, config::Config, PROXY_TIMEOUT};
 
 #[derive(Clone, FromRef)]
 pub(crate) struct TasksState {
     pub(crate) client: SamplyHttpClient,
-    pub(crate) config: config_proxy::Config,
+    pub(crate) config: &'static Config,
 }
 
-pub(crate) fn router(client: &SamplyHttpClient) -> Router {
-    let config = config::CONFIG_PROXY.clone();
+pub(crate) fn router(client: &SamplyHttpClient, config: &'static Config) -> Router {
     let state = TasksState {
         client: client.clone(),
         config,
@@ -62,7 +61,7 @@ const ERR_FAKED_FROM: (StatusCode, &str) = (
 
 pub(crate) async fn forward_request(
     mut req: Request<axum::body::Body>,
-    config: &config_proxy::Config,
+    config: &Config,
     sender: &AppId,
     client: &SamplyHttpClient,
 ) -> Result<reqwest::Response, Response> {
@@ -83,7 +82,7 @@ pub(crate) async fn forward_request(
         HeaderValue::from_static(env!("SAMPLY_USER_AGENT")),
     );
     let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
-    let req = sign_request(encrypted_msg, parts, &config, &get_own_crypto_material()).await.map_err(IntoResponse::into_response)?;
+    let req = sign_request(encrypted_msg, parts, &config).await.map_err(IntoResponse::into_response)?;
     trace!("Requesting: {:?}", req);
     let resp = client.execute(req).await.map_err(|e| {
         if e.is_timeout() {
@@ -103,7 +102,7 @@ pub(crate) async fn forward_request(
 
 pub(crate) async fn handler_task(
     State(client): State<SamplyHttpClient>,
-    State(config): State<config_proxy::Config>,
+    State(config): State<&'static Config>,
     AuthenticatedApp(sender): AuthenticatedApp,
     headers: HeaderMap,
     req: Request,
@@ -131,7 +130,7 @@ pub(crate) async fn handler_task(
 
 async fn handler_tasks_nostream(
     client: SamplyHttpClient,
-    config: config_proxy::Config,
+    config: &Config,
     sender: AppId,
     req: Request,
 ) -> Result<Response, Response> {
@@ -152,7 +151,7 @@ async fn handler_tasks_nostream(
     // TODO: Always return application/jwt from server.
     if !bytes.is_empty() {
         if let Ok(json) = serde_json::from_slice::<Value>(&bytes) {
-            let json = to_server_error(validate_and_decrypt(json).await)?;
+            let json = to_server_error(validate_and_decrypt(json, config).await)?;
             trace!("Decrypted Msg: {:#?}", json);
             bytes = serde_json::to_vec(&json).unwrap().into();
             trace!(
@@ -177,7 +176,7 @@ async fn handler_tasks_nostream(
 
 async fn handler_tasks_stream(
     client: SamplyHttpClient,
-    config: config_proxy::Config,
+    config: &'static Config,
     sender: AppId,
     req: Request,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, Response> {
@@ -272,7 +271,7 @@ async fn handler_tasks_stream(
                             //     .data(format!("Broker sent invalid JSON: {event_as_str}")));
                             continue;
                         };
-                        let json = match validate_and_decrypt(json).await {
+                        let json = match validate_and_decrypt(json, config).await {
                             Ok(json) => json,
                             Err(err) => {
                                 warn!("Got an error decrypting Broker's reply: {err}");
@@ -322,12 +321,11 @@ pub(crate) fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, R
 pub async fn sign_request(
     body: EncryptedMessage,
     mut parts: Parts,
-    config: &config_proxy::Config,
-    private_key: &ConfigCrypto,
+    config: &Config,
 ) -> Result<reqwest::Request, (StatusCode, &'static str)> {
     let from = body.get_from();
 
-    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, &private_key.privkey_rs256)
+    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, &config.crypto.privkey_rs256)
         .await
         .map_err(|e| {
             error!("Crypto failed: {}", e);
@@ -351,7 +349,7 @@ pub async fn sign_request(
     let digest =
         crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig, &from)
             .map_err(|_| ERR_INTERNALCRYPTO)?;
-    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, &private_key.privkey_rs256)
+    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, &config.crypto.privkey_rs256)
         .await
         .map_err(|e| {
             error!("Crypto failed: {}", e);
@@ -377,7 +375,7 @@ pub async fn sign_request(
 }
 
 // This requires rustc 1.77
-pub(crate) async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBeamError> {
+pub(crate) async fn validate_and_decrypt(json: Value, config: &Config) -> Result<Value, SamplyBeamError> {
     // It might be possible to use MsgSigned directly instead but there are issues impl Deserialize for MsgSigned<EncryptedMessage>
     #[derive(Deserialize)]
     struct MsgSignedHelper {
@@ -386,7 +384,7 @@ pub(crate) async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBea
     if let Value::Array(arr) = json {
         let mut results = Vec::with_capacity(arr.len());
         for value in arr {
-            results.push(Box::pin(validate_and_decrypt(value)).await?);
+            results.push(Box::pin(validate_and_decrypt(value, config)).await?);
         }
         Ok(Value::Array(results))
     } else if json.is_object() {
@@ -395,7 +393,7 @@ pub(crate) async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBea
                 let msg = MsgSigned::<EncryptedMessage>::verify(&signed.jwt)
                     .await?
                     .msg;
-                Ok(serde_json::to_value(decrypt_msg(msg)?).expect("Should serialize fine"))
+                Ok(serde_json::to_value(decrypt_msg(msg, config)?).expect("Should serialize fine"))
             }
             Err(e) => Err(SamplyBeamError::JsonParseError(format!(
                 "Failed to parse broker response as a signed encrypted message. Err is {e}"
@@ -408,10 +406,10 @@ pub(crate) async fn validate_and_decrypt(json: Value) -> Result<Value, SamplyBea
     }
 }
 
-fn decrypt_msg<M: DecryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> {
+fn decrypt_msg<M: DecryptableMsg>(msg: M, config: &Config) -> Result<M::Output, SamplyBeamError> {
     msg.decrypt(
-        &AppOrProxyId::Proxy(CONFIG_PROXY.proxy_id.to_owned()),
-        &crypto::get_own_crypto_material().privkey_rsa,
+        &AppOrProxyId::Proxy(config.proxy_id.to_owned()),
+        &config.crypto.privkey_rsa,
     )
 }
 

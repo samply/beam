@@ -32,6 +32,7 @@ use uuid::Uuid;
 use crate::{crypto_jwt::JWT_VERIFICATION_OPTIONS, serde_helpers::*};
 // Reexport b64 implementation
 pub use jwt_simple::reexports::ct_codecs;
+pub use jwt_simple;
 pub use reqwest;
 pub use async_trait::async_trait;
 
@@ -48,12 +49,6 @@ mod traits;
 #[cfg(test)]
 mod serializing_compatibility_test;
 
-pub mod config;
-pub mod config_shared;
-// #[cfg(feature = "config-for-broker")]
-pub mod config_broker;
-// #[cfg(feature = "config-for-proxy")]
-pub mod config_proxy;
 #[cfg(feature = "expire_map")]
 pub mod expire_map;
 #[cfg(feature = "sockets")]
@@ -65,13 +60,12 @@ pub mod graceful_shutdown;
 pub mod http_client;
 pub mod middleware;
 
-pub mod examples;
-
 pub mod sse_event;
 
 // Reexports
 pub use openssl;
 
+pub const CLAP_FOOTER: &str = "For proxy support, environment variables HTTP_PROXY, HTTPS_PROXY, ALL_PROXY and NO_PROXY (and their lower-case variants) are supported. Usually, you want to set HTTP_PROXY *and* HTTPS_PROXY or set ALL_PROXY if both values are the same.\n\nFor updates and detailed usage instructions, visit https://github.com/samply/beam";
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct HowLongToBlock {

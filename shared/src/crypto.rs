@@ -1,15 +1,14 @@
 use async_trait::async_trait;
 use axum::{body::Body, http::Request, Json};
 
-use clap::error;
 use itertools::Itertools;
 use once_cell::sync::{Lazy, OnceCell};
 use openssl::{
-    asn1::{Asn1Time, Asn1TimeRef, Asn1Integer},
+    asn1::{Asn1Integer, Asn1IntegerRef, Asn1Time, Asn1TimeRef},
     error::ErrorStack,
     rand::rand_bytes,
     string::OpensslString,
-    x509::{X509, X509Crl, CrlStatus},
+    x509::{CrlStatus, X509Crl, X509},
 };
 use rsa::{
     pkcs1::DecodeRsaPublicKey, pkcs8::DecodePublicKey, RsaPrivateKey, RsaPublicKey, traits::PublicKeyParts,
@@ -29,8 +28,6 @@ use tracing::{debug, error, info, warn};
 
 use beam_lib::{AppOrProxyId, ProxyId};
 use crate::{
-    config,
-    config_shared::ConfigCrypto,
     crypto,
     errors::{CertificateInvalidReason, SamplyBeamError},
     EncryptedMsgTaskRequest, MsgTaskRequest,
@@ -504,9 +501,9 @@ async fn get_all_certs_from_cache_by_cname(cname: &ProxyId) -> Vec<CertificateCa
 }
 
 /// Wrapper for initializing the CA chain. Must be called *after* config initialization
-pub async fn init_ca_chain() -> Result<(), SamplyBeamError> {
+pub async fn init_ca_chain(root_cert: &X509) -> Result<(), SamplyBeamError> {
     let mut cache = CERT_CACHE.write().await;
-    cache.set_root_cert(&config::CONFIG_SHARED.root_cert);
+    cache.set_root_cert(root_cert);
     cache.set_im_cert().await?;
     Ok(())
 }
@@ -707,13 +704,10 @@ pub(crate) fn hash(data: &[u8]) -> Result<[u8; 32], SamplyBeamError> {
     Ok(digest)
 }
 
-pub fn get_own_crypto_material() -> &'static ConfigCrypto {
-    config::CONFIG_SHARED_CRYPTO.get().unwrap()
-}
 /* Utility Functions */
 
 /// Extracts the pem-encoded public key from a x509 certificate
-fn x509_cert_to_x509_public_key(cert: &X509) -> Result<Vec<u8>, SamplyBeamError> {
+pub fn x509_cert_to_x509_public_key(cert: &X509) -> Result<Vec<u8>, SamplyBeamError> {
     match cert.public_key() {
         Ok(key) => key.public_key_to_pem().or_else(|_| {
             Err(SamplyBeamError::SignEncryptError(
@@ -753,6 +747,28 @@ pub fn asn1_time_to_system_time(time: &Asn1TimeRef) -> Result<SystemTime, ErrorS
     let unix_time = Asn1Time::from_unix(0)?.diff(time)?;
     Ok(SystemTime::UNIX_EPOCH
         + Duration::from_secs(unix_time.days as u64 * 86400 + unix_time.secs as u64))
+}
+
+pub fn asn_str_to_vault_str(asn: &Asn1IntegerRef) -> Result<String, SamplyBeamError> {
+    let mut a = asn
+        .to_bn()
+        .map_err(|e| {
+            SamplyBeamError::SignEncryptError(format!("Unable to parse your certificate: {}", e))
+        })?
+        .to_hex_str()
+        .map_err(|e| {
+            SamplyBeamError::SignEncryptError(format!("Unable to parse your certificate: {}", e))
+        })?
+        .to_string()
+        .to_ascii_lowercase();
+
+    let mut i = 2;
+    while i < a.len() {
+        a.insert(i, ':');
+        i += 3;
+    }
+
+    Ok(a)
 }
 
 /// Checks if SystemTime::now() is between the not_before and the not_after dates of a x509 certificate
@@ -857,7 +873,7 @@ pub fn get_newest_cert(certs: &mut Vec<CryptoPublicPortion>) -> Option<CryptoPub
 /// 1) Does it match the private key?
 /// 2) Is the current date in the valid date range?
 /// 3) Select the newest of the remaining
-pub(crate) fn get_best_own_certificate(
+pub fn get_best_own_certificate(
     publics: impl Into<Vec<CryptoPublicPortion>>,
     private_rsa: &RsaPrivateKey,
 ) -> Option<CryptoPublicPortion> {
@@ -919,6 +935,14 @@ mod tests {
     use openssl::{x509::{X509NameBuilder, extension::{BasicConstraints, KeyUsage, SubjectKeyIdentifier}}, bn::{BigNum, MsbOption}, pkey::PKey, rsa::Rsa, hash::MessageDigest};
 
     use super::*;
+
+    #[test]
+    fn hex_str() {
+        let bn = BigNum::from_hex_str("440E0D94F36966391117BC9F867D84F0C48CFCB7").unwrap();
+        let input = Asn1Integer::from_bn(&bn).unwrap();
+        let expected = "44:0e:0d:94:f3:69:66:39:11:17:bc:9f:86:7d:84:f0:c4:8c:fc:b7";
+        assert_eq!(expected, asn_str_to_vault_str(&input).unwrap());
+    }
 
     fn build_x509(ttl: Duration) -> X509 {
         let mut builder = X509::builder().unwrap();

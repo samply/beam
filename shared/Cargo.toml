@@ -42,11 +42,8 @@ once_cell = "1"
 # Error handling
 thiserror = "2"
 
-# Command Line Interface
-clap = { version = "4", features = ["env", "derive"] }
 
 fundu = "2.0"
-regex = "1"
 
 # expire map dependencies
 dashmap =  { version = "6.0", optional = true}
@@ -58,5 +55,3 @@ async-trait = "0.1"
 expire_map = ["dep:dashmap"]
 sockets = ["expire_map", "beam-lib/sockets", "reqwest/json"]
 default = []
-config-for-proxy = []
-config-for-central = []

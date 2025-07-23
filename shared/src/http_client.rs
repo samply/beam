@@ -7,7 +7,7 @@ use openssl::x509::X509;
 use reqwest::{Certificate, Client, ClientBuilder};
 use tracing::{debug, info, warn};
 
-use crate::{config, errors::SamplyBeamError};
+use crate::{errors::SamplyBeamError};
 
 pub type SamplyHttpClient = reqwest::Client;
 

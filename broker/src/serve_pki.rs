@@ -11,7 +11,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use shared::{
-    config::CONFIG_CENTRAL,
     crypto_jwt::Authorized,
     errors::{CertificateInvalidReason, SamplyBeamError},
 };
