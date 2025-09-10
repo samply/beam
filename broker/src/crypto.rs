@@ -40,11 +40,11 @@ impl GetCertsFromPki {
         health: Arc<RwLock<Health>>,
         config: &Config,
     ) -> Result<Self, SamplyBeamError> {
-        let hyper_client = http_client::build(
+        let hyper_client = http_client::builder(
             &config.tls_ca_certificates,
             Some(Duration::from_secs(30)),
             Some(Duration::from_secs(20)),
-        )?;
+        ).build()?;
 
         Ok(Self {
             pki_realm: config.pki_realm.clone(),
