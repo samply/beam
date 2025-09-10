@@ -36,11 +36,27 @@ pub async fn main() -> anyhow::Result<()> {
     banner::print_banner();
 
     let config = Config::load()?;
-    let client = http_client::build(
+    let retry_policy = reqwest::retry::for_host(config.broker_uri.host_str().unwrap().to_string())
+        .classify_fn(|res|  {
+            if res.method() != reqwest::Method::GET {
+                return res.success();
+            }
+            if let Some(StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE | StatusCode::GATEWAY_TIMEOUT) = res.status() {
+                res.retryable()
+            } else if res.error().and_then(|e| e.downcast_ref::<reqwest::Error>()).is_some_and(reqwest::Error::is_timeout) {
+                res.retryable()
+            } else {
+                res.success()
+            }
+        })
+        .max_extra_load(2.0)
+        .max_retries_per_request(3);
+
+    let client = http_client::builder(
         &config.tls_ca_certificates,
         Some(Duration::from_secs(PROXY_TIMEOUT)),
         Some(Duration::from_secs(20)),
-    )?;
+    ).retry(retry_policy).build()?;
 
     if let Err(err) = retry_notify(|| get_broker_health(&config, &client), |err, dur| {
         warn!("Still trying to reach Broker: {err}. Retrying in {}s", dur.as_secs());
