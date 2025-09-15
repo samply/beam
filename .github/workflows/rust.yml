@@ -7,13 +7,13 @@ on:
 
 jobs:
   build-with-samply:
-    uses: samply/github-workflows/.github/workflows/rust.yml@main
+    uses: samply/github-workflows/.github/workflows/rust.yml@faster
     with:
       # For information on these variables, please refer to https://github.com/samply/github-workflows/tree/main/.github/workflows/rust.yml
       # Docker Hub name will be {image-prefix}{component}
       image-prefix: "samply/"
       components: '[ "beam-broker", "beam-proxy" ]'
-      architectures: '[ "amd64" ]'
+      architectures: '[ "amd64", "arm64" ]'
       #profile: debug
       test-via-script: true
       features: '[ "", "sockets" ]'
