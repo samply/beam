@@ -13,7 +13,7 @@ jobs:
       # Docker Hub name will be {image-prefix}{component}
       image-prefix: "samply/"
       components: '[ "beam-broker", "beam-proxy" ]'
-      architectures: '[ "amd64" ]'
+      architectures: '[ "amd64", "arm64" ]'
       #profile: debug
       test-via-script: true
       features: '[ "", "sockets" ]'
