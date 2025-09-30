@@ -1,12 +1,10 @@
 use std::net::{SocketAddr, IpAddr};
 
-use beam_lib::{AppOrProxyId, ProxyId};
 use crate::{
-    crypto::{self, CryptoPublicPortion},
-    errors::{CertificateInvalidReason, SamplyBeamError},
-    Msg, MsgEmpty, MsgId, MsgSigned,
+    crypto::{self, CryptoPublicPortion}, errors::{CertificateInvalidReason, SamplyBeamError}, Msg, MsgEmpty, MsgId, MsgProto, MsgSigned, IdHelper
 };
 use axum::{body::HttpBody, extract::{{FromRequest, ConnectInfo, FromRequestParts}, Request}, http::{header, request::Parts, uri::PathAndQuery, HeaderMap, HeaderName, Method, StatusCode, Uri}, BoxError, RequestExt};
+use beam_lib::{AppId, ProxyId};
 use jwt_simple::{
     claims::JWTClaims,
     prelude::{
@@ -30,10 +28,7 @@ const ERR_FROM: (StatusCode, &str) = (
 
 impl<S: Send + Sync, T> FromRequest<S> for MsgSigned<T>
 where
-    // these trait bounds are copied from `impl FromRequest for axum::Json`
-    // T: DeserializeOwned,
-    // B: axum::body::HttpBody + Send,
-    T: Serialize + DeserializeOwned + Msg,
+    T: DeserializeOwned + IdHelper + Serialize,
 {
     type Rejection = (StatusCode, &'static str);
 
@@ -46,11 +41,11 @@ where
             );
             ERR_SIG
         })?;
-        verify_with_extended_header(&mut parts, &token_without_extended_signature).await
+        verify_with_extended_header(&mut parts, token_without_extended_signature).await
     }
 }
 
-pub type Authorized = MsgSigned<MsgEmpty>;
+pub type Authorized = MsgSigned<MsgProto>;
 
 #[tracing::instrument]
 pub async fn extract_jwt<T: DeserializeOwned + Serialize>(
@@ -93,7 +88,8 @@ pub async fn extract_jwt<T: DeserializeOwned + Serialize>(
             warn!("Failed to decode {data:?} to JwtClaims<HeaderClaims>. Err: {e}");
             SamplyBeamError::RequestValidationFailed("Invalid JWT body in header".to_string())
         })?;
-        let proxy_id: ProxyId = json.custom.from.proxy_id();
+        // In the case where the JWT does not have a serial the HeaderClaim will always contain a proxy id
+        let proxy_id = ProxyId::new(json.custom.from)?;
         let mut certs = crypto::get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
             .await
             .into_iter()
@@ -128,9 +124,9 @@ pub const JWT_VERIFICATION_OPTIONS: Lazy<VerificationOptions> = Lazy::new(|| Ver
 /// The Message is encoded in the JWT Claims of the body which is a JWT.
 /// There is never really a [`MsgSigned`] involved in Deserializing the message as the signature is just copied from the body JWT.
 /// The token is verified by a key derived from the kid of the JWT in the Header which should also match the kid of the body JWT.
-pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
+pub async fn verify_with_extended_header<M: IdHelper + DeserializeOwned + Serialize>(
     req: &mut Parts,
-    token_without_extended_signature: &str,
+    token_without_extended_signature: String,
 ) -> Result<MsgSigned<M>, (StatusCode, &'static str)> {
     let ip = get_ip(req).await;
     let token_with_extended_signature = req.headers
@@ -155,8 +151,6 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
                 ERR_SIG
             })?;
 
-    Span::current().record("from", header_claims.custom.from.hide_broker());
-
     // Check extra digest
 
     let custom = header_claims.custom;
@@ -166,7 +160,7 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
     // Check if short token matches the long token
     let msg = pubkey
         .verify_token::<M>(
-            token_without_extended_signature,
+            &token_without_extended_signature,
             Some(JWT_VERIFICATION_OPTIONS.clone()),
         )
         .map_err(|e| {
@@ -182,11 +176,12 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
         warn!("Cannot split signature from body token");
         return Err(ERR_SIG);
     };
-    let sender_actual = msg.get_from();
+    let sender_actual = msg.app_or_proxy_id();
+    Span::current().record("from", msg.hide_broker_name());
 
     // Check if header claims is matching the body token
     let digest_actual =
-        make_extra_fields_digest(&req.method, &req.uri, &req.headers, &sig, &sender_actual)
+        make_extra_fields_digest(&req.method, &req.uri, &req.headers, &sig, sender_actual.to_owned())
             .map_err(|e| {
                 warn!("Got error in make_extra_fields_digest: {}", e);
                 ERR_SIG
@@ -201,7 +196,7 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
         return Err(ERR_SIG);
     }
 
-    if sender_actual.to_owned() != sender_claimed {
+    if sender_actual != &sender_claimed {
         warn!(
             "Sender did not match: expected {}, received {}",
             sender_claimed, sender_actual
@@ -210,7 +205,7 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
     }
 
     // Check if Messages' "from" attribute can be signed by the proxy
-    if !msg.get_from().can_be_signed_by(&proxy_public_info.beam_id) {
+    if !sender_actual.ends_with(proxy_public_info.beam_id.as_ref()) {
         warn!(
             "Received messages' \"from\" attribute which should not have been signed by the proxy."
         );
@@ -220,7 +215,7 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
 
     let msg_signed = MsgSigned {
         msg,
-        jwt: token_without_extended_signature.to_string(),
+        jwt: token_without_extended_signature,
     };
     Ok(msg_signed)
 }
@@ -245,7 +240,7 @@ pub struct HeaderClaim {
     #[serde(rename = "s")] //safes 2 bytes
     sig: String,
     #[serde(rename = "f")] //safes 3 bytes
-    from: AppOrProxyId,
+    from: String,
 }
 
 pub fn make_extra_fields_digest(
@@ -253,7 +248,7 @@ pub fn make_extra_fields_digest(
     uri: &Uri,
     headers: &HeaderMap,
     sig: &str,
-    from: &AppOrProxyId,
+    from: String,
 ) -> Result<HeaderClaim, SamplyBeamError> {
     const HEADERS_TO_SIGN: [HeaderName; 1] = [
         // header::HOST, // Host header differs from proxy to broker
@@ -279,14 +274,14 @@ pub fn make_extra_fields_digest(
         }
     }
     buf.append(&mut sig.as_bytes().to_vec());
-    buf.append(&mut from.to_string().as_bytes().to_vec());
+    buf.append(&mut from.as_bytes().to_vec());
 
     let digest = crypto::hash(&buf)?;
     let digest = base64::encode_block(&digest);
 
     Ok(HeaderClaim {
         sig: digest,
-        from: from.to_owned(),
+        from,
     })
 }
 

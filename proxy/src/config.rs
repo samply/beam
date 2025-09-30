@@ -103,7 +103,6 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBea
 impl Config {
     pub fn load() -> Result<Config, SamplyBeamError> {
         let cli_args = CliArgs::parse();
-        beam_lib::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
         let proxy_id = ProxyId::new(&cli_args.proxy_id).map_err(|e| {
             SamplyBeamError::ConfigurationFailed(format!(
                 "Invalid Beam ID \"{}\" supplied: {}",
@@ -215,7 +214,6 @@ mod tests {
             std::env::set_var(format!("APP_{app}_KEY"), key);
         }
         const BROKER_ID: &str = "broker.samply.de";
-        beam_lib::set_broker_id(BROKER_ID.to_string());
         let parsed = parse_apikeys(&ProxyId::new(&format!("proxy.{BROKER_ID}")).unwrap()).unwrap();
         assert_eq!(parsed.len(), apps.len() * 2);
     }

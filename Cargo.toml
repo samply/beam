@@ -4,7 +4,7 @@ resolver = "2"
 package.version = "0.10.0"
 
 [workspace.dependencies]
-beam-lib = { path = "./beam-lib", features = [ "strict-ids" ] }
+beam-lib = { path = "./beam-lib" }
 # Command Line Interface
 clap = { version = "4", features = ["env", "derive"] }
 

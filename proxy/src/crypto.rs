@@ -1,10 +1,10 @@
 use std::{fs, path::PathBuf};
 
 use axum::{body::Bytes, http::{header, request, Method, Request, StatusCode, Uri}, response::Response, Json};
-use beam_lib::{AppOrProxyId, ProxyId};
+use beam_lib::AppId;
 use rsa::{pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey}, pkcs8::DecodePrivateKey, RsaPrivateKey, RsaPublicKey};
 use shared::{
-    async_trait, crypto::{self, asn_str_to_vault_str, get_all_certs_and_clients_by_cname_as_pemstr, get_best_own_certificate, x509_cert_to_x509_public_key, CryptoPublicPortion, GetCerts, ProxyCertInfo}, errors::{CertificateInvalidReason, SamplyBeamError}, http_client::SamplyHttpClient, jwt_simple::prelude::RS256KeyPair, openssl::x509::X509, reqwest, EncryptedMessage, MsgEmpty
+    async_trait, crypto::{self, asn_str_to_vault_str, get_all_certs_and_clients_by_cname_as_pemstr, get_best_own_certificate, x509_cert_to_x509_public_key, CryptoPublicPortion, GetCerts, ProxyCertInfo}, errors::{CertificateInvalidReason, SamplyBeamError}, http_client::SamplyHttpClient, jwt_simple::prelude::RS256KeyPair, openssl::x509::X509, reqwest, EncryptedMessage, MsgEmpty, MsgProto
 };
 use tracing::{debug, info, warn, error};
 
@@ -24,9 +24,9 @@ impl GetCertsFromBroker {
             .build()
             .expect("To build request successfully");
 
-        let body = EncryptedMessage::MsgEmpty(MsgEmpty {
-            from: AppOrProxyId::Proxy(self.config.proxy_id.clone()),
-        });
+        let body = MsgProto {
+            from: self.config.proxy_id.clone(),
+        };
         let (parts, body) = Request::builder()
             .method(Method::GET)
             .uri(&uri)

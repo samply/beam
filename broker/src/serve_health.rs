@@ -133,7 +133,7 @@ async fn get_control_tasks(
     State(state): State<Arc<RwLock<Health>>>,
     proxy_auth: Authorized,
 ) -> Result<Sse<ForeverStream>, StatusCode> {
-    let proxy_id = proxy_auth.get_from().proxy_id(); 
+    let proxy_id = proxy_auth.msg.from;
     // Once this is freed the connection will be removed from the map of connected proxies again
     // This ensures that when the connection is dropped and therefore this response future the status of this proxy will be updated
     let status_mutex = state

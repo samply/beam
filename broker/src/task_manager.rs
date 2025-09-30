@@ -8,7 +8,7 @@ use futures_core::Stream;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde_json::json;
-use beam_lib::{AppOrProxyId, MsgEmpty, MsgId, WorkStatus};
+use beam_lib::{AppId, MsgEmpty, MsgId, WorkStatus};
 use shared::{
     HasWaitId, HowLongToBlock, Msg, MsgSigned,
     MsgState, MsgTaskRequest, MsgTaskResult, sse_event::SseEventType,
@@ -19,7 +19,7 @@ use tracing::{warn, error};
 pub trait Task {
     type Result;
 
-    fn get_results(&self) -> &HashMap<AppOrProxyId, Self::Result>;
+    fn get_results(&self) -> &HashMap<AppId, Self::Result>;
     /// Returns true if the value as been updated and false if it was a result from a new app
     fn insert_result(&mut self, result: Self::Result) -> bool;
     fn is_expired(&self) -> bool;
@@ -47,7 +47,7 @@ impl<State: MsgState> Task for MsgTaskRequest<State> {
         }
     }
 
-    fn get_results(&self) -> &HashMap<AppOrProxyId, Self::Result> {
+    fn get_results(&self) -> &HashMap<AppId, Self::Result> {
         &self.results
     }
 
@@ -56,7 +56,7 @@ impl<State: MsgState> Task for MsgTaskRequest<State> {
     }
 }
 
-static EMPTY_MAP: Lazy<HashMap<AppOrProxyId, ()>> = Lazy::new(|| {
+static EMPTY_MAP: Lazy<HashMap<AppId, ()>> = Lazy::new(|| {
     HashMap::with_capacity(0)
 });
 
@@ -64,7 +64,7 @@ static EMPTY_MAP: Lazy<HashMap<AppOrProxyId, ()>> = Lazy::new(|| {
 impl<State: MsgState> Task for shared::MsgSocketRequest<State> {
     type Result = ();
 
-    fn get_results(&self) -> &HashMap<AppOrProxyId, Self::Result> {
+    fn get_results(&self) -> &HashMap<AppId, Self::Result> {
         &EMPTY_MAP
     }
 
@@ -91,7 +91,7 @@ pub struct TaskManager<T: HasWaitId<MsgId> + Task + Msg> {
     tasks: DashMap<MsgId, MsgSigned<T>>,
     new_tasks: broadcast::Sender<MsgId>,
     /// Send the index at which the new result for the given Task was inserted
-    new_results: DashMap<MsgId, broadcast::Sender<AppOrProxyId>>,
+    new_results: DashMap<MsgId, broadcast::Sender<AppId>>,
 }
 
 impl<T: HasWaitId<MsgId> + Task + Msg + Send + Sync + 'static> TaskManager<T> {

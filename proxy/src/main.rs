@@ -4,10 +4,10 @@ use std::future::Future;
 use std::time::Duration;
 
 use axum::http::{header, HeaderValue, StatusCode};
-use beam_lib::AppOrProxyId;
+use beam_lib::AppId;
 use futures::future::Ready;
 use futures::{StreamExt, TryStreamExt};
-use shared::{reqwest, EncryptedMessage, MsgEmpty, PlainMessage};
+use shared::{reqwest, EncryptedMessage, MsgEmpty, MsgProto, PlainMessage};
 use shared::crypto::{CryptoPublicPortion, ProxyCertInfo};
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
@@ -146,9 +146,9 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: &'static Config) {
                 retries_this_min = 0;
                 reset_interval = Instant::now() + RETRY_INTERVAL;
             }
-            let body = EncryptedMessage::MsgEmpty(MsgEmpty {
-                from: AppOrProxyId::Proxy(config.proxy_id.clone()),
-            });
+            let body = MsgProto {
+                from: config.proxy_id.clone(),
+            };
             let (parts, body) = axum::http::Request::get(format!("{}v1/control", config.broker_uri))
                 .header(header::USER_AGENT, env!("SAMPLY_USER_AGENT"))
                 .body(body)

@@ -4,7 +4,7 @@ use reqwest::{Client, header::{self, HeaderValue, HeaderName}, Url, StatusCode, 
 use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
-use crate::{AddressingId, TaskRequest, MsgId, TaskResult, ProxyId};
+use crate::{AppId, MsgId, ProxyId, TaskRequest, TaskResult};
 #[cfg(feature = "sockets")]
 use crate::SocketTask;
 
@@ -71,7 +71,7 @@ impl BlockingOptions {
 
 impl BeamClient {
     /// Create a beam client based on the Authorization credentials and the beam proxy url
-    pub fn new(app: &AddressingId, key: &str, beam_proxy_url: Url) -> Self {
+    pub fn new(app: &AppId, key: &str, beam_proxy_url: Url) -> Self {
         let default_headers = [
             (header::AUTHORIZATION, HeaderValue::from_bytes(format!("ApiKey {app} {key}").as_bytes()).expect("This is a valid header value"))
         ].into_iter().collect();
@@ -187,13 +187,13 @@ impl BeamClient {
     /// Create a socket task for some other application to connect to
     /// For this to work both the beam proxy and beam broker need to have the sockets feature enabled.
     #[cfg(feature = "sockets")]
-    pub async fn create_socket(&self, destination: &AddressingId) -> Result<reqwest::Upgraded> {
+    pub async fn create_socket(&self, destination: &AppId) -> Result<reqwest::Upgraded> {
         self.create_socket_with_metadata(destination, serde_json::Value::Null).await
     }
 
     /// Same as `create_socket` but with associated (unencrypted) metadata.
     #[cfg(feature = "sockets")]
-    pub async fn create_socket_with_metadata(&self, destination: &AddressingId, metadata: impl Serialize) -> Result<reqwest::Upgraded> {
+    pub async fn create_socket_with_metadata(&self, destination: &AppId, metadata: impl Serialize) -> Result<reqwest::Upgraded> {
         const METADATA_HEADER: HeaderName = HeaderName::from_static("metadata");
         let url = self.beam_proxy_url
             .join(&format!("/v1/sockets/{destination}"))

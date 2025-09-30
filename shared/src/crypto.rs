@@ -26,7 +26,7 @@ use std::{
 use tokio::{sync::{mpsc, oneshot, RwLock}, time::Instant};
 use tracing::{debug, error, info, warn};
 
-use beam_lib::{AppOrProxyId, ProxyId};
+use beam_lib::{AppId, ProxyId};
 use crate::{
     crypto,
     errors::{CertificateInvalidReason, SamplyBeamError},
@@ -908,7 +908,7 @@ pub fn get_best_other_certificate(
 }
 
 pub async fn get_proxy_public_keys(
-    receivers: impl IntoIterator<Item = &AppOrProxyId>,
+    receivers: impl IntoIterator<Item = &AppId>,
 ) -> Result<Vec<RsaPublicKey>, SamplyBeamError> {
     let proxy_receivers: Vec<ProxyId> = receivers
         .into_iter()

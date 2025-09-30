@@ -1,6 +1,6 @@
 #![allow(unused_imports)]
 
-use beam_lib::{AppId, AppOrProxyId, ProxyId, FailureStrategy, WorkStatus};
+use beam_lib::{AppId, ProxyId, FailureStrategy, WorkStatus};
 use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
     XChaCha20Poly1305, XNonce,
@@ -16,9 +16,7 @@ use sha2::Sha256;
 use tracing::debug;
 
 use std::{
-    fmt::{Debug, Display},
-    ops::Deref,
-    time::{Duration, Instant, SystemTime}, net::SocketAddr, error::Error,
+    borrow::Cow, error::Error, fmt::{Debug, Display}, net::SocketAddr, ops::Deref, time::{Duration, Instant, SystemTime}
 };
 
 use rand::Rng;
@@ -74,13 +72,13 @@ pub struct HowLongToBlock {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub struct MsgSigned<M: Msg> {
+pub struct MsgSigned<M> {
     #[serde(skip)]
     pub msg: M,
     pub jwt: String,
 }
 
-impl<M: Msg + DeserializeOwned> MsgSigned<M> {
+impl<M: DeserializeOwned + Serialize> MsgSigned<M> {
     pub async fn verify(token: &str) -> Result<Self, SamplyBeamError> {
         let msg = extract_jwt(token).await?.2.custom;
 
@@ -92,20 +90,20 @@ impl<M: Msg + DeserializeOwned> MsgSigned<M> {
     }
 }
 
-pub static EMPTY_VEC_APPORPROXYID: Vec<AppOrProxyId> = Vec::new();
+pub static EMPTY_VEC_APPORPROXYID: Vec<AppId> = Vec::new();
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct MsgEmpty {
-    pub from: AppOrProxyId,
+    pub from: AppId,
 }
 
 impl Msg for MsgEmpty {
-    fn get_from(&self) -> &AppOrProxyId {
+    fn get_from(&self) -> &AppId {
         &self.from
     }
 
-    fn get_to(&self) -> &Vec<AppOrProxyId> {
+    fn get_to(&self) -> &Vec<AppId> {
         &EMPTY_VEC_APPORPROXYID
     }
 
@@ -114,6 +112,45 @@ impl Msg for MsgEmpty {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct MsgProto {
+    pub from: ProxyId,
+}
+
+pub trait IdHelper {
+    fn proxy_id_ref(&self) -> &str;
+    fn app_or_proxy_id(&self) -> &str;
+    fn hide_broker_name(&self) -> &str;
+}
+
+impl<M: Msg> IdHelper for M {
+    fn proxy_id_ref(&self) -> &str {
+        self.get_from().proxy_id_str()
+    }
+
+    fn app_or_proxy_id(&self) -> &str {
+        self.get_from().as_ref()
+    }
+
+    fn hide_broker_name(&self) -> &str {
+        self.get_from().hide_broker_name()
+    }
+}
+
+impl IdHelper for MsgProto {
+    fn proxy_id_ref(&self) -> &str {
+        self.from.as_ref()
+    }
+
+    fn app_or_proxy_id(&self) -> &str {
+        self.from.as_ref()
+    }
+
+    fn hide_broker_name(&self) -> &str {
+        self.from.hide_broker_name()
+    }
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
@@ -181,7 +218,7 @@ impl DecryptableMsg for EncryptedMessage {
 }
 
 impl<T: MsgState> Msg for MessageType<T> {
-    fn get_from(&self) -> &AppOrProxyId {
+    fn get_from(&self) -> &AppId {
         use MessageType::*;
         match self {
             MsgTaskRequest(m) => m.get_from(),
@@ -192,7 +229,7 @@ impl<T: MsgState> Msg for MessageType<T> {
         }
     }
 
-    fn get_to(&self) -> &Vec<AppOrProxyId> {
+    fn get_to(&self) -> &Vec<AppId> {
         use MessageType::*;
         match self {
             MsgTaskRequest(m) => m.get_to(),
@@ -225,7 +262,7 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
     #[allow(clippy::or_fun_call)]
     fn decrypt(
         self,
-        my_id: &AppOrProxyId,
+        my_id: &ProxyId,
         my_priv_key: &RsaPrivateKey,
     ) -> Result<Self::Output, SamplyBeamError> {
         let Some(Encrypted {
@@ -240,10 +277,10 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
             .get_to()
             .iter()
             .position(|entry| {
-                let entry_str = entry.to_string();
+                let entry_str = entry.as_ref();
 
-                let mut matched = entry_str.ends_with(&my_id.to_string());
-                matched &= match entry_str.find(&my_id.to_string()) {
+                let mut matched = entry_str.ends_with(my_id.as_ref());
+                matched &= match entry_str.find(my_id.as_ref()) {
                     Some(0) => true,                                      // Begins with id
                     Some(i) => entry_str.chars().nth(i - 1) == Some('.'), // Ends with id, but before is a separator (e.g. appId)
                     None => false,
@@ -346,17 +383,17 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
 }
 
 pub trait Msg: Serialize {
-    fn get_from(&self) -> &AppOrProxyId;
-    fn get_to(&self) -> &Vec<AppOrProxyId>;
+    fn get_from(&self) -> &AppId;
+    fn get_to(&self) -> &Vec<AppId>;
     fn get_metadata(&self) -> &Value;
 }
 
 impl<M: Msg> Msg for MsgSigned<M> {
-    fn get_from(&self) -> &AppOrProxyId {
+    fn get_from(&self) -> &AppId {
         self.msg.get_from()
     }
 
-    fn get_to(&self) -> &Vec<AppOrProxyId> {
+    fn get_to(&self) -> &Vec<AppId> {
         self.msg.get_to()
     }
 
@@ -366,11 +403,11 @@ impl<M: Msg> Msg for MsgSigned<M> {
 }
 
 impl<T: MsgState> Msg for MsgTaskRequest<T> {
-    fn get_from(&self) -> &AppOrProxyId {
+    fn get_from(&self) -> &AppId {
         &self.from
     }
 
-    fn get_to(&self) -> &Vec<AppOrProxyId> {
+    fn get_to(&self) -> &Vec<AppId> {
         &self.to
     }
 
@@ -380,11 +417,11 @@ impl<T: MsgState> Msg for MsgTaskRequest<T> {
 }
 
 impl<T: MsgState> Msg for MsgTaskResult<T> {
-    fn get_from(&self) -> &AppOrProxyId {
+    fn get_from(&self) -> &AppId {
         &self.from
     }
 
-    fn get_to(&self) -> &Vec<AppOrProxyId> {
+    fn get_to(&self) -> &Vec<AppId> {
         &self.to
     }
 
@@ -455,15 +492,15 @@ where
     State: MsgState,
 {
     pub id: MsgId,
-    pub from: AppOrProxyId,
-    pub to: Vec<AppOrProxyId>,
+    pub from: AppId,
+    pub to: Vec<AppId>,
     #[serde(flatten)]
     pub body: State,
     #[serde(with = "serialize_time", rename = "ttl")]
     pub expire: SystemTime,
     pub failure_strategy: FailureStrategy,
     #[serde(skip)]
-    pub results: HashMap<AppOrProxyId, MsgSigned<MsgTaskResult<State>>>,
+    pub results: HashMap<AppId, MsgSigned<MsgTaskResult<State>>>,
     pub metadata: Value,
 }
 
@@ -536,8 +573,8 @@ pub struct MsgTaskResult<State = Plain>
 where
     State: MsgState,
 {
-    pub from: AppOrProxyId,
-    pub to: Vec<AppOrProxyId>,
+    pub from: AppId,
+    pub to: Vec<AppId>,
     pub task: MsgId,
     pub status: WorkStatus,
     #[serde(flatten)]
@@ -644,8 +681,8 @@ impl<T: MsgState> MsgTaskRequest<T> {
 }
 impl MsgTaskRequest {
     pub fn new(
-        from: AppOrProxyId,
-        to: Vec<AppOrProxyId>,
+        from: AppId,
+        to: Vec<AppId>,
         body: String,
         failure_strategy: FailureStrategy,
         metadata: serde_json::Value,
@@ -678,54 +715,6 @@ impl<T: MsgState> PartialEq for MsgTaskRequest<T> {
 }
 impl<T: MsgState> Eq for MsgTaskRequest<T> {}
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MsgPing {
-    id: MsgId,
-    from: AppOrProxyId,
-    to: Vec<AppOrProxyId>,
-    nonce: [u8; 16],
-    metadata: Value,
-}
-
-impl MsgPing {
-    pub fn new(from: AppOrProxyId, to: AppOrProxyId) -> Self {
-        let mut nonce = [0; 16];
-        openssl::rand::rand_bytes(&mut nonce)
-            .expect("Critical Error: Failed to generate random byte array.");
-        MsgPing {
-            id: MsgId::new(),
-            from,
-            to: vec![to],
-            nonce,
-            metadata: json!(null),
-        }
-    }
-}
-
-impl Msg for MsgPing {
-    fn get_from(&self) -> &AppOrProxyId {
-        &self.from
-    }
-
-    fn get_to(&self) -> &Vec<AppOrProxyId> {
-        &self.to
-    }
-
-    fn get_metadata(&self) -> &Value {
-        &self.metadata
-    }
-}
-
-pub fn try_read<T>(map: &HashMap<String, String>, key: &str) -> Option<T>
-where
-    T: FromStr,
-{
-    map.get(key).and_then(|value| match value.parse() {
-        Ok(v) => Some(v),
-        Err(_) => None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -734,9 +723,8 @@ mod tests {
     #[test]
     fn encrypt_decrypt_task() {
         //Create Task
-        beam_lib::set_broker_id("broker.samply.de".to_string());
-        let p1_id = AppOrProxyId::App(AppId::new("app.proxy1.broker.samply.de").unwrap());
-        let p2_id = AppOrProxyId::App(AppId::new("app.proxy2.broker.samply.de").unwrap());
+        let p1_id = AppId::new("app.proxy1.broker.samply.de").unwrap();
+        let p2_id = AppId::new("app.proxy2.broker.samply.de").unwrap();
         let from = p1_id.clone();
         let to = vec![p1_id.clone(), p2_id.clone()];
         let expiry = SystemTime::now() + Duration::from_secs(60);
@@ -771,10 +759,10 @@ mod tests {
         // Decrypt for both proxies
         let msg_p1_decr = msg_encr
             .clone()
-            .decrypt(&p1_id, &p1_private)
+            .decrypt(&p1_id.proxy_id(), &p1_private)
             .expect("Cannot decrypt message");
         let msg_p2_decr = msg_encr
-            .decrypt(&p2_id, &p2_private)
+            .decrypt(&p2_id.proxy_id(), &p2_private)
             .expect("Cannot decrypt message");
 
         assert_eq!(msg_p1_decr, msg_p2_decr);
@@ -783,9 +771,8 @@ mod tests {
 
     #[test]
     fn encrypt_decrypt_result() {
-        beam_lib::set_broker_id("broker.samply.de".to_string());
-        let p1_id = AppOrProxyId::App(AppId::new("app.proxy1.broker.samply.de").unwrap());
-        let p2_id = AppOrProxyId::App(AppId::new("app.proxy2.broker.samply.de").unwrap());
+        let p1_id = AppId::new("app.proxy1.broker.samply.de").unwrap();
+        let p2_id = AppId::new("app.proxy2.broker.samply.de").unwrap();
         let from = p1_id.clone();
         let to = vec![p1_id.clone(), p2_id.clone()];
         let status = WorkStatus::Succeeded;
@@ -817,11 +804,11 @@ mod tests {
         // Decrypt for both proxies
         let msg_p1_decr = msg_encr
             .clone()
-            .decrypt(&p1_id, &p1_private)
+            .decrypt(&p1_id.proxy_id(), &p1_private)
             .expect("Cannot decrypt message");
         let msg_p2_decr = msg_encr
             .clone()
-            .decrypt(&p2_id, &p2_private)
+            .decrypt(&p2_id.proxy_id(), &p2_private)
             .expect("Cannot decrypt message");
 
         assert_eq!(msg_p1_decr, msg_p2_decr);

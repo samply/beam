@@ -15,9 +15,9 @@ use httpdate::fmt_http_date;
 use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
-use beam_lib::{AppId, AppOrProxyId, ProxyId};
+use beam_lib::{AppId, ProxyId};
 use shared::{
-    crypto::{self, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType, DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage
+    crypto::{self, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType, DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, IdHelper, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage
 };
 use tokio::io::BufReader;
 use tracing::{debug, error, info, trace, warn};
@@ -318,12 +318,12 @@ pub(crate) fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, R
 }
 
 // TODO: This could be a middleware
-pub async fn sign_request(
-    body: EncryptedMessage,
+pub async fn sign_request<M: Serialize + IdHelper>(
+    body: M,
     mut parts: Parts,
     config: &Config,
 ) -> Result<reqwest::Request, (StatusCode, &'static str)> {
-    let from = body.get_from();
+    let from = body.app_or_proxy_id();
 
     let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, &config.crypto.privkey_rs256)
         .await
@@ -347,7 +347,7 @@ pub async fn sign_request(
             .expect("Internal error: Unable to format system time"),
     );
     let digest =
-        crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig, &from)
+        crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig, from.to_owned())
             .map_err(|_| ERR_INTERNALCRYPTO)?;
     let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, &config.crypto.privkey_rs256)
         .await
@@ -408,7 +408,7 @@ pub(crate) async fn validate_and_decrypt(json: Value, config: &Config) -> Result
 
 fn decrypt_msg<M: DecryptableMsg>(msg: M, config: &Config) -> Result<M::Output, SamplyBeamError> {
     msg.decrypt(
-        &AppOrProxyId::Proxy(config.proxy_id.to_owned()),
+        &config.proxy_id,
         &config.crypto.privkey_rsa,
     )
 }
