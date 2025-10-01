@@ -1,6 +1,6 @@
 use std::{collections::HashMap, convert::Infallible, marker::PhantomData, sync::Arc, time::{Duration, SystemTime}};
 
-use axum::{extract::{Path, State}, http::StatusCode, response::{sse::{Event, KeepAlive}, Response, Sse}, routing::get, Json, Router};
+use axum::{extract::{Path, State}, http::StatusCode, response::{sse::{Event, KeepAlive, KeepAliveStream}, Response, Sse}, routing::get, Json, Router};
 use axum_extra::{headers::{authorization::Basic, Authorization}, TypedHeader};
 use beam_lib::ProxyId;
 use futures_core::Stream;
@@ -132,7 +132,7 @@ async fn proxy_health(
 async fn get_control_tasks(
     State(state): State<Arc<RwLock<Health>>>,
     proxy_auth: Authorized,
-) -> Result<Sse<ForeverStream>, StatusCode> {
+) -> Result<Sse<KeepAliveStream<ForeverStream>>, StatusCode> {
     let proxy_id = proxy_auth.get_from().proxy_id(); 
     // Once this is freed the connection will be removed from the map of connected proxies again
     // This ensures that when the connection is dropped and therefore this response future the status of this proxy will be updated
