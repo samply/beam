@@ -86,6 +86,43 @@ services:
     secrets:
       - proxy2.pem
       - root.crt.pem
+
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "1025:1025" # SMTP port
+      - "8025:8025" # Web UI
+    profiles:
+      - cert-manager
+
+  cert-ui:
+    image: samply/beam-cert-manager
+    ports:
+      - 8000:8000
+      - 3000:3000
+    environment:
+      BROKER_URL: http://broker:8080
+      VAULT_URL: http://vault:8200
+      CSR_DIR: /pki
+      SMTP_URL: smtp://mailhog:1025
+      DB_DIR: /pki/db
+      BROKER_MONITORING_KEY: ${BROKER_MONITORING_KEY}
+      PKI_DEFAULT_ROLE: hd-dot-dktk-dot-com
+      PUBLIC_BASE_URL: http://localhost:3000
+      ADMIN_ADDR: 0.0.0.0:8000
+      BROKER_ID: broker
+      RUST_LOG: ${RUST_LOG}
+    volumes:
+      - ./pki:/pki
+    secrets:
+      - pki.secret
+    depends_on:
+      - vault
+      - broker
+      - mailhog
+    profiles:
+      - cert-manager
+
 secrets:
   pki.secret:
     file: ./pki/pki.secret
