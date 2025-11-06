@@ -36,14 +36,8 @@ pub fn init_logger(log_opts: &LogOptions) -> Result<Option<WorkerGuard>, InitErr
         (registry.with(None), None)
     };
 
-    let stdout_layer = fmt::layer()
-        .fmt_fields(debug_fn(|w, f, v| match f.name() {
-            "from" | "message" => write!(w, "{v:?}"),
-            _ => write!(w, "{f}={v:?} "),
-        }));
-
     registry
-        .with(stdout_layer)
+        .with(fmt::layer())
         .init();
 
     Ok(guard)

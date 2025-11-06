@@ -17,9 +17,9 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::{AppId, AppOrProxyId, ProxyId};
 use shared::{
-    crypto::{self, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType, DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage
+    DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage, crypto::{self, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, format_to_without_broker, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType
 };
-use tokio::io::BufReader;
+use tokio::{io::BufReader, task::id};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{auth::AuthenticatedApp, config::Config, PROXY_TIMEOUT};
@@ -82,6 +82,13 @@ pub(crate) async fn forward_request(
         HeaderValue::from_static(env!("SAMPLY_USER_AGENT")),
     );
     let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
+    match &encrypted_msg {
+        MessageType::MsgTaskRequest(task) => info!(from = %sender.hide_broker_name(), to = %format_to_without_broker(&task.to), id = %task.id, "Sending task"),
+        MessageType::MsgTaskResult(result) => info!(from = %sender.hide_broker_name(), r#for = %result.task, "Submitting result"),
+        #[cfg(feature = "sockets")]
+        MessageType::MsgSocketRequest(socket_req) => info!(from = %socket_req.get_from().hide_broker(), to = %format_to_without_broker(&socket_req.get_to()), id = %socket_req.id, "Submitting socket request"),
+        MessageType::MsgEmpty(..) => {},
+    };
     let req = sign_request(encrypted_msg, parts, &config).await.map_err(IntoResponse::into_response)?;
     trace!("Requesting: {:?}", req);
     let resp = client.execute(req).await.map_err(|e| {
@@ -393,6 +400,13 @@ pub(crate) async fn validate_and_decrypt(json: Value, config: &Config) -> Result
                 let msg = MsgSigned::<EncryptedMessage>::verify(&signed.jwt)
                     .await?
                     .msg;
+                match &msg {
+                    MessageType::MsgTaskRequest(task) => info!(from = %task.get_from().hide_broker(), id = %task.id, "New task"),
+                    MessageType::MsgTaskResult(result) => info!(from = %result.get_from().hide_broker(), r#for = %result.task, "New result"),
+                    #[cfg(feature = "sockets")]
+                    MessageType::MsgSocketRequest(socket_req) => info!(from = %socket_req.get_from().hide_broker(), id = %socket_req.id, "New socket request"),
+                    MessageType::MsgEmpty(..) => {},
+                };
                 Ok(serde_json::to_value(decrypt_msg(msg, config)?).expect("Should serialize fine"))
             }
             Err(e) => Err(SamplyBeamError::JsonParseError(format!(

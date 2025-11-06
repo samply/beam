@@ -16,9 +16,7 @@ use futures_core::{stream, Stream};
 use serde::Deserialize;
 use beam_lib::WorkStatus;
 use shared::{
-    errors::SamplyBeamError, sse_event::SseEventType,
-    EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg, MsgEmpty,
-    MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, EMPTY_VEC_APPORPROXYID, serde_helpers::DerefSerializer,
+    EMPTY_VEC_APPORPROXYID, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, errors::SamplyBeamError, format_to_without_broker, serde_helpers::DerefSerializer, sse_event::SseEventType
 };
 use tokio::{
     sync::{
@@ -339,12 +337,10 @@ async fn post_task(
     State(state): State<TasksState>,
     msg: MsgSigned<EncryptedMsgTaskRequest>,
 ) -> Result<(StatusCode, impl IntoResponse), StatusCode> {
-        // let id = MsgId::new();
-    // msg.id = id;
-    // TODO: Check if ID is taken
+    info!(id = %msg.msg.id, from = %msg.msg.from.hide_broker(), to = %format_to_without_broker(&msg.msg.to), "New task");
     trace!(
-        "Client {} with IP {addr} is creating task {:?}",
-        msg.msg.from, msg
+        "Client {} with IP {addr} is creating task {msg:?}",
+        msg.msg.from,
     );
     let id = msg.msg.id;
     state.task_manager.post_task(msg)?;
@@ -361,6 +357,7 @@ async fn put_result(
     State(state): State<TasksState>,
     result: MsgSigned<EncryptedMsgTaskResult>,
 ) -> Result<StatusCode, (StatusCode, &'static str)> {
+    info!(r#for = %result.msg.task, from = %result.msg.from.hide_broker(), status = ?result.msg.status, "New result");
     trace!("Called: Task {:?}, {:?} by {addr}", task_id, result);
     if task_id != result.msg.task {
         return Err((
@@ -375,7 +372,6 @@ async fn put_result(
             "AppID supplied in URL and signed message do not match.",
         ));
     }
-
 
     let status = if state.task_manager.put_result(&task_id, result)? {
         StatusCode::NO_CONTENT

@@ -4,9 +4,9 @@ use axum::{extract::{Path, Request, State}, http::{header, request::Parts, Heade
 use bytes::BufMut;
 use hyper_util::rt::TokioIo;
 use serde::{Serialize, Serializer, ser::SerializeSeq};
-use shared::{crypto_jwt::Authorized, expire_map::LazyExpireMap, serde_helpers::DerefSerializer, Encrypted, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned, MsgSocketRequest};
+use shared::{format_to_without_broker, crypto_jwt::Authorized, expire_map::LazyExpireMap, serde_helpers::DerefSerializer, Encrypted, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned, MsgSocketRequest};
 use tokio::sync::{RwLock, broadcast::{Sender, self}, oneshot};
-use tracing::{debug, log::error, warn};
+use tracing::{debug, info, log::error, warn};
 
 use crate::task_manager::{TaskManager, Task};
 
@@ -69,6 +69,7 @@ async fn post_socket_request(
     state: State<SocketState>,
     msg: MsgSigned<MsgSocketRequest<Encrypted>>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    info!(from = %msg.get_from().hide_broker(), to = %format_to_without_broker(&msg.get_to()), id = %msg.msg.id, "Submitted socket request");
     let msg_id = msg.wait_id();
     state.task_manager.post_task(msg)?;
 
@@ -90,6 +91,7 @@ async fn connect_socket(
         Ok(msg) => msg.msg,
         Err(e) => return Ok(e.into_response()),
     };
+    info!(from = %msg.get_from().hide_broker(), id = %task_id, "Connected to socket request");
     {
         let task = state.task_manager.get(&task_id)?;
         // Allowed to connect are the issuer of the task and the recipient
