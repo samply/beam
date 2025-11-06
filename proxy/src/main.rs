@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use axum::http::{header, HeaderValue, StatusCode};
 use beam_lib::AppOrProxyId;
+use clap::Parser;
 use futures::future::Ready;
 use futures::{StreamExt, TryStreamExt};
 use shared::{reqwest, EncryptedMessage, MsgEmpty, PlainMessage};
@@ -15,7 +16,7 @@ use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 use tryhard::{backoff_strategies::ExponentialBackoff, RetryFuture, RetryFutureConfig};
 
-use crate::config::Config;
+use crate::config::{CliArgs, Config};
 use crate::serve_tasks::sign_request;
 
 mod auth;
@@ -32,10 +33,11 @@ pub(crate) const PROXY_TIMEOUT: u64 = 120;
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
-    shared::logger::init_logger()?;
+    let args = CliArgs::parse();
+    let _log_guard = shared::logger::init_logger(&args.log_options)?;
     banner::print_banner();
 
-    let config = Config::load()?;
+    let config = Config::load(args)?;
     let retry_policy = reqwest::retry::for_host(config.broker_uri.host_str().unwrap().to_string())
         .classify_fn(|res|  {
             if res.method() != reqwest::Method::GET {
@@ -90,11 +92,11 @@ pub async fn main() -> anyhow::Result<()> {
 }
 
 fn retry_notify<F, T, Fut, E, Cb>(f: F, on_error: Cb) -> RetryFuture<F, Fut, ExponentialBackoff, Box<dyn Fn(u32, Option<Duration>, &E) -> Ready<()>>>
-where 
+where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, E>>,
     Cb: Fn(&E, Duration) + 'static,
-    
+
 {
     tryhard::retry_fn(f)
         .retries(100)

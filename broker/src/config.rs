@@ -5,7 +5,7 @@ use crate::{
 };
 use axum::http::Uri;
 use clap::Parser;
-use shared::{openssl::x509::X509, reqwest::{self, Url}};
+use shared::{logger::LogOptions, openssl::x509::X509, reqwest::{self, Url}};
 use std::str::FromStr;
 use tracing::info;
 
@@ -16,7 +16,7 @@ use tracing::info;
     arg_required_else_help(true),
     after_help(crate::CLAP_FOOTER)
 )]
-struct CliArgs {
+pub struct CliArgs {
     /// Local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8080").unwrap())]
     bind_addr: SocketAddr,
@@ -52,6 +52,9 @@ struct CliArgs {
     /// The API key for accessing monitoring endpoints of the broker
     #[clap(long, env, value_parser)]
     monitoring_api_key: Option<String>,
+
+    #[clap(flatten)]
+    pub log_options: LogOptions,
 }
 
 #[derive(Debug)]
@@ -66,8 +69,7 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load() -> Result<Self, SamplyBeamError> {
-        let cli_args = CliArgs::parse();
+    pub fn load(cli_args: CliArgs) -> Result<Self, SamplyBeamError> {
         beam_lib::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
         let pki_token = read_to_string(&cli_args.pki_apikey_file)
             .map_err(|e| {

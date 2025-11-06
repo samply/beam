@@ -14,6 +14,7 @@ mod compare_client_server_version;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use clap::Parser;
 use crypto::GetCertsFromPki;
 use serve_health::{Health, InitStatus};
 use once_cell::sync::Lazy;
@@ -21,13 +22,14 @@ use shared::{errors::SamplyBeamError, openssl::x509::X509, *};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
-use crate::serve::BrokerState;
+use crate::{config::CliArgs, serve::BrokerState};
 
 #[tokio::main]
 pub async fn main() -> anyhow::Result<()> {
-    shared::logger::init_logger()?;
+    let args = CliArgs::parse();
+    let _log_guard = shared::logger::init_logger(&args.log_options)?;
     banner::print_banner();
-    let config = config::Config::load()?;
+    let config = config::Config::load(args)?;
 
     let health = Arc::new(RwLock::new(Health::default()));
     let cert_getter = GetCertsFromPki::new(health.clone(), &config)?;
