@@ -2,7 +2,7 @@ use clap::Parser;
 use regex::Regex;
 use reqwest::Url;
 use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
-use shared::{errors::SamplyBeamError, jwt_simple::prelude::RS256KeyPair, openssl::x509::X509, reqwest};
+use shared::{errors::SamplyBeamError, jwt_simple::prelude::RS256KeyPair, logger::LogOptions, openssl::x509::X509, reqwest};
 
 use std::{
     collections::HashMap,
@@ -70,6 +70,9 @@ pub struct CliArgs {
     /// samply.pki: Path to CA Root certificate
     #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
     rootcert_file: PathBuf,
+
+    #[clap(flatten)]
+    pub log_options: LogOptions,
 }
 
 pub const APP_PREFIX: &str = "APP";
@@ -101,8 +104,7 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBea
 }
 
 impl Config {
-    pub fn load() -> Result<Config, SamplyBeamError> {
-        let cli_args = CliArgs::parse();
+    pub fn load(cli_args: CliArgs) -> Result<Config, SamplyBeamError> {
         beam_lib::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
         let proxy_id = ProxyId::new(&cli_args.proxy_id).map_err(|e| {
             SamplyBeamError::ConfigurationFailed(format!(

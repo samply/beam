@@ -1,36 +1,44 @@
+use std::{io, path::PathBuf};
+
 use tracing::{debug, dispatcher::SetGlobalDefaultError, Level};
-use tracing_subscriber::fmt::format::{debug_fn, self};
+use tracing_appender::{non_blocking::WorkerGuard, rolling::{InitError, Rotation}};
+use tracing_subscriber::{fmt::{self, format::{self, debug_fn}}, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-#[allow(clippy::if_same_then_else)] // The redundant if-else serves documentation purposes
-pub fn init_logger() -> Result<(), SetGlobalDefaultError> {
-    let subscriber = tracing_subscriber::FmtSubscriber::builder()
-        .fmt_fields(debug_fn(|w, f, v| match f.name() {
-            "from" | "message" => write!(w, "{v:?}"),
-            _ => write!(w, "{f}={v:?} "),
-        }))
-        .with_max_level(Level::DEBUG);
+#[derive(Debug, clap::Args)]
+pub struct LogOptions {
+    #[clap(long, env)]
+    /// Directory to store log files in.
+    pub log_dir: Option<PathBuf>,
 
-    // TODO: Reduce code complexity.
-    let env_filter = match std::env::var("RUST_LOG") {
-        Ok(env) if !env.is_empty() => {
-            if env.contains("hyper=") {
-                env
-            } else {
-                format!("{env},hyper=info")
-            }
-        }
-        _ => {
-            if cfg!(debug_assertions) {
-                "info,hyper=info".to_string()
-            } else {
-                "info,hyper=info".to_string()
-            }
-        }
+    /// Number of days to retain log files.
+    #[clap(long, env, default_value_t = 30)]
+    pub log_retention: usize,
+}
+
+pub fn init_logger(log_opts: &LogOptions) -> Result<Option<WorkerGuard>, InitError> {
+    let env_filter = EnvFilter::builder()
+        .with_default_directive(Level::INFO.into())
+        .from_env_lossy();
+    let registry = tracing_subscriber::registry()
+        .with(env_filter);
+    let (registry, guard) = if let LogOptions { log_dir: Some(log_dir), log_retention } = log_opts {
+        let appender = tracing_appender::rolling::Builder::new()
+            .max_log_files(*log_retention)
+            .filename_suffix("log")
+            .rotation(Rotation::DAILY)
+            .build(log_dir)?;
+        let (appender, guard) = tracing_appender::non_blocking(appender);
+        let json_layer = fmt::layer()
+            .json()
+            .with_writer(appender);
+        (registry.with(Some(json_layer)), Some(guard))
+    } else {
+        (registry.with(None), None)
     };
 
-    let subscriber = subscriber.with_env_filter(env_filter.clone()).finish();
-    tracing::subscriber::set_global_default(subscriber)?;
+    registry
+        .with(fmt::layer())
+        .init();
 
-    debug!("Logging initialized with env_filter {env_filter}.");
-    Ok(())
+    Ok(guard)
 }

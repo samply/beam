@@ -169,6 +169,7 @@ function stop {
 function clean {
     docker compose --profile "*" down
     rm -fv pki/*.pem pki/*.json pki/pki.secret
+    sudo rm -fv logs/*/*.log
     pki/pki clean
 }
 

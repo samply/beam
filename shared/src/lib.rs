@@ -716,6 +716,20 @@ impl Msg for MsgPing {
     }
 }
 
+pub fn format_to_without_broker(to: &[AppOrProxyId]) -> impl Display + use<'_> {
+    struct Helper<'a> {
+        to: &'a [AppOrProxyId],
+    }
+
+    impl<'a> std::fmt::Display for Helper<'a> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_list().entries(self.to.iter().map(|to| to.hide_broker())).finish()
+        }
+    }
+
+    Helper { to }
+}
+
 pub fn try_read<T>(map: &HashMap<String, String>, key: &str) -> Option<T>
 where
     T: FromStr,

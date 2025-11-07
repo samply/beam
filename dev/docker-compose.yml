@@ -31,7 +31,10 @@ services:
       BIND_ADDR: 0.0.0.0:8080
       MONITORING_API_KEY: ${BROKER_MONITORING_KEY}
       RUST_LOG: ${RUST_LOG}
+      LOG_DIR: /logs
       # ALL_PROXY: http://mitmproxy:8080
+    volumes:
+      - ./logs/broker:/logs
     secrets:
       - pki.secret
       - dummy.pem
@@ -60,7 +63,10 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
+      LOG_DIR: /logs
       # ALL_PROXY: http://mitmproxy:8080
+    volumes:
+      - ./logs/proxy1:/logs
     secrets:
       - proxy1.pem
       - root.crt.pem
@@ -82,7 +88,10 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
       RUST_LOG: ${RUST_LOG}
+      LOG_DIR: /logs
       # ALL_PROXY: http://mitmproxy:8080
+    volumes:
+      - ./logs/proxy2:/logs
     secrets:
       - proxy2.pem
       - root.crt.pem
