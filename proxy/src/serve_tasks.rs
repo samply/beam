@@ -84,7 +84,7 @@ pub(crate) async fn forward_request(
     let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
     match &encrypted_msg {
         MessageType::MsgTaskRequest(task) => info!(from = %sender.hide_broker_name(), to = %format_to_without_broker(&task.to), id = %task.id, "Sending task"),
-        MessageType::MsgTaskResult(result) => info!(from = %sender.hide_broker_name(), r#for = %result.task, "Submitting result"),
+        MessageType::MsgTaskResult(result) => info!(from = %sender.hide_broker_name(), for = %result.task, "Submitting result"),
         #[cfg(feature = "sockets")]
         MessageType::MsgSocketRequest(socket_req) => info!(from = %socket_req.get_from().hide_broker(), to = %format_to_without_broker(&socket_req.get_to()), id = %socket_req.id, "Submitting socket request"),
         MessageType::MsgEmpty(..) => {},
@@ -402,7 +402,7 @@ pub(crate) async fn validate_and_decrypt(json: Value, config: &Config) -> Result
                     .msg;
                 match &msg {
                     MessageType::MsgTaskRequest(task) => info!(from = %task.get_from().hide_broker(), id = %task.id, "New task"),
-                    MessageType::MsgTaskResult(result) => info!(from = %result.get_from().hide_broker(), r#for = %result.task, "New result"),
+                    MessageType::MsgTaskResult(result) => info!(from = %result.get_from().hide_broker(), for = %result.task, "New result"),
                     #[cfg(feature = "sockets")]
                     MessageType::MsgSocketRequest(socket_req) => info!(from = %socket_req.get_from().hide_broker(), id = %socket_req.id, "New socket request"),
                     MessageType::MsgEmpty(..) => {},
