@@ -357,7 +357,7 @@ async fn put_result(
     State(state): State<TasksState>,
     result: MsgSigned<EncryptedMsgTaskResult>,
 ) -> Result<StatusCode, (StatusCode, &'static str)> {
-    info!(r#for = %result.msg.task, from = %result.msg.from.hide_broker(), status = ?result.msg.status, "New result");
+    info!(for = %result.msg.task, from = %result.msg.from.hide_broker(), status = ?result.msg.status, "New result");
     trace!("Called: Task {:?}, {:?} by {addr}", task_id, result);
     if task_id != result.msg.task {
         return Err((
