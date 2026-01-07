@@ -21,8 +21,8 @@ tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = [] }
 bytes = "1.4"
 
-# HTTP client with proxy support
-reqwest = { version = "0.13", features = ["stream"] }
+# This includes all default features of reqwest but uses native-tls aka openssl as we depend on it for encryption anyways
+reqwest = { workspace = true, features = ["stream", "native-tls", "charset", "system-proxy", "http2"] }
 
 # Logging
 tracing = "0.1"
