@@ -24,16 +24,16 @@ pub enum BeamError {
     #[error("The following receivers had invalid certificates which is why the request has been canceld: {0:?}")]
     InvalidReceivers(Vec<ProxyId>),
     #[error("Other handler specific error: {0}")]
-    Other(Box<dyn std::error::Error + Send + Sync>)
+    Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl BeamError {
-    fn other<T: Into<Box<dyn std::error::Error + Send + Sync + 'static>>>(e: T) -> Self {
+    pub fn other<T: Into<Box<dyn std::error::Error + Send + Sync + 'static>>>(e: T) -> Self {
         Self::Other(e.into())
     }
 }
 
-pub type Result<T> = std::result::Result<T, BeamError>;
+pub type Result<T, E = BeamError> = std::result::Result<T, E>;
 
 /// Long polling blocking options
 /// 
@@ -261,6 +261,25 @@ impl BeamClient {
                 .upgrade()
                 .await
                 .map_err(Into::into)
+        }
+    }
+
+    #[cfg(feature = "sockets")]
+    pub async fn handle_sockets<F, Fut>(&self, cb: F) -> Result<()>
+    where
+        F: Fn(SocketTask, reqwest::Upgraded) -> Fut,
+        Fut: Future<Output = Result<()>>,
+    {
+        loop {
+            let Some(socket_task) = self
+                .get_socket_tasks(&BlockingOptions::from_count(1))
+                .await?
+                .pop()
+            else {
+                continue;
+            };
+            let socket = self.connect_socket(&socket_task.id).await?;
+            cb(socket_task, socket).await?;
         }
     }
 }
