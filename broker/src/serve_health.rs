@@ -3,7 +3,7 @@ use std::{collections::HashMap, convert::Infallible, marker::PhantomData, sync::
 use axum::{extract::{Path, State}, http::StatusCode, response::{sse::{Event, KeepAlive, KeepAliveStream}, Response, Sse}, routing::get, Json, Router};
 use axum_extra::{headers::{authorization::Basic, Authorization}, TypedHeader};
 use beam_lib::ProxyId;
-use futures_core::Stream;
+use futures::Stream;
 use serde::{Serialize, Deserialize};
 use shared::{crypto_jwt::Authorized, Msg};
 use tokio::sync::{Mutex, OwnedMutexGuard, RwLock};

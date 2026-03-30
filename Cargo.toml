@@ -8,6 +8,7 @@ beam-lib = { path = "./beam-lib", features = [ "strict-ids" ] }
 # Command Line Interface
 clap = { version = "4", features = ["env", "derive"] }
 reqwest = { version = "0.13", default-features = false }
+futures = { version = "0.3" }
 
 [profile.release]
 #opt-level = "z"     # Optimize for size.

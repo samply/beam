@@ -282,9 +282,15 @@ impl CertificateCache {
         revoked_certs
     }
 
-    pub async fn update_certificates_mut(&mut self) -> Result<CertificateCacheUpdate, SamplyBeamError> {
+    pub async fn update_certificates_mut(
+        &mut self,
+    ) -> Result<CertificateCacheUpdate, SamplyBeamError> {
         debug!("Updating certificates via network ...");
-        let certificate_list = CERT_GETTER.get().unwrap().certificate_list_via_network().await?;
+        let certificate_list = CERT_GETTER
+            .get()
+            .unwrap()
+            .certificate_list_via_network()
+            .await?;
         let certificate_revocation_list = CERT_GETTER.get().unwrap().get_crl().await?;
         // Check if any of the certs in the cache have been revoked
         let mut revoked_certs = certificate_revocation_list
@@ -303,32 +309,28 @@ impl CertificateCache {
         );
 
         let mut new_count = 0;
-        //TODO Check for validity
-        for serial in new_certificate_serials {
+        let cert_getter = CERT_GETTER.get().unwrap();
+        let cert_pems = new_certificate_serials
+            .iter()
+            .map(|s| cert_getter.certificate_by_serial_as_pem(s))
+            .collect::<futures::future::JoinAll<_>>()
+            .await;
+        for (serial, cert_pem) in new_certificate_serials.into_iter().zip(cert_pems) {
             debug!("Checking certificate with serial {serial}");
 
-            let certificate = CERT_GETTER
-                .get()
-                .unwrap()
-                .certificate_by_serial_as_pem(serial)
-                .await;
-            if let Err(e) = certificate {
-                match e {
-                    SamplyBeamError::CertificateError(err) => {
-                        debug!("Will skip invalid certificate {serial} from now on.");
-                        self.serial_to_x509
-                            .insert(serial.clone(), CertificateCacheEntry::Invalid(err));
-                    }
-                    other_error => {
-                        warn!(
-                            "Could not retrieve certificate for serial {serial}: {}",
-                            other_error
-                        );
-                    }
-                };
-                continue;
-            }
-            let certificate = certificate.unwrap();
+            let certificate = match cert_pem {
+                Err(SamplyBeamError::CertificateError(err)) => {
+                    debug!("Will skip invalid certificate {serial} from now on.");
+                    self.serial_to_x509
+                        .insert(serial.clone(), CertificateCacheEntry::Invalid(err));
+                    continue;
+                },
+                Err(other_error) => {
+                    warn!("Could not retrieve certificate for serial {serial}: {other_error}");
+                    continue;
+                }
+                Ok(cert) => cert,
+            };
             let opensslcert = match X509::from_pem(certificate.as_bytes()) {
                 Ok(x) => x,
                 Err(err) => {
