@@ -12,7 +12,7 @@ use axum::{
     Json, Router,
 };
 use beam_lib::AppOrProxyId;
-use futures_core::{stream, Stream};
+use futures::{stream, Stream};
 use serde::Deserialize;
 use beam_lib::WorkStatus;
 use shared::{

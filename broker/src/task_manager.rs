@@ -4,7 +4,7 @@ use std::{
 
 use axum::{response::{IntoResponse, sse::Event, Sse}, Json, http::StatusCode};
 use dashmap::DashMap;
-use futures_core::Stream;
+use futures::Stream;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde_json::json;

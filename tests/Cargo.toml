@@ -14,7 +14,7 @@ anyhow = "1"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 reqwest = { workspace = true, features = ["stream"], default-features = false }
-futures = "0.3.28"
+futures.workspace = true
 async-sse = "5.1.0"
 
 [features]

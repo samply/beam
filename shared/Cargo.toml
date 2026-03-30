@@ -20,6 +20,7 @@ clap.workspace = true
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = [] }
 bytes = "1.4"
+futures.workspace = true
 
 # This includes all default features of reqwest but uses native-tls aka openssl as we depend on it for encryption anyways
 reqwest = { workspace = true, features = ["stream", "native-tls", "charset", "system-proxy", "http2"] }
