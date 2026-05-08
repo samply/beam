@@ -16,6 +16,10 @@ pub(crate) struct GetCertsFromBroker {
 }
 
 impl GetCertsFromBroker {
+    pub fn new(client: SamplyHttpClient, config: Config) -> Self {
+        Self { client, config }
+    }
+
     async fn request(&self, path: &str) -> Result<reqwest::Response, SamplyBeamError> {
         let uri = Uri::builder()
             .scheme(self.config.broker_uri.scheme())
@@ -93,17 +97,6 @@ impl GetCerts for GetCertsFromBroker {
         debug!("Retrieving intermediate CA certificate ...");
         self.query("/v1/pki/certs/im-ca").await
     }
-}
-
-pub(crate) fn build_cert_getter(
-    config: Config,
-    client: SamplyHttpClient,
-) -> Result<GetCertsFromBroker, SamplyBeamError> {
-    let client = client;
-    Ok(GetCertsFromBroker {
-        client,
-        config,
-    })
 }
 
 pub async fn init_public_crypto_for_proxy(
