@@ -17,6 +17,7 @@ use tracing::{debug, error, info, warn};
 use tryhard::{backoff_strategies::ExponentialBackoff, RetryFuture, RetryFutureConfig};
 
 use crate::config::{CliArgs, Config};
+use crate::crypto::GetCertsFromBroker;
 use crate::serve_tasks::sign_request;
 
 mod auth;
@@ -69,7 +70,11 @@ pub async fn main() -> anyhow::Result<()> {
         info!("Connected to Broker: {}", &config.broker_uri);
     }
 
-    let result = retry_notify(|| init_crypto(&config, &client), |err, dur| {
+    shared::crypto::init_cert_getter(GetCertsFromBroker::new(
+        client.clone(),
+        config.clone(),
+    ));
+    let result = retry_notify(|| init_crypto(&config), |err, dur| {
         warn!("Still trying to initialize certificate chain: {err}. Retrying in {}s", dur.as_secs());
     }).await;
     let config = match result {
@@ -105,11 +110,7 @@ where
         .on_retry(Box::new(move |_, b, e| futures::future::ready(on_error(e, b.unwrap_or(Duration::MAX)))))
 }
 
-async fn init_crypto(config: &Config, client: &SamplyHttpClient) -> Result<config::ConfigCrypto, SamplyBeamError> {
-    shared::crypto::init_cert_getter(crypto::build_cert_getter(
-        config.clone(),
-        client.clone(),
-    )?);
+async fn init_crypto(config: &Config) -> Result<config::ConfigCrypto, SamplyBeamError> {
     shared::crypto::init_ca_chain(&config.rootcert).await?;
 
     let _public_info: Vec<_> =
