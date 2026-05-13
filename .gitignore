@@ -5,3 +5,4 @@ dev/pki/*
 !dev/pki/pki
 **/mitmproxy/
 dev/logs/
+.zed/
