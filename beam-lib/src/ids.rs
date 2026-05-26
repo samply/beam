@@ -68,7 +68,7 @@ impl AppOrProxyId {
     }
 
     pub fn can_be_signed_by(&self, other: &impl AsRef<str>) -> bool {
-        self.as_ref().ends_with(other.as_ref())
+        signer_matches(self.as_ref(), other.as_ref())
     }
 
     pub fn hide_broker(&self) -> &str {
@@ -150,7 +150,7 @@ macro_rules! impl_id {
 
             #[cfg(feature = "strict-ids")]
             pub fn can_be_signed_by(&self, other: &impl AsRef<str>) -> bool {
-                self.as_ref().ends_with(other.as_ref())
+                signer_matches(self.as_ref(), other.as_ref())
             }
         }
 
@@ -271,6 +271,18 @@ impl Display for BeamIdError {
     }
 }
 
+/// Returns true if `signer` is allowed to sign on behalf of `id`, i.e. `id`
+/// equals `signer` or `signer` is a suffix of `id` at a `.`-delimited label
+/// boundary. A bare `str::ends_with` is insufficient here: it would let a proxy
+/// `ulm.broker` sign for the unrelated `neu-ulm.broker`.
+#[cfg(feature = "strict-ids")]
+fn signer_matches(id: &str, signer: &str) -> bool {
+    id == signer
+        || id
+            .strip_suffix(signer)
+            .is_some_and(|prefix| prefix.ends_with('.'))
+}
+
 #[cfg(feature = "strict-ids")]
 fn check_valid_id_part(id: &str) -> Result<(), BeamIdError> {
     for char in id.chars() {
@@ -333,6 +345,25 @@ mod tests {
             app_id.proxy_id(),
             ProxyId::new("proxy1.broker.samply.de").unwrap()
         );
+    }
+
+    #[test]
+    fn test_can_be_signed_by_label_boundary() {
+        set_broker_id("broker.samply.de".to_string());
+        let victim_proxy = ProxyId::new("neu-ulm.broker.samply.de").unwrap();
+        let victim_app: AppOrProxyId =
+            AppId::new("app.neu-ulm.broker.samply.de").unwrap().into();
+        let attacker = ProxyId::new("ulm.broker.samply.de").unwrap();
+
+        // Legitimate: a proxy signs for itself and its own apps.
+        assert!(victim_proxy.can_be_signed_by(&victim_proxy));
+        assert!(victim_app.can_be_signed_by(&victim_proxy));
+
+        // Attack: `ulm.broker.samply.de` is a bare-suffix of the unrelated
+        // `neu-ulm.broker.samply.de`, but the preceding char is `-`, not a label
+        // boundary -> must be rejected.
+        assert!(!victim_proxy.can_be_signed_by(&attacker));
+        assert!(!victim_app.can_be_signed_by(&attacker));
     }
 
     #[test]
