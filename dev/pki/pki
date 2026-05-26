@@ -95,7 +95,15 @@ function request() {
      application=$1
      cn=$2
      ttl=$3
-     openssl req -new -newkey rsa:2048 -nodes -keyout ${application}.priv.pem -out ${application}.csr -subj "/CN=${cn}" 2>/dev/null
+     # Beam only supports multiple certificates per proxy when they share one key.
+     # devsetup enrolls some proxies repeatedly to create duplicate certs, so reuse
+     # an existing key on re-enrollment and generate a fresh one only the first time;
+     # otherwise senders may encrypt to a key the proxy no longer holds.
+     if [ -s "${application}.priv.pem" ] && openssl pkey -in "${application}.priv.pem" -noout 2>/dev/null; then
+          openssl req -new -key "${application}.priv.pem" -out ${application}.csr -subj "/CN=${cn}" 2>/dev/null
+     else
+          openssl req -new -newkey rsa:2048 -nodes -keyout ${application}.priv.pem -out ${application}.csr -subj "/CN=${cn}" 2>/dev/null
+     fi
      data=$(jq -Rs '{common_name: "'$cn'", ttl: "'$ttl'", csr: .}' < ${application}.csr)
      echo "Creating Certificate for domain $cn"
      curl --header "X-Vault-Token: $VAULT_TOKEN" \
