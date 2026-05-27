@@ -1,3 +1,9 @@
+# Unreleased
+
+## Bugfixes
+
+* Fixed an authorization flaw where the signer check matched bare id suffixes, allowing a proxy to sign on behalf of another proxy whose id ended with its own (e.g. `ulm.broker` for `neu-ulm.broker`). The check now requires a `.`-delimited label boundary.
+
 # Samply.Beam 0.10.0 - 2025-05-26
 
 ## Breaking changes
