@@ -827,7 +827,7 @@ pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool, Er
     let cert_rsa = cert.public_key()?.rsa()?;
     let cert_mod = cert_rsa.n();
     let key_mod = key.n();
-    let key_mod_bignum = openssl::bn::BigNum::from_slice(&key_mod.to_bytes_be())?;
+    let key_mod_bignum = openssl::bn::BigNum::from_slice(&key_mod.to_be_bytes())?;
     let is_equal = cert_mod.ucmp(&key_mod_bignum) == std::cmp::Ordering::Equal;
     if !is_equal {
         match ProxyCertInfo::try_from(cert) {
