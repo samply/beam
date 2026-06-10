@@ -2,7 +2,7 @@
 
 use beam_lib::{AppId, AppOrProxyId, ProxyId, FailureStrategy, WorkStatus};
 use chacha20poly1305::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
+    aead::{Aead, AeadCore, Key, KeyInit},
     XChaCha20Poly1305, XNonce,
 };
 use crypto_jwt::extract_jwt;
@@ -257,7 +257,7 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
 
         // Cryptographic Operations
         let cipher_engine = XChaCha20Poly1305::new_from_slice(&my_priv_key.decrypt(
-            Oaep::new::<sha2::Sha256>(),
+            Oaep::<sha2::Sha256>::new(),
             &encrypted_decryption_key,
         )?)
         .map_err(|e| {
@@ -302,9 +302,13 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
         receivers_public_keys: &Vec<RsaPublicKey>,
     ) -> Result<Self::Output, SamplyBeamError> {
         // Generate Symmetric Key and Nonce
-        let mut rng = rand::thread_rng();
-        let symmetric_key = XChaCha20Poly1305::generate_key(&mut rng);
-        let nonce = XChaCha20Poly1305::generate_nonce(&mut rng);
+        let mut rng = rand::rng();
+        let mut symmetric_key = Key::<XChaCha20Poly1305>::default();
+        openssl::rand::rand_bytes(&mut symmetric_key)
+            .map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))?;
+        let mut nonce = XNonce::default();
+        openssl::rand::rand_bytes(&mut nonce)
+            .map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))?;
 
         // Encrypt symmetric key with receivers' public keys
         let Ok(encrypted_keys) = receivers_public_keys
@@ -312,7 +316,7 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
             .map(|key| {
                 key.encrypt(
                     &mut rng,
-                    Oaep::new::<sha2::Sha256>(),
+                    Oaep::<sha2::Sha256>::new(),
                     symmetric_key.as_slice(),
                 )
             })
@@ -767,7 +771,7 @@ mod tests {
         };
 
         //Setup Keypairs
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let rsa_length: usize = 2048;
         let p1_private = RsaPrivateKey::new(&mut rng, rsa_length)
             .expect("Failed to generate private key for proxy 1");
@@ -813,7 +817,7 @@ mod tests {
         };
 
         //Setup Keypairs
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let rsa_length: usize = 2048;
         let p1_private = RsaPrivateKey::new(&mut rng, rsa_length)
             .expect("Failed to generate private key for proxy 1");

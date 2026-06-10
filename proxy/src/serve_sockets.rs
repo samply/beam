@@ -11,7 +11,7 @@ use chacha20poly1305::{
         self,
         generic_array::{typenum::Unsigned, GenericArray},
         stream::{DecryptorLE31, EncryptorLE31, NewStream, StreamLE31, StreamPrimitive},
-        Buffer, Nonce, OsRng,
+        Buffer, Nonce,
     },
     consts::{U20, U32},
     AeadCore, AeadInPlace, ChaCha20Poly1305, KeyInit, XChaCha20Poly1305,
@@ -19,7 +19,7 @@ use chacha20poly1305::{
 use dashmap::DashMap;
 use futures::{stream::IntoAsyncRead, FutureExt, SinkExt, StreamExt, TryStreamExt};
 use hyper_util::rt::TokioIo;
-use rsa::rand_core::RngCore;
+use rsa::rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::AppOrProxyId;
