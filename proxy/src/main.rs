@@ -7,18 +7,19 @@ use axum::http::{header, HeaderValue, StatusCode};
 use beam_lib::AppOrProxyId;
 use clap::Parser;
 use futures::future::Ready;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use shared::{reqwest, EncryptedMessage, MsgEmpty, PlainMessage};
 use shared::crypto::{CryptoPublicPortion, ProxyCertInfo};
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
+use sse_stream::SseStream;
 use tokio::time::Instant;
 use tracing::{debug, error, info, warn};
 use tryhard::{backoff_strategies::ExponentialBackoff, RetryFuture, RetryFutureConfig};
 
 use crate::config::{CliArgs, Config};
 use crate::crypto::GetCertsFromBroker;
-use crate::serve_tasks::sign_request;
+use crate::serve_tasks::{sign_request, sse_error_is_timeout};
 
 mod auth;
 mod banner;
@@ -198,18 +199,11 @@ fn spawn_controller_polling(client: SamplyHttpClient, config: &'static Config) {
                     continue;
                 }
             };
-            let incoming = res
-                .bytes_stream()
-                .map(|result| result.map_err(|error| {
-                    let kind = error.is_timeout().then_some(std::io::ErrorKind::TimedOut).unwrap_or(std::io::ErrorKind::Other);
-                    std::io::Error::new(kind, format!("IO Error: {error}"))
-                }))
-                .into_async_read();
-            let mut reader = async_sse::decode(incoming);
+            let mut reader = SseStream::from_byte_stream(res.bytes_stream());
             while let Some(ev) = reader.next().await {
                 match ev {
                     Ok(_)=> (),
-                    Err(e) if e.downcast_ref::<std::io::Error>().unwrap().kind() == std::io::ErrorKind::TimedOut => {
+                    Err(e) if sse_error_is_timeout(&e) => {
                         debug!("SSE connection timed out");
                         break;
                     },

@@ -33,9 +33,9 @@ serde_json = "1"
 rsa = "0.9"
 
 # Server-sent Events (SSE) support
-tokio-util = { version = "0.7", features = ["io"] }
+tokio-util = "0.7"
 futures.workspace = true
-async-sse = "5.1"
+sse-stream = "0.2.3"
 async-stream = "0.3"
 
 # Socket dependencies
