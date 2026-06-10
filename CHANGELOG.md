@@ -1,8 +1,17 @@
-# Unreleased
+
+# Samply.Beam 0.11.0 - 2026-06-10
+
+## Minor changes
+
+* Improved resilience by retrying timed-out broker requests.
+* Certificates are now fetched in parallel, reducing startup time.
+* Broker and proxy logs can now be written to disk.
 
 ## Bugfixes
 
-* Fixed an authorization flaw where the signer check matched bare id suffixes, allowing a proxy to sign on behalf of another proxy whose id ended with its own (e.g. `ulm.broker` for `neu-ulm.broker`). The check now requires a `.`-delimited label boundary.
+* Fixed an overly broad signer check that matched bare id suffixes (e.g. `ulm.broker` for `neu-ulm.broker`). The check now requires a `.`-delimited label boundary.
+* Fixed socket tasks lingering after one side has already given up on the connection.
+* Fixed a rare certificate getter initialization issue causing it to be initialized more than once leading to a crash.
 
 # Samply.Beam 0.10.0 - 2025-05-26
 
