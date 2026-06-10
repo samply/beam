@@ -15,7 +15,7 @@ rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 reqwest = { workspace = true, features = ["stream"], default-features = false }
 futures.workspace = true
-async-sse = "5.1.0"
+sse-stream = "0.2.3"
 
 [features]
 sockets = ["beam-lib/sockets"]

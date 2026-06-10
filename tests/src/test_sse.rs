@@ -1,10 +1,8 @@
-use std::io;
-
 use anyhow::{Result, bail, anyhow};
-use async_sse::Event;
 use beam_lib::TaskResult;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use reqwest::{header::{self, HeaderValue}, Method};
+use sse_stream::SseStream;
 
 use crate::{client1, task_test};
 
@@ -25,10 +23,7 @@ async fn test_sse() -> Result<()> {
     task_test::put_result(id, "foo", Some(beam_lib::WorkStatus::Claimed)).await?;
     task_test::put_result(id, "foo", Some(beam_lib::WorkStatus::Claimed)).await?;
     task_test::put_result(id, "bar", Some(beam_lib::WorkStatus::Succeeded)).await?;
-    let mut stream = async_sse::decode(res.bytes_stream()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-        .into_async_read()
-    );
+    let mut stream = SseStream::from_byte_stream(res.bytes_stream());
     assert_body(stream.next().await, "foo")?;
     assert_body(stream.next().await, "foo")?;
     assert_body(stream.next().await, "bar")?;
@@ -36,14 +31,13 @@ async fn test_sse() -> Result<()> {
     Ok(())
 }
 
-fn assert_body<E>(event: Option<Result<Event, E>>, expected_body: &str) -> Result<()> {
+fn assert_body<E>(event: Option<Result<sse_stream::Sse, E>>, expected_body: &str) -> Result<()> {
     let Ok(event) = event.ok_or(anyhow!("SSE stream ended early"))? else {
         bail!("Unexpected error parsing SSE")
     };
-    let Event::Message(m) = event else {
-        bail!("Event is not a message");
-    };
-    let result = serde_json::from_slice::<TaskResult<String>>(m.data())?;
+    let result = serde_json::from_str::<TaskResult<String>>(
+        event.data.as_deref().ok_or(anyhow!("Event has no data"))?,
+    )?;
     assert_eq!(result.body, expected_body);
     Ok(())
 }
