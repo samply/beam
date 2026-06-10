@@ -8,7 +8,7 @@ use axum::{
     body::Bytes, extract::{FromRef, Request, State}, http::{header, request::Parts, HeaderMap, HeaderValue, StatusCode, Uri}, response::{sse::Event, IntoResponse, Response, Sse}, routing::{any, get, put}, Json, RequestExt, Router
 };
 use futures::{
-    stream::{StreamExt, TryStreamExt},
+    stream::StreamExt,
     Stream, TryFutureExt,
 };
 use httpdate::fmt_http_date;
@@ -19,6 +19,7 @@ use beam_lib::{AppId, AppOrProxyId, ProxyId};
 use shared::{
     DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage, crypto::{self, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, format_to_without_broker, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType
 };
+use sse_stream::SseStream;
 use tokio::{io::BufReader, task::id};
 use tracing::{debug, error, info, trace, warn};
 
@@ -199,20 +200,12 @@ async fn handler_tasks_stream(
     }
 
     let outgoing = async_stream::stream! {
-        let incoming = resp
-            .bytes_stream()
-            .map(|result| result.map_err(|error| {
-                let kind = error.is_timeout().then_some(std::io::ErrorKind::TimedOut).unwrap_or(std::io::ErrorKind::Other);
-                std::io::Error::new(kind, format!("IO Error: {error}"))
-            }))
-            .into_async_read();
-
-        let mut reader = async_sse::decode(incoming);
+        let mut reader = SseStream::from_byte_stream(resp.bytes_stream());
 
         while let Some(event) = reader.next().await {
             let event = match event {
-                Ok(event)=> event,
-                Err(e) if e.downcast_ref::<std::io::Error>().unwrap().kind() == std::io::ErrorKind::TimedOut => {
+                Ok(event) => event,
+                Err(e) if sse_error_is_timeout(&e) => {
                     debug!("SSE connection timed out");
                     break;
                 },
@@ -224,86 +217,92 @@ async fn handler_tasks_stream(
                     continue;
                 }
             };
-            match event {
-                async_sse::Event::Retry(_dur) => {
-                    error!("Got a retry message from the Broker, which is not yet supported.");
-                },
-                async_sse::Event::Message(event) => {
-                    // Check if this is a message or some control event
-                    let event_type = SseEventType::from_str(event.name()).expect("Error in Infallible");
-                    let mut event_as_bytes = event.into_bytes();
-                    let event_as_str = std::str::from_utf8(&event_as_bytes).unwrap_or("(unable to parse)");
+            if event.retry.is_some() && event.event.is_none() && event.data.is_none() {
+                error!("Got a retry message from the Broker, which is not yet supported.");
+                continue;
+            }
+            // Check if this is a message or some control event
+            let event_type = SseEventType::from_str(event.event.as_deref().unwrap_or("")).expect("Error in Infallible");
+            let mut event_as_bytes = event.data.unwrap_or_default().into_bytes();
+            let event_as_str = std::str::from_utf8(&event_as_bytes).unwrap_or("(unable to parse)");
 
-                    match &event_type {
-                        SseEventType::DeletedTask | SseEventType::WaitExpired => {
-                            debug!("SSE: Got {event_type} message, forwarding to App.");
-                            yield Ok(Event::default()
-                                .event(event_type)
-                                .data(event_as_str));
-                            continue;
-                        },
-                        SseEventType::Error => {
-                            warn!("SSE: The Broker has reported an error: {event_as_str}");
-                            yield Ok(Event::default()
-                                .event(event_type)
-                                .data(event_as_str));
-                            continue;
-                        },
-                        SseEventType::Undefined => {
-                            error!("SSE: Got a message without event type -- discarding.");
-                            continue;
-                        },
-                        SseEventType::Unknown(s) => {
-                            error!("SSE: Got unknown event type: {s} -- discarding.");
-                            continue;
-                        },
-                        SseEventType::NewResult => {
-                            debug!("SSE: Got new result");
-                        }
-                        other => {
-                            info!("Got \"{other}\" event -- parsing.");
-                        }
-                    }
-
-                    // Check reply's signature
-
-                    if !event_as_bytes.is_empty() {
-                        let Ok(json) = serde_json::from_slice::<Value>(&event_as_bytes) else {
-                            warn!("Answer is no valid JSON; discarding: \"{event_as_str}\".");
-                            // TODO: For some reason, compiler won't accept the following lines, so we can't inform the App about the problem.
-                            //
-                            // warn!("Answer is no valid JSON; returning as-is to client: \"{event_as_str}\".");
-                            // yield Ok(Event::default()
-                            //     .event(SseEventType::Error)
-                            //     .data(format!("Broker sent invalid JSON: {event_as_str}")));
-                            continue;
-                        };
-                        let json = match validate_and_decrypt(json, config).await {
-                            Ok(json) => json,
-                            Err(err) => {
-                                warn!("Got an error decrypting Broker's reply: {err}");
-                                continue;
-                            }
-                        };
-                        trace!("Decrypted Msg: {:#?}",json);
-                        event_as_bytes = serde_json::to_vec(&json).unwrap();
-                        trace!(
-                            "Validated and stripped signature: \"{}\"",
-                            std::str::from_utf8(&event_as_bytes).unwrap_or("Unable to parse string as UTF-8")
-                        );
-                    }
-                    let as_string = std::str::from_utf8(&event_as_bytes).unwrap_or("(garbled_utf8)");
-                    let event = Event::default()
+            match &event_type {
+                SseEventType::DeletedTask | SseEventType::WaitExpired => {
+                    debug!("SSE: Got {event_type} message, forwarding to App.");
+                    yield Ok(Event::default()
                         .event(event_type)
-                        .data(as_string);
-                    yield Ok(event);
+                        .data(event_as_str));
+                    continue;
+                },
+                SseEventType::Error => {
+                    warn!("SSE: The Broker has reported an error: {event_as_str}");
+                    yield Ok(Event::default()
+                        .event(event_type)
+                        .data(event_as_str));
+                    continue;
+                },
+                SseEventType::Undefined => {
+                    error!("SSE: Got a message without event type -- discarding.");
+                    continue;
+                },
+                SseEventType::Unknown(s) => {
+                    error!("SSE: Got unknown event type: {s} -- discarding.");
+                    continue;
+                },
+                SseEventType::NewResult => {
+                    debug!("SSE: Got new result");
+                }
+                other => {
+                    info!("Got \"{other}\" event -- parsing.");
                 }
             }
+
+            // Check reply's signature
+
+            if !event_as_bytes.is_empty() {
+                let Ok(json) = serde_json::from_slice::<Value>(&event_as_bytes) else {
+                    warn!("Answer is no valid JSON; discarding: \"{event_as_str}\".");
+                    // TODO: For some reason, compiler won't accept the following lines, so we can't inform the App about the problem.
+                    //
+                    // warn!("Answer is no valid JSON; returning as-is to client: \"{event_as_str}\".");
+                    // yield Ok(Event::default()
+                    //     .event(SseEventType::Error)
+                    //     .data(format!("Broker sent invalid JSON: {event_as_str}")));
+                    continue;
+                };
+                let json = match validate_and_decrypt(json, config).await {
+                    Ok(json) => json,
+                    Err(err) => {
+                        warn!("Got an error decrypting Broker's reply: {err}");
+                        continue;
+                    }
+                };
+                trace!("Decrypted Msg: {:#?}",json);
+                event_as_bytes = serde_json::to_vec(&json).unwrap();
+                trace!(
+                    "Validated and stripped signature: \"{}\"",
+                    std::str::from_utf8(&event_as_bytes).unwrap_or("Unable to parse string as UTF-8")
+                );
+            }
+            let as_string = std::str::from_utf8(&event_as_bytes).unwrap_or("(garbled_utf8)");
+            let event = Event::default()
+                .event(event_type)
+                .data(as_string);
+            yield Ok(event);
         }
     };
     // TODO: Somehow return correct error code (not always possible since headers are sent before long request)
     let sse = Sse::new(outgoing);
     Ok(sse)
+}
+
+pub(crate) fn sse_error_is_timeout(err: &sse_stream::Error) -> bool {
+    match err {
+        sse_stream::Error::Body(err) => err
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(reqwest::Error::is_timeout),
+        _ => false,
+    }
 }
 
 pub(crate) fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, Response> {
