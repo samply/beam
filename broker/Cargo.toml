@@ -17,7 +17,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 axum = { version = "0.8", features = ["query", "macros"] }
 #axum-macros = "0.3.7"
-dashmap =  "6.0"
+dashmap = "6.0"
 
 anyhow = "1"
 thiserror = "2"
@@ -32,11 +32,20 @@ once_cell = "1"
 # Socket dependencies
 bytes = { version = "1", optional = true }
 axum-extra = { version = "0.12", features = ["typed-header"] }
-hyper = { version = "1", default-features = false, optional = true}
-hyper-util = { version = "0.1", default-features = false, features = ["tokio"], optional = true}
+hyper = { version = "1", default-features = false, optional = true }
+hyper-util = { version = "0.1", default-features = false, features = [
+  "tokio",
+], optional = true }
+
+tikv-jemallocator = { workspace = true, optional = true }
+mimalloc = { workspace = true, optional = true }
+snmalloc-rs = { workspace = true, optional = true }
 
 [features]
 sockets = ["dep:bytes", "shared/sockets", "dep:hyper", "dep:hyper-util"]
+jemalloc = ["dep:tikv-jemallocator"]
+mimalloc = ["dep:mimalloc"]
+snmalloc = ["dep:snmalloc-rs"]
 
 [build-dependencies]
 build-data = "0"

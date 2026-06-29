@@ -1,5 +1,15 @@
 #![allow(unused_imports)]
 
+#[cfg(feature = "jemalloc")]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+#[cfg(feature = "snmalloc")]
+#[global_allocator]
+static GLOBAL: snmalloc_rs::SnMalloc = snmalloc_rs::SnMalloc;
+
 mod banner;
 mod crypto;
 mod config;
