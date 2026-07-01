@@ -74,12 +74,83 @@ async fn test_polling_tasks_yields_more_than_specified_wait_count() -> Result<()
     Ok(())
 }
 
+#[tokio::test]
+async fn test_get_task_by_id() -> Result<()> {
+    let id = post_task(()).await?;
+    let block = BlockingOptions::from_count(1);
+    // One is sender, one reciever so both calls should work
+    assert_eq!(client1().get_task::<()>(&id, &block).await?.map(|t| t.id), Some(id));
+    assert_eq!(client2().get_task::<()>(&id, &block).await?.map(|t| t.id), Some(id));
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_get_task_by_id_unauthorized() -> Result<()> {
+    // From APP1 to APP1, App2 unauthorized
+    let id = post_task_to((), vec![APP1.clone()]).await?;
+    let block = BlockingOptions::from_time(Duration::from_secs(1));
+    assert_eq!(client1().get_task::<()>(&id, &block).await?.map(|t| t.id), Some(id));
+    assert!(client2().get_task::<()>(&id, &block).await?.is_none(), "Unauthorized app was able to read task");
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_get_task_by_id_not_found() -> Result<()> {
+    let block = BlockingOptions::from_time(Duration::from_secs(1));
+    assert!(client1().get_task::<()>(&MsgId::new(), &block).await?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_get_task_by_id_long_poll() -> Result<()> {
+    let id = MsgId::new();
+    let getter = async {
+        let block = BlockingOptions { wait_time: Some(Duration::from_secs(5)), wait_count: Some(1) };
+        let task = client1().get_task::<()>(&id, &block).await?;
+        assert_eq!(task.map(|t| t.id), Some(id), "Long-poll did not return the task before time out");
+        Ok::<_, anyhow::Error>(())
+    };
+    let poster = async {
+        // Wait with sending until long-poll is established
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        client1().post_task(&TaskRequest {
+            id,
+            from: APP1.clone(),
+            to: vec![APP2.clone()],
+            body: (),
+            ttl: "10s".to_string(),
+            failure_strategy: beam_lib::FailureStrategy::Discard,
+            metadata: serde_json::Value::Null,
+        }).await?;
+        Ok::<_, anyhow::Error>(())
+    };
+    tokio::try_join!(getter, poster)?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_get_task_by_id_rejects_invalid_wait_count() -> Result<()> {
+    use reqwest::{Method, StatusCode};
+    let id = post_task(()).await?;
+    let res = client1()
+        .raw_beam_request(Method::GET, &format!("/v1/tasks/{id}?wait_count=2"))
+        .send()
+        .await?;
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    Ok(())
+}
+
+// Default APP1 -> APP2
 pub async fn post_task<T: Serialize + 'static>(body: T) -> Result<MsgId> {
+    post_task_to(body, vec![APP2.clone()]).await
+}
+
+pub async fn post_task_to<T: Serialize + 'static>(body: T, to: Vec<beam_lib::AddressingId>) -> Result<MsgId> {
     let id = MsgId::new();
     client1().post_task(&TaskRequest {
         id,
         from: APP1.clone(),
-        to: vec![APP2.clone()],
+        to,
         body,
         ttl: "10s".to_string(),
         failure_strategy: beam_lib::FailureStrategy::Discard,
