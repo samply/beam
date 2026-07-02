@@ -140,6 +140,33 @@ impl BeamClient {
         }
     }
 
+    /// Retrieve a task by its id.
+    /// Not existing tasks and non-authorized access return both `None`
+    /// As only a single task can ever be returned, `blocking.wait_count` must be unset or `1`.
+    /// The generic parameter `T` represents the expected task body type.
+    pub async fn get_task<T: DeserializeOwned + 'static>(&self, task_id: &MsgId, blocking: &BlockingOptions) -> Result<Option<TaskRequest<T>>> {
+        let url = self.beam_proxy_url
+            .join(&format!("/v1/tasks/{task_id}?{}", blocking.to_query()))
+            .expect("The proxy url is valid");
+        let response_result = self.client
+            .get(url)
+            .send()
+            .await;
+        let response = match response_result {
+            Ok(res) => res,
+            Err(e) => return if e.is_timeout() {
+                Ok(None)
+            } else {
+                Err(e.into())
+            },
+        }.handle_invalid_receivers().await?;
+        match response.status() {
+            StatusCode::NOT_FOUND | StatusCode::GATEWAY_TIMEOUT => Ok(None),
+            StatusCode::OK => Ok(Some(response.json().await?)),
+            status => Err(BeamError::UnexpectedStatus(status)),
+        }
+    }
+
     /// Post a beam task with a serializeable body.
     pub async fn post_task<T: Serialize + 'static>(&self, task: &TaskRequest<T>) -> Result<()> {
         let url = self.beam_proxy_url
