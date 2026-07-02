@@ -35,7 +35,7 @@ rsa.workspace = true
 sha2 = "0.11"
 chacha20poly1305.workspace = true
 openssl = "0.10"
-itertools = "0.14.0"
+itertools = "0.15.0"
 jwt-simple = "0.11"
 
 # Global variables
