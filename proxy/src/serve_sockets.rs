@@ -1,25 +1,16 @@
 use std::{
-    io::{self, Write}, ops::{Deref, DerefMut}, pin::Pin, sync::{atomic::AtomicUsize, Arc}, task::Poll, time::{Duration, Instant, SystemTime}
+    io, mem::size_of, pin::Pin, sync::{atomic::AtomicUsize, Arc}, time::{Duration, Instant, SystemTime}
 };
 
 use axum::{
     extract::{Path, Request, State}, http::{self, header, HeaderValue, StatusCode}, response::{IntoResponse, Response}, routing::{get, post}, Extension, Json, RequestPartsExt, Router
 };
+use aead_stream::{DecryptorLE31, EncryptorLE31, Nonce, StreamLE31};
 use bytes::{Buf, BufMut, BytesMut};
-use chacha20poly1305::{
-    aead::{
-        self,
-        generic_array::{typenum::Unsigned, GenericArray},
-        stream::{DecryptorLE31, EncryptorLE31, NewStream, StreamLE31, StreamPrimitive},
-        Buffer, Nonce, OsRng,
-    },
-    consts::{U20, U32},
-    AeadCore, AeadInPlace, ChaCha20Poly1305, KeyInit, XChaCha20Poly1305,
-};
+use chacha20poly1305::{aead::{array::typenum::Unsigned, AeadCore, Generate}, Key, KeyInit, XChaCha20Poly1305};
 use dashmap::DashMap;
 use futures::{stream::IntoAsyncRead, FutureExt, SinkExt, StreamExt, TryStreamExt};
 use hyper_util::rt::TokioIo;
-use rsa::rand_core::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::AppOrProxyId;
@@ -38,6 +29,10 @@ use crate::{
 };
 
 type MsgSecretMap = Arc<LazyExpireMap<MsgId, SocketEncKey>>;
+type StreamNonce = Nonce<XChaCha20Poly1305, StreamLE31<XChaCha20Poly1305>>;
+type FrameLen = u32;
+const FRAME_LEN_SIZE: usize = size_of::<FrameLen>();
+const TAG_SIZE: usize = <XChaCha20Poly1305 as AeadCore>::TagSize::USIZE;
 const TASK_SECRET_CLEANUP_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 pub(crate) fn router(client: SamplyHttpClient, config: &'static Config) -> Router {
@@ -236,17 +231,15 @@ async fn connect_socket(
 }
 
 #[derive(Debug, Clone, Copy)]
-struct SocketEncKey(GenericArray<u8, U32>);
+struct SocketEncKey(Key);
 
 impl SocketEncKey {
     fn generate() -> Self {
-        let mut arr = GenericArray::default();
-        OsRng.fill_bytes(&mut arr);
-        SocketEncKey(arr)
+        SocketEncKey(Key::generate())
     }
 
     fn to_b64_str(&self) -> Result<String, ct_codecs::Error> {
-        Base64UrlSafeNoPadding::encode_to_string(self.as_slice())
+        Base64UrlSafeNoPadding::encode_to_string(self.0.as_slice())
     }
 }
 
@@ -265,25 +258,9 @@ impl<'de> Deserialize<'de> for SocketEncKey {
         D: serde::Deserializer<'de>,
     {
         let bytes = Base64UrlSafeNoPadding::decode_to_vec(String::deserialize(deserializer)?, None).map_err(serde::de::Error::custom)?;
-        if bytes.len() != U32::to_usize() {
-            return Err(serde::de::Error::custom("Key does not match required key length"));
-        } else {
-            Ok(SocketEncKey(GenericArray::clone_from_slice(bytes.as_slice())))
-        }
-    }
-}
-
-impl Deref for SocketEncKey {
-    type Target = GenericArray<u8, U32>;
-
-    fn deref(&self) -> &GenericArray<u8, U32> {
-        &self.0
-    }
-}
-
-impl DerefMut for SocketEncKey {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        let key = Key::try_from(bytes.as_slice())
+            .map_err(|_| serde::de::Error::custom("Key does not match required key length"))?;
+        Ok(SocketEncKey(key))
     }
 }
 
@@ -301,111 +278,71 @@ struct DecryptorCodec {
     decryptor: DecryptorLE31<XChaCha20Poly1305>,
 }
 
-impl DecryptorCodec {
-    const SIZE_OVERHEAD: usize = 4;
-}
-
-impl EncryptorCodec {
-    const TAG_SIZE: usize = <XChaCha20Poly1305 as AeadCore>::TagSize::USIZE;
-}
-
 impl Encoder<&[u8]> for EncryptorCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: &[u8], dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let mut enc_buf = EncBuffer::new(dst, (item.len() + Self::TAG_SIZE).try_into().expect("item to large"));
-        enc_buf.extend_from_slice(item).expect("Infallible");
-        self.encryptor
-            .encrypt_next_in_place(b"", &mut enc_buf)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Encryption failed"))
+        let frame_len: FrameLen = item
+            .len()
+            .checked_add(TAG_SIZE)
+            .and_then(|l| l.try_into().ok())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "item too large"))?;
+
+        dst.reserve(FRAME_LEN_SIZE + frame_len as usize);
+        let frame_start = dst.len();
+        dst.put_u32_le(frame_len);
+        dst.extend_from_slice(item);
+        let mut frame = dst.split_off(frame_start + FRAME_LEN_SIZE);
+        self
+            .encryptor
+            .encrypt_next_in_place(&[], &mut frame)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Encryption failed"))?;
+        dst.unsplit(frame);
+        Ok(())
     }
 }
 
 impl Decoder for DecryptorCodec {
-    type Item = Vec<u8>;
+    type Item = BytesMut;
 
     type Error = io::Error;
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if src.len() < Self::SIZE_OVERHEAD {
+        if src.len() < FRAME_LEN_SIZE {
             return Ok(None);
         }
-        let mut size_slice = [0; Self::SIZE_OVERHEAD];
-        size_slice.clone_from_slice(&src[..Self::SIZE_OVERHEAD]);
-        let size = u32::from_le_bytes(size_slice);
-        let total_frame_size = size as usize + Self::SIZE_OVERHEAD;
+        let mut size_slice = [0; FRAME_LEN_SIZE];
+        size_slice.copy_from_slice(&src[..FRAME_LEN_SIZE]);
+        let size = FrameLen::from_le_bytes(size_slice) as usize;
+        let total_frame_size = size + FRAME_LEN_SIZE;
         if src.len() < total_frame_size {
             return Ok(None);
         }
 
-        let plain = self
+        src.advance(FRAME_LEN_SIZE);
+        let mut frame = src.split_to(size);
+        self
             .decryptor
-            .decrypt_next(&src[Self::SIZE_OVERHEAD..(Self::SIZE_OVERHEAD + size as usize)])
+            .decrypt_next_in_place(&[], &mut frame)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Decryption failed"))?;
-        src.advance(total_frame_size);
-        Ok(Some(plain))
-    }
-}
-
-struct EncBuffer<'a> {
-    buf: &'a mut BytesMut,
-    /// The index from which the inplace encryption takes place
-    enc_idx: usize,
-}
-
-impl<'a> EncBuffer<'a> {
-    fn new(buffer: &'a mut BytesMut, content_len: u32) -> Self {
-        let enc_idx = buffer.len() + Self::SIZE_OVERHEAD;
-        buffer.reserve(content_len as usize + Self::SIZE_OVERHEAD);
-        buffer.extend_from_slice(&u32::to_le_bytes(content_len));
-        Self { buf: buffer, enc_idx }
-    }
-
-    /// Reserved for size of msg
-    const SIZE_OVERHEAD: usize = (u32::BITS / 8) as usize;
-}
-
-impl<'a> Buffer for EncBuffer<'a> {
-    // This should only be called to append the tag to the buffer
-    fn extend_from_slice(&mut self, other: &[u8]) -> aead::Result<()> {
-        self.buf.extend_from_slice(other);
-        Ok(())
-    }
-
-    // This should only be called when decrypting
-    fn truncate(&mut self, len: usize) {
-        warn!("Buffer got truncated. This should never happen as it should be perfectly sized");
-        self.buf.truncate(self.enc_idx + len)
-    }
-}
-
-impl<'a> AsRef<[u8]> for EncBuffer<'a> {
-    fn as_ref(&self) -> &[u8] {
-        &self.buf[self.enc_idx..]
-    }
-}
-
-impl<'a> AsMut<[u8]> for EncBuffer<'a> {
-    fn as_mut(&mut self) -> &mut [u8] {
-        &mut self.buf[self.enc_idx..]
+        Ok(Some(frame))
     }
 }
 
 impl<S: AsyncRead + AsyncWrite + Unpin> EncryptedSocket<S> {
-    /// Creates a new cipher stream with a 32 byte key and a 16 + 4 byte Nonce
-    async fn new(mut inner: S, key: &GenericArray<u8, U32>) -> io::Result<Self> {
-        let aead = XChaCha20Poly1305::new(key);
+    /// Creates a new cipher stream from a shared AEAD key and per-direction STREAM nonces.
+    async fn new(mut inner: S, key: &SocketEncKey) -> io::Result<Self> {
+        let cipher = XChaCha20Poly1305::new(&key.0);
 
         // Encryption
-        let mut enc_nonce = GenericArray::default();
-        OsRng.fill_bytes(&mut enc_nonce);
-        let encryptor = EncryptorLE31::from_aead(aead.clone(), &enc_nonce);
+        let enc_nonce = StreamNonce::generate();
+        let encryptor = EncryptorLE31::from_aead(cipher.clone(), &enc_nonce);
         inner.write_all(&enc_nonce).await?;
 
         // Decryption
-        let mut dec_nonce = GenericArray::default();
+        let mut dec_nonce = StreamNonce::default();
         inner.read_exact(dec_nonce.as_mut_slice()).await?;
-        let decryptor = DecryptorLE31::from_aead(aead, &dec_nonce);
+        let decryptor = DecryptorLE31::from_aead(cipher, &dec_nonce);
 
         let (r, w) = tokio::io::split(inner);
         let read = FramedRead::new(r, DecryptorCodec { decryptor });
@@ -452,19 +389,17 @@ impl<S: AsyncWrite + AsyncRead + Unpin> AsyncWrite for EncryptedSocket<S> {
 
 #[cfg(test)]
 mod tests {
-    use chacha20poly1305::aead::stream::{Decryptor, Encryptor, EncryptorLE31};
-    use rand::Rng;
+    use rand::RngExt;
     use tokio::net::{TcpListener, TcpStream};
 
     use super::*;
 
     #[tokio::test]
     async fn test_encryption() {
-        let mut key = GenericArray::default();
-        OsRng.fill_bytes(&mut key);
+        let key = SocketEncKey::generate();
         let data: Arc<Vec<_>> = (0..13337).map(|_| {
-            let mut chunk = vec![0; OsRng.gen_range(1..9999)];
-            OsRng.fill_bytes(&mut chunk);
+            let mut chunk = vec![0; rand::rng().random_range(1..9999)];
+            rand::rng().fill(&mut chunk[..]);
             chunk
         }).collect::<Vec<_>>().into();
 
@@ -501,7 +436,7 @@ mod tests {
         });
     }
 
-    async fn client(key: &GenericArray<u8, U32>) -> impl AsyncRead + AsyncWrite {
+    async fn client(key: &SocketEncKey) -> impl AsyncRead + AsyncWrite {
         // Wait for server to start
         tokio::time::sleep(Duration::from_millis(100)).await;
         let stream = TcpStream::connect("127.0.0.1:1337").await.unwrap();
@@ -510,27 +445,17 @@ mod tests {
 
     #[test]
     fn normal_enc() {
-        let mut key = GenericArray::default();
-        OsRng.fill_bytes(&mut key);
         const N: usize = 2_usize.pow(10);
         let test_data: &mut [u8; N] = &mut [0; N];
-        OsRng.fill_bytes(test_data);
+        rand::rng().fill(&mut test_data[..]);
 
-        let mut nonce = GenericArray::<u8, U20>::default();
-        OsRng.fill_bytes(&mut nonce);
-        let aead = XChaCha20Poly1305::new(&key);
-        let client1 = StreamLE31::from_aead(aead, &nonce);
-        let mut encryptor = Encryptor::from_stream_primitive(client1);
-
-        // let mut nonce = GenericArray::<u8, U20>::default();
-        // OsRng.fill_bytes(&mut nonce);
-        let aead = XChaCha20Poly1305::new(&key);
-        let client2 = StreamLE31::from_aead(aead, &nonce);
-        let mut decrypter = Decryptor::from_stream_primitive(client2);
-
+        let key = SocketEncKey::generate();
+        let cipher = XChaCha20Poly1305::new(&key.0);
+        let nonce = StreamNonce::generate();
+        let mut encryptor = EncryptorLE31::from_aead(cipher.clone(), &nonce);
+        let mut decryptor = DecryptorLE31::from_aead(cipher, &nonce);
         let cipher_text = encryptor.encrypt_next(test_data.as_slice()).unwrap();
-        dbg!(cipher_text.len());
-        let a = decrypter.decrypt_next(cipher_text.as_slice()).unwrap();
-        assert_eq!(test_data, a.as_slice());
+        let plain = decryptor.decrypt_next(cipher_text.as_slice()).unwrap();
+        assert_eq!(test_data.as_slice(), plain);
     }
 }

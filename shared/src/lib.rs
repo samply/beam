@@ -2,8 +2,7 @@
 
 use beam_lib::{AppId, AppOrProxyId, ProxyId, FailureStrategy, WorkStatus};
 use chacha20poly1305::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
-    XChaCha20Poly1305, XNonce,
+    aead, XChaCha20Poly1305, XNonce, aead::{Aead, AeadCore, Generate, KeyInit, array::typenum::Unsigned}
 };
 use crypto_jwt::extract_jwt;
 use errors::SamplyBeamError;
@@ -21,7 +20,7 @@ use std::{
     time::{Duration, Instant, SystemTime}, net::SocketAddr, error::Error,
 };
 
-use rand::Rng;
+use rand::{rng, Rng};
 use serde::{
     de::{DeserializeOwned, Visitor},
     Deserialize, Serialize,
@@ -256,18 +255,27 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
         let encrypted_decryption_key = &encryption_keys[to_array_index];
 
         // Cryptographic Operations
-        let cipher_engine = XChaCha20Poly1305::new_from_slice(&my_priv_key.decrypt(
-            Oaep::new::<sha2::Sha256>(),
+        let symmetric_key = my_priv_key.decrypt(
+            Oaep::<sha2::Sha256>::new(),
             &encrypted_decryption_key,
-        )?)
-        .map_err(|e| {
-            SamplyBeamError::SignEncryptError(format!(
-                "Decryption error: Cannot initialize stream cipher because {}",
-                e
-            ))
-        })?;
-        let nonce: XNonce = XNonce::clone_from_slice(&encrypted[0..24]);
-        let ciphertext = &encrypted[24..];
+        )?;
+        let symmetric_key = aead::Key::<XChaCha20Poly1305>::try_from(symmetric_key.as_slice())
+            .map_err(|_| {
+                SamplyBeamError::SignEncryptError(
+                    "Decryption error: Invalid symmetric key length".into(),
+                )
+            })?;
+        let cipher_engine = XChaCha20Poly1305::new(&symmetric_key);
+        const NONCE_SIZE: usize = <XChaCha20Poly1305 as AeadCore>::NonceSize::USIZE;
+        let nonce = encrypted
+            .get(..NONCE_SIZE)
+            .and_then(|nonce| XNonce::try_from(nonce).ok())
+            .ok_or(SamplyBeamError::SignEncryptError(
+                "Decryption error: Missing or invalid nonce".into(),
+            ))?;
+        let ciphertext = encrypted.get(NONCE_SIZE..).ok_or(SamplyBeamError::SignEncryptError(
+            "Decryption error: Missing ciphertext".into(),
+        ))?;
         let plaintext = String::from_utf8(
             cipher_engine
                 .decrypt(&nonce, ciphertext.as_ref())
@@ -302,9 +310,9 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
         receivers_public_keys: &Vec<RsaPublicKey>,
     ) -> Result<Self::Output, SamplyBeamError> {
         // Generate Symmetric Key and Nonce
-        let mut rng = rand::thread_rng();
-        let symmetric_key = XChaCha20Poly1305::generate_key(&mut rng);
-        let nonce = XChaCha20Poly1305::generate_nonce(&mut rng);
+        let mut rng = rng();
+        let symmetric_key = aead::Key::<XChaCha20Poly1305>::generate_from_rng(&mut rng);
+        let nonce = aead::Nonce::<XChaCha20Poly1305>::generate_from_rng(&mut rng);
 
         // Encrypt symmetric key with receivers' public keys
         let Ok(encrypted_keys) = receivers_public_keys
@@ -312,7 +320,7 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
             .map(|key| {
                 key.encrypt(
                     &mut rng,
-                    Oaep::new::<sha2::Sha256>(),
+                    Oaep::<sha2::Sha256>::new(),
                     symmetric_key.as_slice(),
                 )
             })
@@ -767,7 +775,7 @@ mod tests {
         };
 
         //Setup Keypairs
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let rsa_length: usize = 2048;
         let p1_private = RsaPrivateKey::new(&mut rng, rsa_length)
             .expect("Failed to generate private key for proxy 1");
@@ -813,7 +821,7 @@ mod tests {
         };
 
         //Setup Keypairs
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let rsa_length: usize = 2048;
         let p1_private = RsaPrivateKey::new(&mut rng, rsa_length)
             .expect("Failed to generate private key for proxy 1");
