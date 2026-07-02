@@ -252,7 +252,7 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
             });
         let Some(to_array_index) = to_array_index else {
             if self.get_from().proxy_id() == my_id.proxy_id() {
-                return Ok(self.convert_self("null".to_string()));
+                return Ok(self.convert_self("<encrypted>".to_string()));
             } else {
                 return Err(SamplyBeamError::SignEncryptError("Decryption error: This client cannot be found in 'to' list".into()));
             }
@@ -896,7 +896,7 @@ mod tests {
             .clone()
             .decrypt(&p1_id, &p1_private)
             .expect("Creator must receive the task without a body");
-        assert_eq!(as_creator.body.body.as_deref(), Some("null"));
+        assert_eq!(as_creator.body.body.as_deref(), Some("<encrypted>"));
 
         // Non-sender or non-reciever is rejected
         assert!(msg_encr.decrypt(&p3_id, &p3_private).is_err());
