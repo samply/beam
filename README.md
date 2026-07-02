@@ -375,7 +375,7 @@ Content-Type: application/json
 }
 ```
 
-If no task with that ID is visible to the caller because a) it does not exist or b) the caller is neither the sender nor a recipient, the broker returns `404 Not Found`. Both conditions leading to the same return value is deliberate to avoid unauthorized message enumeration.
+If no task with that ID is visible to the caller because a) it does not exist or b) the caller is neither the sender nor a recipient, the broker returns `404 Not Found`. Both conditions leading to the same return value is deliberate to avoid unauthorized message enumeration. If the caller is the task's creator, it can't decrypt the body and will instead return all other fields of the task.
 
 ### Create a result
 

@@ -227,15 +227,13 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
         my_id: &AppOrProxyId,
         my_priv_key: &RsaPrivateKey,
     ) -> Result<Self::Output, SamplyBeamError> {
-        let Some(Encrypted {
-            encrypted,
-            encryption_keys,
-        }) = self.get_encryption() else {
-            // We have something that is not encryptable
-            return Ok(self.convert_self(String::new()));
-        };
 
-        let to_array_index: usize = self
+        // Message can not be encrypted, e.g. MsgEmpty
+        if self.get_encryption().is_none() {
+            return Ok(self.convert_self(String::new()));
+        }
+
+        let to_array_index = self
             .get_to()
             .iter()
             .position(|entry| {
@@ -248,10 +246,20 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
                     None => false,
                 };
                 matched
-            }) // TODO remove expect!
-            .ok_or(SamplyBeamError::SignEncryptError(
-                "Decryption error: This client cannot be found in 'to' list".into(),
-            ))?;
+            });
+        let Some(to_array_index) = to_array_index else {
+            if self.get_from().proxy_id() == my_id.proxy_id() {
+                return Ok(self.convert_self("null".to_string()));
+            } else {
+                return Err(SamplyBeamError::SignEncryptError("Decryption error: This client cannot be found in 'to' list".into()));
+            }
+        };
+        
+        let Encrypted {
+            encrypted,
+            encryption_keys,
+        } = self.get_encryption().unwrap(); // Checked above (l 233) that it is Some
+
         let encrypted_decryption_key = &encryption_keys[to_array_index];
 
         // Cryptographic Operations
@@ -849,4 +857,50 @@ mod tests {
         assert_eq!(msg_p1_decr, msg_p2_decr);
         assert_eq!(msg, msg_p1_decr);
     }
+
+    #[test]
+    fn decrypt_task_as_creator() {
+        // Task sender should get an empty body
+        beam_lib::set_broker_id("broker.samply.de".to_string());
+        let p1_id = AppOrProxyId::App(AppId::new("app.proxy1.broker.samply.de").unwrap());
+        let p2_id = AppOrProxyId::App(AppId::new("app.proxy2.broker.samply.de").unwrap());
+        let p3_id = AppOrProxyId::App(AppId::new("app.proxy3.broker.samply.de").unwrap());
+        let msg = MsgTaskRequest {
+            id: MsgId::new(),
+            from: p1_id.clone(),
+            to: vec![p2_id.clone()],
+            body: "Testbody".into(),
+            expire: SystemTime::now() + Duration::from_secs(60),
+            failure_strategy: FailureStrategy::Discard,
+            results: HashMap::new(),
+            metadata: "".into(),
+        };
+
+        let mut rng = rand::thread_rng();
+        let rsa_length: usize = 2048;
+        let p1_private = RsaPrivateKey::new(&mut rng, rsa_length).unwrap();
+        let p2_private = RsaPrivateKey::new(&mut rng, rsa_length).unwrap();
+        let p3_private = RsaPrivateKey::new(&mut rng, rsa_length).unwrap();
+        let p2_public = RsaPublicKey::from(&p2_private);
+
+        // Encrypted for proxy2 only.
+        let msg_encr = msg.encrypt(&vec![p2_public]).expect("Could not encrypt message");
+
+        // Proxy2 can decrypt
+        let as_recipient = msg_encr
+            .clone()
+            .decrypt(&p2_id, &p2_private)
+            .expect("Recipient must be able to decrypt");
+        assert_eq!(as_recipient.body.body.as_deref(), Some("Testbody"));
+
+        // Proxy1 gets empty body
+        let as_creator = msg_encr
+            .clone()
+            .decrypt(&p1_id, &p1_private)
+            .expect("Creator must receive the task without a body");
+        assert_eq!(as_creator.body.body.as_deref(), Some("null"));
+
+        // Non-sender or non-reciever is rejected
+        assert!(msg_encr.decrypt(&p3_id, &p3_private).is_err());
+   }
 }
