@@ -876,7 +876,7 @@ mod tests {
             metadata: "".into(),
         };
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let rsa_length: usize = 2048;
         let p1_private = RsaPrivateKey::new(&mut rng, rsa_length).unwrap();
         let p2_private = RsaPrivateKey::new(&mut rng, rsa_length).unwrap();
