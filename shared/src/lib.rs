@@ -891,11 +891,11 @@ mod tests {
             .expect("Recipient must be able to decrypt");
         assert_eq!(as_recipient.body.body.as_deref(), Some("Testbody"));
 
-        // Proxy1 gets empty body
+        // Proxy1 gets <encrypted> body
         let as_creator = msg_encr
             .clone()
             .decrypt(&p1_id, &p1_private)
-            .expect("Creator must receive the task without a body");
+            .expect("Creator must receive the task with <encrypted> body");
         assert_eq!(as_creator.body.body.as_deref(), Some("<encrypted>"));
 
         // Non-sender or non-reciever is rejected
