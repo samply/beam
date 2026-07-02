@@ -30,11 +30,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Crypto
-rand = "0.8"
-rsa = "0.9"
-sha2 = "0.10"
+rand.workspace = true
+rsa.workspace = true
+sha2 = "0.11"
+chacha20poly1305.workspace = true
 openssl = "0.10"
-chacha20poly1305 = "0.10"
 itertools = "0.14.0"
 jwt-simple = "0.11"
 

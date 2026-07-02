@@ -30,7 +30,7 @@ serde = "1"
 serde_json = "1"
 
 # Encryption handling
-rsa = "0.9"
+rsa.workspace = true
 
 # Server-sent Events (SSE) support
 tokio-util = "0.7"
@@ -39,16 +39,17 @@ sse-stream = "0.2.3"
 async-stream = "0.3"
 
 # Socket dependencies
-chacha20poly1305 = { version = "0.10", features = ["stream"], optional = true }
+aead-stream = { version = "0.6", features = ["alloc"], optional = true }
+chacha20poly1305 = { workspace = true, features = ["bytes"], optional = true }
 dashmap =  { version = "6.0", optional = true}
 hyper = { version = "1", default-features = false, optional = true }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"], optional = true}
 
 [features]
-sockets = ["dep:chacha20poly1305", "dep:dashmap", "tokio-util/codec", "tokio-util/compat", "shared/sockets", "shared/expire_map", "dep:hyper", "dep:hyper-util"]
+sockets = ["dep:aead-stream", "dep:chacha20poly1305", "dep:dashmap", "tokio-util/codec", "tokio-util/compat", "shared/sockets", "shared/expire_map", "dep:hyper", "dep:hyper-util"]
 
 [build-dependencies]
 build-data = "0"
 
 [dev-dependencies]
-rand = "0.8.5"
+rand.workspace = true
