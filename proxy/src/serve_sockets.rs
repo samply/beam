@@ -7,7 +7,7 @@ use axum::{
 };
 use aead_stream::{DecryptorLE31, EncryptorLE31, Nonce, StreamLE31};
 use bytes::{Buf, BufMut, BytesMut};
-use chacha20poly1305::{aead::Generate, Key, KeyInit, XChaCha20Poly1305};
+use chacha20poly1305::{aead::{array::typenum::Unsigned, AeadCore, Generate}, Key, KeyInit, XChaCha20Poly1305};
 use dashmap::DashMap;
 use futures::{stream::IntoAsyncRead, FutureExt, SinkExt, StreamExt, TryStreamExt};
 use hyper_util::rt::TokioIo;
@@ -32,6 +32,7 @@ type MsgSecretMap = Arc<LazyExpireMap<MsgId, SocketEncKey>>;
 type StreamNonce = Nonce<XChaCha20Poly1305, StreamLE31<XChaCha20Poly1305>>;
 type FrameLen = u32;
 const FRAME_LEN_SIZE: usize = size_of::<FrameLen>();
+const TAG_SIZE: usize = <XChaCha20Poly1305 as AeadCore>::TagSize::USIZE;
 const TASK_SECRET_CLEANUP_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 pub(crate) fn router(client: SamplyHttpClient, config: &'static Config) -> Router {
@@ -281,23 +282,28 @@ impl Encoder<&[u8]> for EncryptorCodec {
     type Error = io::Error;
 
     fn encode(&mut self, item: &[u8], dst: &mut BytesMut) -> Result<(), Self::Error> {
-        let encrypted = self
-            .encryptor
-            .encrypt_next(item)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Encryption failed"))?;
-        let frame_len: FrameLen = encrypted
+        let frame_len: FrameLen = item
             .len()
-            .try_into()
-            .expect("item too large");
-        dst.reserve(FRAME_LEN_SIZE + encrypted.len());
+            .checked_add(TAG_SIZE)
+            .and_then(|l| l.try_into().ok())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "item too large"))?;
+
+        dst.reserve(FRAME_LEN_SIZE + frame_len as usize);
+        let frame_start = dst.len();
         dst.put_u32_le(frame_len);
-        dst.extend_from_slice(&encrypted);
+        dst.extend_from_slice(item);
+        let mut frame = dst.split_off(frame_start + FRAME_LEN_SIZE);
+        self
+            .encryptor
+            .encrypt_next_in_place(&[], &mut frame)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Encryption failed"))?;
+        dst.unsplit(frame);
         Ok(())
     }
 }
 
 impl Decoder for DecryptorCodec {
-    type Item = Vec<u8>;
+    type Item = BytesMut;
 
     type Error = io::Error;
 
@@ -313,12 +319,13 @@ impl Decoder for DecryptorCodec {
             return Ok(None);
         }
 
-        let plain = self
+        src.advance(FRAME_LEN_SIZE);
+        let mut frame = src.split_to(size);
+        self
             .decryptor
-            .decrypt_next(&src[FRAME_LEN_SIZE..total_frame_size])
+            .decrypt_next_in_place(&[], &mut frame)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Decryption failed"))?;
-        src.advance(total_frame_size);
-        Ok(Some(plain))
+        Ok(Some(frame))
     }
 }
 
