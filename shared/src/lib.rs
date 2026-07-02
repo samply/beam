@@ -228,10 +228,13 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
         my_priv_key: &RsaPrivateKey,
     ) -> Result<Self::Output, SamplyBeamError> {
 
-        // Message can not be encrypted, e.g. MsgEmpty
-        if self.get_encryption().is_none() {
+        let Some(Encrypted {
+            encrypted,
+            encryption_keys,
+        }) = self.get_encryption() else {
+            // We have something that is not encryptable
             return Ok(self.convert_self(String::new()));
-        }
+        };
 
         let to_array_index = self
             .get_to()
@@ -255,11 +258,6 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
             }
         };
         
-        let Encrypted {
-            encrypted,
-            encryption_keys,
-        } = self.get_encryption().unwrap(); // Checked above (l 233) that it is Some
-
         let encrypted_decryption_key = &encryption_keys[to_array_index];
 
         // Cryptographic Operations
