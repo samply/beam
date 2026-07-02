@@ -79,8 +79,8 @@ async fn test_get_task_by_id() -> Result<()> {
     let id = post_task(()).await?;
     let block = BlockingOptions::from_count(1);
     // One is sender, one reciever so both calls should work
-    assert_eq!(client1().get_task::<()>(&id, &block).await?.map(|t| t.id), Some(id));
-    assert_eq!(client2().get_task::<()>(&id, &block).await?.map(|t| t.id), Some(id));
+    assert_eq!(client1().get_task::<beam_lib::RawString>(&id, &block).await?.map(|t| t.id), Some(id));
+    assert_eq!(client2().get_task::<beam_lib::RawString>(&id, &block).await?.map(|t| t.id), Some(id));
     Ok(())
 }
 
@@ -106,7 +106,7 @@ async fn test_get_task_by_id_long_poll() -> Result<()> {
     let id = MsgId::new();
     let getter = async {
         let block = BlockingOptions { wait_time: Some(Duration::from_secs(5)), wait_count: Some(1) };
-        let task = client1().get_task::<()>(&id, &block).await?;
+        let task = client1().get_task::<beam_lib::RawString>(&id, &block).await?;
         assert_eq!(task.map(|t| t.id), Some(id), "Long-poll did not return the task before time out");
         Ok::<_, anyhow::Error>(())
     };
