@@ -354,6 +354,29 @@ Date: Mon, 27 Jun 2022 14:05:59 GMT
 )
 ```
 
+### Retrieve a task by ID
+
+Retrieve a task by its ID. The caller must be the task's creator or one of its recipients.
+
+Method: `GET`  
+URL: `/v1/tasks/<task_id>`  
+Parameters:
+
+- [long polling](#long-polling-api-access) is supported, but since at most one task is ever returned, `wait_count` must be omitted or `1` (any other value returns `400 Bad Request`).
+
+Returns the single task, cf. [here](#task):
+
+```
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "id": ...
+}
+```
+
+If no task with that ID is visible to the caller because a) it does not exist or b) the caller is neither the sender nor a recipient, the broker returns `404 Not Found`. Both conditions leading to the same return value is deliberate to avoid unauthorized message enumeration. If the caller is the task's creator, it can't decrypt the body and will instead return "<encrypted>" as a body.
+
 ### Create a result
 
 Create or update a result of a task. Currently, the body is restricted to 10MB in size.
