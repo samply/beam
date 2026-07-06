@@ -17,7 +17,7 @@ function start() {
 }
 
 function clean() {
-     rm -vf *.pem *.json *.secret
+     rm -vf *.pem *.json *.secret *.csr
      docker compose down
 }
 
@@ -95,17 +95,22 @@ function request() {
      application=$1
      cn=$2
      ttl=$3
-     data="{\"common_name\": \"$cn\", \"ttl\": \"$ttl\"}"
-     echo $data
+     # Beam only supports multiple certificates per proxy when they share one key.
+     # devsetup enrolls some proxies repeatedly to create duplicate certs, so reuse
+     # an existing key on re-enrollment and generate a fresh one only the first time;
+     # otherwise senders may encrypt to a key the proxy no longer holds.
+     if [ -s "${application}.priv.pem" ] && openssl pkey -in "${application}.priv.pem" -noout 2>/dev/null; then
+          openssl req -new -key "${application}.priv.pem" -out ${application}.csr -subj "/CN=${cn}" 2>/dev/null
+     else
+          openssl req -new -newkey rsa:2048 -nodes -keyout ${application}.priv.pem -out ${application}.csr -subj "/CN=${cn}" 2>/dev/null
+     fi
+     data=$(jq -Rs '{common_name: "'$cn'", ttl: "'$ttl'", csr: .}' < ${application}.csr)
      echo "Creating Certificate for domain $cn"
      curl --header "X-Vault-Token: $VAULT_TOKEN" \
           --request POST \
           --data "$data" \
           --no-progress-meter \
-     $VAULT_ADDR/v1/samply_pki/issue/hd-dot-dktk-dot-com | jq > ${application}.json
-     cat ${application}.json | jq -r .data.certificate > ${application}.crt.pem
-     cat ${application}.json | jq -r .data.ca_chain[] > ${application}.chain.pem
-     cat ${application}.json | jq -r .data.private_key > ${application}.priv.pem
+     $VAULT_ADDR/v1/samply_pki/sign/hd-dot-dktk-dot-com | jq > ${application}.json
      echo "Success: PEM files stored to ${application}*.pem"
 }
 
@@ -118,7 +123,7 @@ function setup() {
     #touch root.crt.pem # see https://github.com/docker/compose/issues/8305
     start
     while ! [ "$(curl -s $VAULT_ADDR/v1/sys/health | jq -r .sealed)" == "false" ]; do echo "Waiting ..."; sleep 0.1; done
-    docker compose exec -T vault sh -c "https_proxy=$http_proxy apk add --no-cache bash curl jq"
+    docker compose exec -T vault sh -c "https_proxy=$http_proxy apk add --no-cache bash curl jq openssl"
     docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki init"
     docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY1_ID_SHORT" "24h"
     docker compose exec -T vault sh -c "VAULT_TOKEN=$VAULT_TOKEN http_proxy= HTTP_PROXY= PROXY1_ID=$PROXY1_ID PROXY2_ID=$PROXY2_ID /pki/pki request_proxy $PROXY2_ID_SHORT" "24h"

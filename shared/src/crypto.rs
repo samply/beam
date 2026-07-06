@@ -1,15 +1,14 @@
 use async_trait::async_trait;
 use axum::{body::Body, http::Request, Json};
 
-use clap::error;
 use itertools::Itertools;
 use once_cell::sync::{Lazy, OnceCell};
 use openssl::{
-    asn1::{Asn1Time, Asn1TimeRef, Asn1Integer},
+    asn1::{Asn1Integer, Asn1IntegerRef, Asn1Time, Asn1TimeRef},
     error::ErrorStack,
     rand::rand_bytes,
     string::OpensslString,
-    x509::{X509, X509Crl, CrlStatus},
+    x509::{CrlStatus, X509Crl, X509},
 };
 use rsa::{
     pkcs1::DecodeRsaPublicKey, pkcs8::DecodePublicKey, RsaPrivateKey, RsaPublicKey, traits::PublicKeyParts,
@@ -29,8 +28,6 @@ use tracing::{debug, error, info, warn};
 
 use beam_lib::{AppOrProxyId, ProxyId};
 use crate::{
-    config,
-    config_shared::ConfigCrypto,
     crypto,
     errors::{CertificateInvalidReason, SamplyBeamError},
     EncryptedMsgTaskRequest, MsgTaskRequest,
@@ -285,9 +282,15 @@ impl CertificateCache {
         revoked_certs
     }
 
-    pub async fn update_certificates_mut(&mut self) -> Result<CertificateCacheUpdate, SamplyBeamError> {
+    pub async fn update_certificates_mut(
+        &mut self,
+    ) -> Result<CertificateCacheUpdate, SamplyBeamError> {
         debug!("Updating certificates via network ...");
-        let certificate_list = CERT_GETTER.get().unwrap().certificate_list_via_network().await?;
+        let certificate_list = CERT_GETTER
+            .get()
+            .unwrap()
+            .certificate_list_via_network()
+            .await?;
         let certificate_revocation_list = CERT_GETTER.get().unwrap().get_crl().await?;
         // Check if any of the certs in the cache have been revoked
         let mut revoked_certs = certificate_revocation_list
@@ -306,32 +309,28 @@ impl CertificateCache {
         );
 
         let mut new_count = 0;
-        //TODO Check for validity
-        for serial in new_certificate_serials {
+        let cert_getter = CERT_GETTER.get().unwrap();
+        let cert_pems = new_certificate_serials
+            .iter()
+            .map(|s| cert_getter.certificate_by_serial_as_pem(s))
+            .collect::<futures::future::JoinAll<_>>()
+            .await;
+        for (serial, cert_pem) in new_certificate_serials.into_iter().zip(cert_pems) {
             debug!("Checking certificate with serial {serial}");
 
-            let certificate = CERT_GETTER
-                .get()
-                .unwrap()
-                .certificate_by_serial_as_pem(serial)
-                .await;
-            if let Err(e) = certificate {
-                match e {
-                    SamplyBeamError::CertificateError(err) => {
-                        debug!("Will skip invalid certificate {serial} from now on.");
-                        self.serial_to_x509
-                            .insert(serial.clone(), CertificateCacheEntry::Invalid(err));
-                    }
-                    other_error => {
-                        warn!(
-                            "Could not retrieve certificate for serial {serial}: {}",
-                            other_error
-                        );
-                    }
-                };
-                continue;
-            }
-            let certificate = certificate.unwrap();
+            let certificate = match cert_pem {
+                Err(SamplyBeamError::CertificateError(err)) => {
+                    debug!("Will skip invalid certificate {serial} from now on.");
+                    self.serial_to_x509
+                        .insert(serial.clone(), CertificateCacheEntry::Invalid(err));
+                    continue;
+                },
+                Err(other_error) => {
+                    warn!("Could not retrieve certificate for serial {serial}: {other_error}");
+                    continue;
+                }
+                Ok(cert) => cert,
+            };
             let opensslcert = match X509::from_pem(certificate.as_bytes()) {
                 Ok(x) => x,
                 Err(err) => {
@@ -504,9 +503,9 @@ async fn get_all_certs_from_cache_by_cname(cname: &ProxyId) -> Vec<CertificateCa
 }
 
 /// Wrapper for initializing the CA chain. Must be called *after* config initialization
-pub async fn init_ca_chain() -> Result<(), SamplyBeamError> {
+pub async fn init_ca_chain(root_cert: &X509) -> Result<(), SamplyBeamError> {
     let mut cache = CERT_CACHE.write().await;
-    cache.set_root_cert(&config::CONFIG_SHARED.root_cert);
+    cache.set_root_cert(root_cert);
     cache.set_im_cert().await?;
     Ok(())
 }
@@ -707,13 +706,10 @@ pub(crate) fn hash(data: &[u8]) -> Result<[u8; 32], SamplyBeamError> {
     Ok(digest)
 }
 
-pub fn get_own_crypto_material() -> &'static ConfigCrypto {
-    config::CONFIG_SHARED_CRYPTO.get().unwrap()
-}
 /* Utility Functions */
 
 /// Extracts the pem-encoded public key from a x509 certificate
-fn x509_cert_to_x509_public_key(cert: &X509) -> Result<Vec<u8>, SamplyBeamError> {
+pub fn x509_cert_to_x509_public_key(cert: &X509) -> Result<Vec<u8>, SamplyBeamError> {
     match cert.public_key() {
         Ok(key) => key.public_key_to_pem().or_else(|_| {
             Err(SamplyBeamError::SignEncryptError(
@@ -753,6 +749,28 @@ pub fn asn1_time_to_system_time(time: &Asn1TimeRef) -> Result<SystemTime, ErrorS
     let unix_time = Asn1Time::from_unix(0)?.diff(time)?;
     Ok(SystemTime::UNIX_EPOCH
         + Duration::from_secs(unix_time.days as u64 * 86400 + unix_time.secs as u64))
+}
+
+pub fn asn_str_to_vault_str(asn: &Asn1IntegerRef) -> Result<String, SamplyBeamError> {
+    let mut a = asn
+        .to_bn()
+        .map_err(|e| {
+            SamplyBeamError::SignEncryptError(format!("Unable to parse your certificate: {}", e))
+        })?
+        .to_hex_str()
+        .map_err(|e| {
+            SamplyBeamError::SignEncryptError(format!("Unable to parse your certificate: {}", e))
+        })?
+        .to_string()
+        .to_ascii_lowercase();
+
+    let mut i = 2;
+    while i < a.len() {
+        a.insert(i, ':');
+        i += 3;
+    }
+
+    Ok(a)
 }
 
 /// Checks if SystemTime::now() is between the not_before and the not_after dates of a x509 certificate
@@ -807,10 +825,8 @@ pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<reqwest
 /// Checks whether or not a x509 certificate matches a private key by comparing the (public) modulus
 pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool, ErrorStack> {
     let cert_rsa = cert.public_key()?.rsa()?;
-    let cert_mod = cert_rsa.n();
-    let key_mod = key.n();
-    let key_mod_bignum = openssl::bn::BigNum::from_slice(&key_mod.to_bytes_be())?;
-    let is_equal = cert_mod.ucmp(&key_mod_bignum) == std::cmp::Ordering::Equal;
+    let cert_mod = rsa::BoxedUint::from_be_slice_vartime(&cert_rsa.n().to_vec());
+    let is_equal = cert_mod.cmp(&key.n()) == std::cmp::Ordering::Equal;
     if !is_equal {
         match ProxyCertInfo::try_from(cert) {
             Ok(x) => {
@@ -857,7 +873,7 @@ pub fn get_newest_cert(certs: &mut Vec<CryptoPublicPortion>) -> Option<CryptoPub
 /// 1) Does it match the private key?
 /// 2) Is the current date in the valid date range?
 /// 3) Select the newest of the remaining
-pub(crate) fn get_best_own_certificate(
+pub fn get_best_own_certificate(
     publics: impl Into<Vec<CryptoPublicPortion>>,
     private_rsa: &RsaPrivateKey,
 ) -> Option<CryptoPublicPortion> {
@@ -919,6 +935,14 @@ mod tests {
     use openssl::{x509::{X509NameBuilder, extension::{BasicConstraints, KeyUsage, SubjectKeyIdentifier}}, bn::{BigNum, MsbOption}, pkey::PKey, rsa::Rsa, hash::MessageDigest};
 
     use super::*;
+
+    #[test]
+    fn hex_str() {
+        let bn = BigNum::from_hex_str("440E0D94F36966391117BC9F867D84F0C48CFCB7").unwrap();
+        let input = Asn1Integer::from_bn(&bn).unwrap();
+        let expected = "44:0e:0d:94:f3:69:66:39:11:17:bc:9f:86:7d:84:f0:c4:8c:fc:b7";
+        assert_eq!(expected, asn_str_to_vault_str(&input).unwrap());
+    }
 
     fn build_x509(ttl: Duration) -> X509 {
         let mut builder = X509::builder().unwrap();

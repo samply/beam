@@ -7,15 +7,15 @@ use openssl::x509::X509;
 use reqwest::{Certificate, Client, ClientBuilder};
 use tracing::{debug, info, warn};
 
-use crate::{config, errors::SamplyBeamError};
+use crate::{errors::SamplyBeamError};
 
 pub type SamplyHttpClient = reqwest::Client;
 
-pub fn build(
+pub fn builder(
     ca_certificates: &Vec<Certificate>,
     timeout: Option<Duration>,
     keepalive: Option<Duration>,
-) -> Result<SamplyHttpClient, SamplyBeamError> {
+) -> ClientBuilder {
     let mut builder = Client::builder().tcp_keepalive(keepalive);
     if let Some(to) = timeout {
         builder = builder.connect_timeout(to);
@@ -43,7 +43,7 @@ pub fn build(
     };
     info!("Using {proxies} and {certs} for TLS termination.");
 
-    builder.build().map_err(|e| SamplyBeamError::ConfigurationFailed(e.to_string()))
+    builder
 }
 
 #[cfg(test)]
@@ -60,13 +60,13 @@ mod test {
 
     #[tokio::test]
     async fn https() {
-        let client = http_client::build(&vec![], None, None).unwrap();
+        let client = http_client::builder(&vec![], None, None).build().unwrap();
         run(HTTPS.parse().unwrap(), client).await;
     }
 
     #[tokio::test]
     async fn http() {
-        let client = http_client::build(&vec![], None, None).unwrap();
+        let client = http_client::builder(&vec![], None, None).build().unwrap();
         run(HTTP.parse().unwrap(), client).await;
     }
 

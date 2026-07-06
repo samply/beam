@@ -5,7 +5,7 @@ use crate::{
 };
 use axum::http::Uri;
 use clap::Parser;
-use reqwest::Url;
+use shared::{logger::LogOptions, openssl::x509::X509, reqwest::{self, Url}};
 use std::str::FromStr;
 use tracing::info;
 
@@ -14,9 +14,9 @@ use tracing::info;
     name("🌈 Samply.Beam.Broker"),
     version,
     arg_required_else_help(true),
-    after_help(crate::config_shared::CLAP_FOOTER)
+    after_help(crate::CLAP_FOOTER)
 )]
-struct CliArgs {
+pub struct CliArgs {
     /// Local bind address
     #[clap(long, env, value_parser, default_value_t = SocketAddr::from_str("0.0.0.0:8080").unwrap())]
     bind_addr: SocketAddr,
@@ -53,23 +53,23 @@ struct CliArgs {
     #[clap(long, env, value_parser)]
     monitoring_api_key: Option<String>,
 
-    /// (included for technical reasons)
-    #[clap(long, hide(true))]
-    test_threads: Option<String>,
+    #[clap(flatten)]
+    pub log_options: LogOptions,
 }
 
+#[derive(Debug)]
 pub struct Config {
     pub bind_addr: SocketAddr,
     pub pki_address: Url,
     pub pki_realm: String,
     pub pki_token: String,
-    pub tls_ca_certificates_dir: Option<PathBuf>,
+    pub tls_ca_certificates: Vec<reqwest::Certificate>,
     pub monitoring_api_key: Option<String>,
+    pub rootcert: X509,
 }
 
-impl crate::config::Config for Config {
-    fn load() -> Result<Self, SamplyBeamError> {
-        let cli_args = CliArgs::parse();
+impl Config {
+    pub fn load(cli_args: CliArgs) -> Result<Self, SamplyBeamError> {
         beam_lib::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
         let pki_token = read_to_string(&cli_args.pki_apikey_file)
             .map_err(|e| {
@@ -88,8 +88,11 @@ impl crate::config::Config for Config {
             pki_address: cli_args.pki_address,
             pki_realm: cli_args.pki_realm,
             pki_token,
-            tls_ca_certificates_dir: cli_args.tls_ca_certificates_dir,
+            tls_ca_certificates: shared::crypto::load_certificates_from_dir(cli_args.tls_ca_certificates_dir).map_err(|e| {
+                SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory: {e:#}"))
+            })?,
             monitoring_api_key: cli_args.monitoring_api_key,
+            rootcert: shared::crypto::load_certificates_from_file(cli_args.rootcert_file)?,
         };
         Ok(config)
     }

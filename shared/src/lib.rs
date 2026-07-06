@@ -2,8 +2,7 @@
 
 use beam_lib::{AppId, AppOrProxyId, ProxyId, FailureStrategy, WorkStatus};
 use chacha20poly1305::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
-    XChaCha20Poly1305, XNonce,
+    aead, XChaCha20Poly1305, XNonce, aead::{Aead, AeadCore, Generate, KeyInit, array::typenum::Unsigned}
 };
 use crypto_jwt::extract_jwt;
 use errors::SamplyBeamError;
@@ -21,7 +20,7 @@ use std::{
     time::{Duration, Instant, SystemTime}, net::SocketAddr, error::Error,
 };
 
-use rand::Rng;
+use rand::{rng, Rng};
 use serde::{
     de::{DeserializeOwned, Visitor},
     Deserialize, Serialize,
@@ -32,6 +31,7 @@ use uuid::Uuid;
 use crate::{crypto_jwt::JWT_VERIFICATION_OPTIONS, serde_helpers::*};
 // Reexport b64 implementation
 pub use jwt_simple::reexports::ct_codecs;
+pub use jwt_simple;
 pub use reqwest;
 pub use async_trait::async_trait;
 
@@ -48,12 +48,6 @@ mod traits;
 #[cfg(test)]
 mod serializing_compatibility_test;
 
-pub mod config;
-pub mod config_shared;
-// #[cfg(feature = "config-for-broker")]
-pub mod config_broker;
-// #[cfg(feature = "config-for-proxy")]
-pub mod config_proxy;
 #[cfg(feature = "expire_map")]
 pub mod expire_map;
 #[cfg(feature = "sockets")]
@@ -65,13 +59,12 @@ pub mod graceful_shutdown;
 pub mod http_client;
 pub mod middleware;
 
-pub mod examples;
-
 pub mod sse_event;
 
 // Reexports
 pub use openssl;
 
+pub const CLAP_FOOTER: &str = "For proxy support, environment variables HTTP_PROXY, HTTPS_PROXY, ALL_PROXY and NO_PROXY (and their lower-case variants) are supported. Usually, you want to set HTTP_PROXY *and* HTTPS_PROXY or set ALL_PROXY if both values are the same.\n\nFor updates and detailed usage instructions, visit https://github.com/samply/beam";
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct HowLongToBlock {
@@ -234,6 +227,7 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
         my_id: &AppOrProxyId,
         my_priv_key: &RsaPrivateKey,
     ) -> Result<Self::Output, SamplyBeamError> {
+
         let Some(Encrypted {
             encrypted,
             encryption_keys,
@@ -242,7 +236,7 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
             return Ok(self.convert_self(String::new()));
         };
 
-        let to_array_index: usize = self
+        let to_array_index = self
             .get_to()
             .iter()
             .position(|entry| {
@@ -255,25 +249,39 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
                     None => false,
                 };
                 matched
-            }) // TODO remove expect!
-            .ok_or(SamplyBeamError::SignEncryptError(
-                "Decryption error: This client cannot be found in 'to' list".into(),
-            ))?;
+            });
+        let Some(to_array_index) = to_array_index else {
+            if self.get_from().proxy_id() == my_id.proxy_id() {
+                return Ok(self.convert_self("<encrypted>".to_string()));
+            } else {
+                return Err(SamplyBeamError::SignEncryptError("Decryption error: This client cannot be found in 'to' list".into()));
+            }
+        };
+        
         let encrypted_decryption_key = &encryption_keys[to_array_index];
 
         // Cryptographic Operations
-        let cipher_engine = XChaCha20Poly1305::new_from_slice(&my_priv_key.decrypt(
-            Oaep::new::<sha2::Sha256>(),
+        let symmetric_key = my_priv_key.decrypt(
+            Oaep::<sha2::Sha256>::new(),
             &encrypted_decryption_key,
-        )?)
-        .map_err(|e| {
-            SamplyBeamError::SignEncryptError(format!(
-                "Decryption error: Cannot initialize stream cipher because {}",
-                e
-            ))
-        })?;
-        let nonce: XNonce = XNonce::clone_from_slice(&encrypted[0..24]);
-        let ciphertext = &encrypted[24..];
+        )?;
+        let symmetric_key = aead::Key::<XChaCha20Poly1305>::try_from(symmetric_key.as_slice())
+            .map_err(|_| {
+                SamplyBeamError::SignEncryptError(
+                    "Decryption error: Invalid symmetric key length".into(),
+                )
+            })?;
+        let cipher_engine = XChaCha20Poly1305::new(&symmetric_key);
+        const NONCE_SIZE: usize = <XChaCha20Poly1305 as AeadCore>::NonceSize::USIZE;
+        let nonce = encrypted
+            .get(..NONCE_SIZE)
+            .and_then(|nonce| XNonce::try_from(nonce).ok())
+            .ok_or(SamplyBeamError::SignEncryptError(
+                "Decryption error: Missing or invalid nonce".into(),
+            ))?;
+        let ciphertext = encrypted.get(NONCE_SIZE..).ok_or(SamplyBeamError::SignEncryptError(
+            "Decryption error: Missing ciphertext".into(),
+        ))?;
         let plaintext = String::from_utf8(
             cipher_engine
                 .decrypt(&nonce, ciphertext.as_ref())
@@ -308,9 +316,9 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
         receivers_public_keys: &Vec<RsaPublicKey>,
     ) -> Result<Self::Output, SamplyBeamError> {
         // Generate Symmetric Key and Nonce
-        let mut rng = rand::thread_rng();
-        let symmetric_key = XChaCha20Poly1305::generate_key(&mut rng);
-        let nonce = XChaCha20Poly1305::generate_nonce(&mut rng);
+        let mut rng = rng();
+        let symmetric_key = aead::Key::<XChaCha20Poly1305>::generate_from_rng(&mut rng);
+        let nonce = aead::Nonce::<XChaCha20Poly1305>::generate_from_rng(&mut rng);
 
         // Encrypt symmetric key with receivers' public keys
         let Ok(encrypted_keys) = receivers_public_keys
@@ -318,7 +326,7 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
             .map(|key| {
                 key.encrypt(
                     &mut rng,
-                    Oaep::new::<sha2::Sha256>(),
+                    Oaep::<sha2::Sha256>::new(),
                     symmetric_key.as_slice(),
                 )
             })
@@ -722,6 +730,20 @@ impl Msg for MsgPing {
     }
 }
 
+pub fn format_to_without_broker(to: &[AppOrProxyId]) -> impl Display + use<'_> {
+    struct Helper<'a> {
+        to: &'a [AppOrProxyId],
+    }
+
+    impl<'a> std::fmt::Display for Helper<'a> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_list().entries(self.to.iter().map(|to| to.hide_broker())).finish()
+        }
+    }
+
+    Helper { to }
+}
+
 pub fn try_read<T>(map: &HashMap<String, String>, key: &str) -> Option<T>
 where
     T: FromStr,
@@ -759,7 +781,7 @@ mod tests {
         };
 
         //Setup Keypairs
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let rsa_length: usize = 2048;
         let p1_private = RsaPrivateKey::new(&mut rng, rsa_length)
             .expect("Failed to generate private key for proxy 1");
@@ -805,7 +827,7 @@ mod tests {
         };
 
         //Setup Keypairs
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let rsa_length: usize = 2048;
         let p1_private = RsaPrivateKey::new(&mut rng, rsa_length)
             .expect("Failed to generate private key for proxy 1");
@@ -833,4 +855,50 @@ mod tests {
         assert_eq!(msg_p1_decr, msg_p2_decr);
         assert_eq!(msg, msg_p1_decr);
     }
+
+    #[test]
+    fn decrypt_task_as_creator() {
+        // Task sender should get an empty body
+        beam_lib::set_broker_id("broker.samply.de".to_string());
+        let p1_id = AppOrProxyId::App(AppId::new("app.proxy1.broker.samply.de").unwrap());
+        let p2_id = AppOrProxyId::App(AppId::new("app.proxy2.broker.samply.de").unwrap());
+        let p3_id = AppOrProxyId::App(AppId::new("app.proxy3.broker.samply.de").unwrap());
+        let msg = MsgTaskRequest {
+            id: MsgId::new(),
+            from: p1_id.clone(),
+            to: vec![p2_id.clone()],
+            body: "Testbody".into(),
+            expire: SystemTime::now() + Duration::from_secs(60),
+            failure_strategy: FailureStrategy::Discard,
+            results: HashMap::new(),
+            metadata: "".into(),
+        };
+
+        let mut rng = rand::rng();
+        let rsa_length: usize = 2048;
+        let p1_private = RsaPrivateKey::new(&mut rng, rsa_length).unwrap();
+        let p2_private = RsaPrivateKey::new(&mut rng, rsa_length).unwrap();
+        let p3_private = RsaPrivateKey::new(&mut rng, rsa_length).unwrap();
+        let p2_public = RsaPublicKey::from(&p2_private);
+
+        // Encrypted for proxy2 only.
+        let msg_encr = msg.encrypt(&vec![p2_public]).expect("Could not encrypt message");
+
+        // Proxy2 can decrypt
+        let as_recipient = msg_encr
+            .clone()
+            .decrypt(&p2_id, &p2_private)
+            .expect("Recipient must be able to decrypt");
+        assert_eq!(as_recipient.body.body.as_deref(), Some("Testbody"));
+
+        // Proxy1 gets <encrypted> body
+        let as_creator = msg_encr
+            .clone()
+            .decrypt(&p1_id, &p1_private)
+            .expect("Creator must receive the task with <encrypted> body");
+        assert_eq!(as_creator.body.body.as_deref(), Some("<encrypted>"));
+
+        // Non-sender or non-reciever is rejected
+        assert!(msg_encr.decrypt(&p3_id, &p3_private).is_err());
+   }
 }

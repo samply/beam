@@ -2,8 +2,6 @@ use std::net::{SocketAddr, IpAddr};
 
 use beam_lib::{AppOrProxyId, ProxyId};
 use crate::{
-    config,
-    config_shared::ConfigCrypto,
     crypto::{self, CryptoPublicPortion},
     errors::{CertificateInvalidReason, SamplyBeamError},
     Msg, MsgEmpty, MsgId, MsgSigned,

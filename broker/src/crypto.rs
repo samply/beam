@@ -3,16 +3,18 @@ use std::{future::Future, mem::discriminant, sync::Arc};
 use axum::http::{header, method, uri::Scheme, Method, Request, StatusCode, Uri};
 use serde::{Deserialize, Serialize};
 use shared::{
-    async_trait, config, crypto::{parse_crl, CertificateCache, CertificateCacheUpdate, GetCerts}, errors::SamplyBeamError, http_client::{self, SamplyHttpClient}, openssl::x509::X509Crl, reqwest::{self, Url}
+    async_trait, crypto::{parse_crl, CertificateCache, CertificateCacheUpdate, GetCerts}, errors::SamplyBeamError, http_client::{self, SamplyHttpClient}, openssl::x509::X509Crl, reqwest::{self, Url}
 };
 use std::time::Duration;
 use tokio::{sync::RwLock, time::timeout};
 use tracing::{debug, error, warn, info};
 
-use crate::serve_health::{Health, VaultStatus};
+use crate::{config::Config, serve_health::{Health, VaultStatus}};
 
 pub struct GetCertsFromPki {
     pki_realm: String,
+    vault_token: String,
+    vault_address: Url,
     hyper_client: SamplyHttpClient,
     health: Arc<RwLock<Health>>,
 }
@@ -36,30 +38,18 @@ struct PkiListResponse {
 impl GetCertsFromPki {
     pub(crate) fn new(
         health: Arc<RwLock<Health>>,
+        config: &Config,
     ) -> Result<Self, SamplyBeamError> {
-        let mut certs: Vec<String> = Vec::new();
-        if let Some(dir) = &config::CONFIG_CENTRAL.tls_ca_certificates_dir {
-            for file in std::fs::read_dir(dir).map_err(|e| {
-                SamplyBeamError::ConfigurationFailed(format!(
-                    "Unable to read CA certificates: {}",
-                    e
-                ))
-            })? {
-                if let Ok(file) = file {
-                    certs.push(file.path().to_str().unwrap().into());
-                }
-            }
-            debug!("Loaded local certificates: {}", certs.join(" "));
-        }
-        let hyper_client = http_client::build(
-            &config::CONFIG_SHARED.tls_ca_certificates,
+        let hyper_client = http_client::builder(
+            &config.tls_ca_certificates,
             Some(Duration::from_secs(30)),
             Some(Duration::from_secs(20)),
-        )?;
-        let pki_realm = config::CONFIG_CENTRAL.pki_realm.clone();
+        ).build()?;
 
         Ok(Self {
-            pki_realm,
+            pki_realm: config.pki_realm.clone(),
+            vault_address: config.pki_address.clone(),
+            vault_token: config.pki_token.clone(),
             hyper_client,
             health,
         })
@@ -86,7 +76,7 @@ impl GetCertsFromPki {
     }
 
     async fn check_vault_health_helper(&self) -> Result<(), SamplyBeamError> {
-        let url = pki_url_builder("sys/health");
+        let url = self.vault_address.join(&format!("/v1/sys/health")).unwrap();
         debug!("Checking Vault's health at URL {url}");
         let health = self.hyper_client.get(url).send().await;
         let Ok(resp) = health else {
@@ -117,7 +107,7 @@ impl GetCertsFromPki {
         api_path: &str,
         max_tries: Option<u32>,
     ) -> Result<reqwest::Response, SamplyBeamError> {
-        let uri = pki_url_builder(api_path);
+        let uri = self.vault_address.join(&format!("/v1/{api_path}")).unwrap();
         debug!("Samply.PKI: Vault request to {uri}");
         let max_tries = max_tries.unwrap_or(u32::MAX);
         for tries in 0..max_tries {
@@ -126,7 +116,7 @@ impl GetCertsFromPki {
             }
             let resp = self.hyper_client
                 .request(method.clone(), uri.clone())
-                .header("X-Vault-Token", &config::CONFIG_CENTRAL.pki_token)
+                .header("X-Vault-Token", &self.vault_token)
                 .header("User-Agent", env!("SAMPLY_USER_AGENT"))
                 .send()
                 .await;
@@ -193,7 +183,7 @@ impl GetCerts for GetCertsFromPki {
         let resp = self
             .resilient_vault_request(
                 &Method::from_bytes("LIST".as_bytes()).unwrap(),
-                &format!("{}/certs", &config::CONFIG_CENTRAL.pki_realm),
+                &format!("{}/certs", &self.pki_realm),
                 Some(100),
             )
             .await?;
@@ -252,8 +242,4 @@ impl GetCerts for GetCertsFromPki {
         .await?;
         parse_crl(&resp.bytes().await?).map(Some)
     }
-}
-
-fn pki_url_builder(location: &str) -> Url {
-    config::CONFIG_CENTRAL.pki_address.join(&format!("/v1/{location}")).unwrap()
 }

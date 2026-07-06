@@ -12,7 +12,7 @@ pub async fn log(
 ) -> Response {
     let method = req.method().clone();
     let uri = req.uri().clone();
-    let span = info_span!("", from = field::Empty);
+    let span = info_span!("request", from = field::Empty);
 
     async move {
         let resp = next.run(req).instrument(Span::current()).await;

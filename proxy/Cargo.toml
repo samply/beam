@@ -8,13 +8,15 @@ documentation = "https://github.com/samply/beam"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-shared = { path = "../shared", features = ["config-for-proxy"] }
+shared = { path = "../shared" }
 beam-lib = { workspace = true }
 
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["macros"] }
 bytes = { version = "1" }
 httpdate = "1.0"
+clap.workspace = true
+regex = "1"
 
 # Error handling
 anyhow = "1"
@@ -28,25 +30,26 @@ serde = "1"
 serde_json = "1"
 
 # Encryption handling
-rsa = "0.9"
+rsa.workspace = true
 
 # Server-sent Events (SSE) support
-tokio-util = { version = "0.7", features = ["io"] }
-futures = "0.3"
-async-sse = "5.1"
+tokio-util = "0.7"
+futures.workspace = true
+sse-stream = "0.2.3"
 async-stream = "0.3"
 
 # Socket dependencies
-chacha20poly1305 = { version = "0.10", features = ["stream"], optional = true }
+aead-stream = { version = "0.6", features = ["alloc"], optional = true }
+chacha20poly1305 = { workspace = true, features = ["bytes"], optional = true }
 dashmap =  { version = "6.0", optional = true}
 hyper = { version = "1", default-features = false, optional = true }
 hyper-util = { version = "0.1", default-features = false, features = ["tokio"], optional = true}
 
 [features]
-sockets = ["dep:chacha20poly1305", "dep:dashmap", "tokio-util/codec", "tokio-util/compat", "shared/sockets", "shared/expire_map", "dep:hyper", "dep:hyper-util"]
+sockets = ["dep:aead-stream", "dep:chacha20poly1305", "dep:dashmap", "tokio-util/codec", "tokio-util/compat", "shared/sockets", "shared/expire_map", "dep:hyper", "dep:hyper-util"]
 
 [build-dependencies]
 build-data = "0"
 
 [dev-dependencies]
-rand = "0.8.5"
+rand.workspace = true

@@ -1,7 +1,7 @@
 version: "3.7"
 services:
   vault:
-    image: hashicorp/vault
+    image: hashicorp/vault:1.21
     ports:
       - 127.0.0.1:8200:8200
     environment:
@@ -31,7 +31,10 @@ services:
       BIND_ADDR: 0.0.0.0:8080
       MONITORING_API_KEY: ${BROKER_MONITORING_KEY}
       RUST_LOG: ${RUST_LOG}
+      LOG_DIR: /logs
       # ALL_PROXY: http://mitmproxy:8080
+    volumes:
+      - ./logs/broker:/logs
     secrets:
       - pki.secret
       - dummy.pem
@@ -60,7 +63,10 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy1.pem
       BIND_ADDR: 0.0.0.0:8081
       RUST_LOG: ${RUST_LOG}
+      LOG_DIR: /logs
       # ALL_PROXY: http://mitmproxy:8080
+    volumes:
+      - ./logs/proxy1:/logs
     secrets:
       - proxy1.pem
       - root.crt.pem
@@ -82,10 +88,50 @@ services:
       PRIVKEY_FILE: /run/secrets/proxy2.pem
       BIND_ADDR: 0.0.0.0:8082
       RUST_LOG: ${RUST_LOG}
+      LOG_DIR: /logs
       # ALL_PROXY: http://mitmproxy:8080
+    volumes:
+      - ./logs/proxy2:/logs
     secrets:
       - proxy2.pem
       - root.crt.pem
+
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "1025:1025" # SMTP port
+      - "8025:8025" # Web UI
+    profiles:
+      - cert-manager
+
+  cert-ui:
+    image: samply/beam-cert-manager
+    ports:
+      - 8000:8000
+      - 3000:3000
+    environment:
+      BROKER_URL: http://broker:8080
+      VAULT_URL: http://vault:8200
+      CSR_DIR: /pki
+      SMTP_URL: smtp://mailhog:1025
+      DB_DIR: /pki/db
+      BROKER_MONITORING_KEY: ${BROKER_MONITORING_KEY}
+      PKI_DEFAULT_ROLE: hd-dot-dktk-dot-com
+      PUBLIC_BASE_URL: http://localhost:3000
+      ADMIN_ADDR: 0.0.0.0:8000
+      BROKER_ID: broker
+      RUST_LOG: ${RUST_LOG}
+    volumes:
+      - ./pki:/pki
+    secrets:
+      - pki.secret
+    depends_on:
+      - vault
+      - broker
+      - mailhog
+    profiles:
+      - cert-manager
+
 secrets:
   pki.secret:
     file: ./pki/pki.secret

@@ -15,25 +15,27 @@ uuid = { version = "1", features = [
 ]}
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+clap.workspace = true
 
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = [] }
 bytes = "1.4"
+futures.workspace = true
 
-# HTTP client with proxy support
-reqwest = { version = "0.12", features = ["stream"] }
+# This includes all default features of reqwest but uses native-tls aka openssl as we depend on it for encryption anyways
+reqwest = { workspace = true, features = ["stream", "native-tls", "charset", "system-proxy", "http2"] }
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Crypto
-rand = "0.8"
-rsa = "0.9"
-sha2 = "0.10"
+rand.workspace = true
+rsa.workspace = true
+sha2 = "0.11"
+chacha20poly1305.workspace = true
 openssl = "0.10"
-chacha20poly1305 = "0.10"
-itertools = "0.14.0"
+itertools = "0.15.0"
 jwt-simple = "0.11"
 
 # Global variables
@@ -42,21 +44,17 @@ once_cell = "1"
 # Error handling
 thiserror = "2"
 
-# Command Line Interface
-clap = { version = "4", features = ["env", "derive"] }
 
 fundu = "2.0"
-regex = "1"
 
 # expire map dependencies
 dashmap =  { version = "6.0", optional = true}
 
 beam-lib = { workspace = true }
 async-trait = "0.1"
+tracing-appender = "0.2.3"
 
 [features]
 expire_map = ["dep:dashmap"]
 sockets = ["expire_map", "beam-lib/sockets", "reqwest/json"]
 default = []
-config-for-proxy = []
-config-for-central = []

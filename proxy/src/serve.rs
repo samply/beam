@@ -2,7 +2,7 @@ use std::{fmt::Write, net::SocketAddr};
 
 use axum::extract::DefaultBodyLimit;
 use shared::{
-    config, config_proxy, config_shared, errors::SamplyBeamError, http_client::SamplyHttpClient,
+    errors::SamplyBeamError, http_client::SamplyHttpClient,
 };
 use tokio::net::TcpListener;
 use tracing::{debug, error, info, warn};
@@ -10,17 +10,17 @@ use tracing::{debug, error, info, warn};
 use crate::{banner, serve_health, serve_tasks};
 
 pub(crate) async fn serve(
-    config: config_proxy::Config,
+    config: &'static crate::Config,
     client: SamplyHttpClient,
 ) -> anyhow::Result<()> {
-    let router_tasks = serve_tasks::router(&client);
+    let router_tasks = serve_tasks::router(&client, config);
 
     let router_health = serve_health::router();
 
     let app = router_tasks.merge(router_health);
 
     #[cfg(feature = "sockets")]
-    let app = app.merge(crate::serve_sockets::router(client));
+    let app = app.merge(crate::serve_sockets::router(client, config));
     // Middleware needs to be set last
     let app = app
         .layer(axum::middleware::from_fn(shared::middleware::log))

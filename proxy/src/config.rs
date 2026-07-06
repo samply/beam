@@ -1,11 +1,12 @@
 use clap::Parser;
-use openssl::x509::X509;
 use regex::Regex;
 use reqwest::Url;
+use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
+use shared::{errors::SamplyBeamError, jwt_simple::prelude::RS256KeyPair, logger::LogOptions, openssl::x509::X509, reqwest};
 
 use std::{
     collections::HashMap,
-    fs::read_to_string,
+    fs::{self, read_to_string},
     net::SocketAddr,
     path::{Path, PathBuf},
     process::exit,
@@ -17,7 +18,6 @@ use serde::Deserialize;
 use tracing::{debug, info, warn};
 
 use beam_lib::{AppId, ProxyId};
-use crate::errors::SamplyBeamError;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -27,6 +27,14 @@ pub struct Config {
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId, ApiKey>,
     pub tls_ca_certificates: Vec<reqwest::Certificate>,
+    pub crypto: ConfigCrypto,
+    pub rootcert: X509,
+}
+
+#[derive(Debug, Clone)]
+pub struct ConfigCrypto {
+    pub privkey_rs256: RS256KeyPair,
+    pub privkey_rsa: RsaPrivateKey,
 }
 
 pub type ApiKey = String;
@@ -36,7 +44,7 @@ pub type ApiKey = String;
     name("🌈 Samply.Beam.Proxy"),
     version,
     arg_required_else_help(true),
-    after_help(crate::config_shared::CLAP_FOOTER)
+    after_help(shared::CLAP_FOOTER)
 )]
 pub struct CliArgs {
     /// Local bind address
@@ -63,9 +71,8 @@ pub struct CliArgs {
     #[clap(long, env, value_parser, default_value = "/run/secrets/root.crt.pem")]
     rootcert_file: PathBuf,
 
-    /// (included for technical reasons)
-    #[clap(long, hide(true))]
-    test_threads: Option<String>,
+    #[clap(flatten)]
+    pub log_options: LogOptions,
 }
 
 pub const APP_PREFIX: &str = "APP";
@@ -76,6 +83,7 @@ pub const APP_PREFIX: &str = "APP";
 fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBeamError> {
     let env_vars = std::env::vars().collect::<HashMap<String, ApiKey>>();
     let mut api_keys = HashMap::new();
+    // TODO: Do we really need a regex for that?
     let pattern = Regex::new(&format!("{APP_PREFIX}_([A-Za-z0-9-]+)_KEY")).expect("This is a valid regex");
     for (env_var_name, secret) in env_vars {
         if let Some(app_name) = pattern.captures_iter(&env_var_name).next().and_then(|cap| cap.get(1)) {
@@ -95,9 +103,8 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBea
     Ok(api_keys)
 }
 
-impl crate::config::Config for Config {
-    fn load() -> Result<Config, SamplyBeamError> {
-        let cli_args = CliArgs::parse();
+impl Config {
+    pub fn load(cli_args: CliArgs) -> Result<Config, SamplyBeamError> {
         beam_lib::set_broker_id(cli_args.broker_url.host().unwrap().to_string());
         let proxy_id = ProxyId::new(&cli_args.proxy_id).map_err(|e| {
             SamplyBeamError::ConfigurationFailed(format!(
@@ -109,7 +116,7 @@ impl crate::config::Config for Config {
         if api_keys.is_empty() {
             return Err(SamplyBeamError::ConfigurationFailed(format!("No API keys have been defined. Please set environment vars à la {0}_<clientname>_KEY=<key>", APP_PREFIX)));
         }
-        let tls_ca_certificates = crate::crypto::load_certificates_from_dir(
+        let tls_ca_certificates = shared::crypto::load_certificates_from_dir(
             cli_args.tls_ca_certificates_dir,
         )
         .map_err(|e| {
@@ -122,14 +129,60 @@ impl crate::config::Config for Config {
             broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
             broker_uri: cli_args.broker_url,
             bind_addr: cli_args.bind_addr,
+            crypto: load_private_crypto_for_proxy(&cli_args.privkey_file, &proxy_id)?,
             proxy_id,
             api_keys,
             tls_ca_certificates,
+            rootcert: shared::crypto::load_certificates_from_file(cli_args.rootcert_file)?,
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)
     }
 }
+
+fn load_private_crypto_for_proxy(privkey_file: &PathBuf, proxy_id: &ProxyId) -> Result<ConfigCrypto, SamplyBeamError> {
+    let privkey_pem = fs::read_to_string(privkey_file)
+        .map_err(|e| {
+            SamplyBeamError::ConfigurationFailed(format!(
+                "Unable to load private key from file {}: {}\n{}",
+                privkey_file.display(),
+                e,
+                get_enrollment_msg(proxy_id.as_ref())
+            ))
+        })?
+        .trim()
+        .to_string();
+    let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
+        .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
+        .map_err(|e| {
+            SamplyBeamError::ConfigurationFailed(format!(
+                "Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}",
+                e
+            ))
+        })?;
+    let privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem).map_err(|e| {
+        SamplyBeamError::ConfigurationFailed(format!(
+            "Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}",
+            e
+        ))
+    })?;
+    Ok(ConfigCrypto {
+        privkey_rs256,
+        privkey_rsa,
+    })
+}
+
+fn get_enrollment_msg(proxy_id: &str) -> String {
+    let divider = "***************************************************************************\n
+                   ***              Beam Certificate Enrollment Warning                    ***\n
+                   ***************************************************************************";
+    format!(
+        "{}\nIf you are not yet enrolled in the central certificate store, please execute the beam-enroll companion tool (https://github.com/samply/beam-enroll) by executing:\n  docker run --rm -it -v \"$(pwd)\":/data -e PROXY_ID={} samply/beam-enroll\nand follow the steps on the screen.\nAfter your certificate signing request (CSR) has been approved, please restart this Beam.Proxy and this message should disappear.",
+        divider,
+        proxy_id
+    )
+}
+
 
 fn uri_to_host_header(uri: &Url) -> Result<HeaderValue, SamplyBeamError> {
     let hostname: String = uri

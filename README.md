@@ -4,9 +4,9 @@
 
 Samply.Beam is a distributed task broker designed for efficient communication across strict network environments. It provides most commonly used communication patterns across strict network boundaries, end-to-end encryption and signatures, as well as certificate management and validation on top of an easy to use REST API. In addition to task/response semantics, Samply.Beam supports high-performance applications with encrypted low-level direct socket connections.
 
-## Latest version: Samply.Beam 0.10.0 – 2025-05-26
+## Latest version: Samply.Beam 0.11.0 – 2026-07-06
 
-This new major version includes better error messages for expired certificates and a small api change. Please check the [Changelog](CHANGELOG.md) for details.
+This new version improves broker request retries, speeds up certificate fetching, adds file logging and a get-task-by-id endpoint, and fixes socket cleanup. Please check the [Changelog](CHANGELOG.md) for details.
 
 Find info on all previous versions in the [Changelog](CHANGELOG.md).
 
@@ -353,6 +353,29 @@ Date: Mon, 27 Jun 2022 14:05:59 GMT
   }
 )
 ```
+
+### Retrieve a task by ID
+
+Retrieve a task by its ID. The caller must be the task's creator or one of its recipients.
+
+Method: `GET`  
+URL: `/v1/tasks/<task_id>`  
+Parameters:
+
+- [long polling](#long-polling-api-access) is supported, but since at most one task is ever returned, `wait_count` must be omitted or `1` (any other value returns `400 Bad Request`).
+
+Returns the single task, cf. [here](#task):
+
+```
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "id": ...
+}
+```
+
+If no task with that ID is visible to the caller because a) it does not exist or b) the caller is neither the sender nor a recipient, the broker returns `404 Not Found`. Both conditions leading to the same return value is deliberate to avoid unauthorized message enumeration. If the caller is the task's creator, it can't decrypt the body and will instead return "<encrypted>" as a body.
 
 ### Create a result
 

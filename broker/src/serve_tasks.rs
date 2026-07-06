@@ -12,13 +12,11 @@ use axum::{
     Json, Router,
 };
 use beam_lib::AppOrProxyId;
-use futures_core::{stream, Stream};
+use futures::{stream, Stream};
 use serde::Deserialize;
 use beam_lib::WorkStatus;
 use shared::{
-    config, errors::SamplyBeamError, sse_event::SseEventType,
-    EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg, MsgEmpty,
-    MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, EMPTY_VEC_APPORPROXYID, serde_helpers::DerefSerializer,
+    EMPTY_VEC_APPORPROXYID, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, errors::SamplyBeamError, format_to_without_broker, serde_helpers::DerefSerializer, sse_event::SseEventType
 };
 use tokio::{
     sync::{
@@ -40,6 +38,7 @@ pub(crate) fn router() -> Router {
     let state = TasksState::default();
     Router::new()
         .route("/v1/tasks", get(get_tasks).post(post_task))
+        .route("/v1/tasks/{task_id}", get(get_task_by_id))
         .route("/v1/tasks/{task_id}/results", get(get_results_for_task))
         .route("/v1/tasks/{task_id}/results/{app_id}", put(put_result))
         .with_state(state)
@@ -212,6 +211,31 @@ async fn get_tasks(
     })
 }
 
+async fn get_task_by_id(
+    State(state): State<TasksState>,
+    Path(task_id): Path<MsgId>,
+    mut block: HowLongToBlock,
+    msg: MsgSigned<MsgEmpty>,
+) -> Result<Response, StatusCode> {
+    if !(block.wait_count.is_none() || block.wait_count == Some(1)) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    block.wait_count = Some(1);
+    let Some(task) = state.task_manager
+        .wait_for_tasks(&block, |task| task.id() == &task_id && (msg.get_from() == task.get_from() || task.get_to().contains(msg.get_from())))
+        .await?
+        .next()
+    else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+    let body = serde_json::to_vec(&*task)
+        .map_err(|e| {
+            warn!("Failed to serialize task: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+    Ok(([(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))], body).into_response())
+}
+
 trait MsgFilterTrait<M: Msg> {
     // fn new() -> Self;
     fn from(&self) -> Option<&AppOrProxyId>;
@@ -339,12 +363,10 @@ async fn post_task(
     State(state): State<TasksState>,
     msg: MsgSigned<EncryptedMsgTaskRequest>,
 ) -> Result<(StatusCode, impl IntoResponse), StatusCode> {
-        // let id = MsgId::new();
-    // msg.id = id;
-    // TODO: Check if ID is taken
+    info!(id = %msg.msg.id, from = %msg.msg.from.hide_broker(), to = %format_to_without_broker(&msg.msg.to), "New task");
     trace!(
-        "Client {} with IP {addr} is creating task {:?}",
-        msg.msg.from, msg
+        "Client {} with IP {addr} is creating task {msg:?}",
+        msg.msg.from,
     );
     let id = msg.msg.id;
     state.task_manager.post_task(msg)?;
@@ -361,6 +383,7 @@ async fn put_result(
     State(state): State<TasksState>,
     result: MsgSigned<EncryptedMsgTaskResult>,
 ) -> Result<StatusCode, (StatusCode, &'static str)> {
+    info!(for = %result.msg.task, from = %result.msg.from.hide_broker(), status = ?result.msg.status, "New result");
     trace!("Called: Task {:?}, {:?} by {addr}", task_id, result);
     if task_id != result.msg.task {
         return Err((
@@ -375,7 +398,6 @@ async fn put_result(
             "AppID supplied in URL and signed message do not match.",
         ));
     }
-
 
     let status = if state.task_manager.put_result(&task_id, result)? {
         StatusCode::NO_CONTENT

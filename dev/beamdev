@@ -167,8 +167,9 @@ function stop {
 }
 
 function clean {
-    docker compose down
+    docker compose --profile "*" down
     rm -fv pki/*.pem pki/*.json pki/pki.secret
+    sudo rm -fv logs/*/*.log
     pki/pki clean
 }
 
@@ -275,6 +276,14 @@ case "$1" in
     shift
     start_bg $@
     ;;
+  start_cert_manager)
+    shift
+    clean
+    pki/pki devsetup
+    echo "$VAULT_TOKEN" > ./pki/pki.secret
+    build $@
+    docker compose --profile "cert-manager" up --no-build --no-recreate
+    ;;
   restart)
     shift
     build $@
@@ -296,6 +305,6 @@ case "$1" in
     defaults
     ;;
   *)
-    echo "Usage: $0 [--tag SOMETAG, e.g. develop, to use an existing image] build|start|start_bg|restart|stop|clean|defaults|demo|noop"
+    echo "Usage: $0 [--tag SOMETAG, e.g. develop, to use an existing image] build|start|start_bg|start_cert_manager|restart|stop|clean|defaults|demo|noop"
     ;;
 esac
