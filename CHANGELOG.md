@@ -1,11 +1,12 @@
 
-# Samply.Beam 0.11.0 - 2026-06-10
+# Samply.Beam 0.11.0 - 2026-07-06
 
 ## Minor changes
 
 * Improved resilience by retrying timed-out broker requests.
 * Certificates are now fetched in parallel, reducing startup time.
 * Broker and proxy logs can now be written to disk.
+* Added an endpoint to allow senders and recipients to retrieve a task with a known task-id.
 
 ## Bugfixes
 
