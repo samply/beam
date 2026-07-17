@@ -16,6 +16,7 @@ use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::{AppId, AppOrProxyId, ProxyId};
+use shared::jwt_simple::prelude::RSAKeyPairLike;
 use shared::{
     DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage, crypto::{self, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, format_to_without_broker, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType
 };
@@ -91,20 +92,42 @@ pub(crate) async fn forward_request(
         MessageType::MsgSocketRequest(socket_req) => info!(from = %socket_req.get_from().hide_broker(), to = %format_to_without_broker(&socket_req.get_to()), id = %socket_req.id, "Submitting socket request"),
         MessageType::MsgEmpty(..) => {},
     };
-    let req = sign_request(encrypted_msg, parts, &config).await.map_err(IntoResponse::into_response)?;
-    trace!("Requesting: {:?}", req);
-    let resp = client.execute(req).await.map_err(|e| {
-        if e.is_timeout() {
-            debug!("Request to broker timed out after set proxy timeout of {PROXY_TIMEOUT}s");
-            (StatusCode::GATEWAY_TIMEOUT, "Request to broker timed out ")
-        } else {
-            warn!("Request to broker failed: {}", e.to_string());
-            (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
-        }.into_response()
-    })?;
+    async fn execute_broker_request(
+        client: &SamplyHttpClient,
+        req: reqwest::Request,
+    ) -> Result<reqwest::Response, Response> {
+        trace!("Requesting: {req:?}");
+        client.execute(req).await.map_err(|e| {
+            if e.is_timeout() {
+                debug!("Request to broker timed out after set proxy timeout of {PROXY_TIMEOUT}s");
+                (StatusCode::GATEWAY_TIMEOUT, "Request to broker timed out ")
+            } else {
+                warn!("Request to broker failed: {}", e.to_string());
+                (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
+            }
+            .into_response()
+        })
+    }
+    let retry_parts = parts.clone();
+    let req = sign_request(&encrypted_msg, parts, config)
+        .await
+        .map_err(IntoResponse::into_response)?;
+    let mut resp = execute_broker_request(client, req).await?;
     if resp.status() == StatusCode::UNAUTHORIZED {
-        error!("The Broker has rejected our request with 401 Unauthorized. This is likely because our beam certificate expired.");
-        std::process::exit(401);
+        warn!("The Broker has rejected our request with 401 Unauthorized. Checking whether our beam certificate was extended.");
+        if let Err(e) = config.crypto.reload_public_key_id(config).await {
+            error!("Failed to reload public key: {e:#}. Aborting.");
+            std::process::exit(401);
+        }
+        info!("Loaded the extended beam certificate. Retrying the request.");
+        let req = sign_request(&encrypted_msg, retry_parts, config)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        resp = execute_broker_request(client, req).await?;
+        if resp.status() == StatusCode::UNAUTHORIZED {
+            error!("The Broker rejected our request after trying to reload the beam certificate.");
+            std::process::exit(401);
+        }
     }
     Ok(resp)
 }
@@ -324,15 +347,15 @@ pub(crate) fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, R
     }.into_response())
 }
 
-// TODO: This could be a middleware
 pub async fn sign_request(
-    body: EncryptedMessage,
+    body: &EncryptedMessage,
     mut parts: Parts,
     config: &Config,
 ) -> Result<reqwest::Request, (StatusCode, &'static str)> {
     let from = body.get_from();
 
-    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, &config.crypto.privkey_rs256)
+    let signer = config.crypto.privkey_rs256.read().await;
+    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, &signer)
         .await
         .map_err(|e| {
             error!("Crypto failed: {}", e);
@@ -356,7 +379,7 @@ pub async fn sign_request(
     let digest =
         crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig, &from)
             .map_err(|_| ERR_INTERNALCRYPTO)?;
-    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, &config.crypto.privkey_rs256)
+    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, &signer)
         .await
         .map_err(|e| {
             error!("Crypto failed: {}", e);
