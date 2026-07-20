@@ -16,6 +16,7 @@ use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::{AppId, AppOrProxyId, ProxyId};
+use shared::jwt_simple::prelude::RSAKeyPairLike;
 use shared::{
     DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage, crypto::{self, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, format_to_without_broker, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType
 };
@@ -91,20 +92,42 @@ pub(crate) async fn forward_request(
         MessageType::MsgSocketRequest(socket_req) => info!(from = %socket_req.get_from().hide_broker(), to = %format_to_without_broker(&socket_req.get_to()), id = %socket_req.id, "Submitting socket request"),
         MessageType::MsgEmpty(..) => {},
     };
-    let req = sign_request(encrypted_msg, parts, &config).await.map_err(IntoResponse::into_response)?;
-    trace!("Requesting: {:?}", req);
-    let resp = client.execute(req).await.map_err(|e| {
-        if e.is_timeout() {
-            debug!("Request to broker timed out after set proxy timeout of {PROXY_TIMEOUT}s");
-            (StatusCode::GATEWAY_TIMEOUT, "Request to broker timed out ")
-        } else {
-            warn!("Request to broker failed: {}", e.to_string());
-            (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
-        }.into_response()
-    })?;
+    async fn execute_broker_request(
+        client: &SamplyHttpClient,
+        req: reqwest::Request,
+    ) -> Result<reqwest::Response, Response> {
+        trace!("Requesting: {req:?}");
+        client.execute(req).await.map_err(|e| {
+            if e.is_timeout() {
+                debug!("Request to broker timed out after set proxy timeout of {PROXY_TIMEOUT}s");
+                (StatusCode::GATEWAY_TIMEOUT, "Request to broker timed out ")
+            } else {
+                warn!("Request to broker failed: {}", e.to_string());
+                (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
+            }
+            .into_response()
+        })
+    }
+    let retry_parts = parts.clone();
+    let req = sign_request(&encrypted_msg, parts, config)
+        .await
+        .map_err(IntoResponse::into_response)?;
+    let mut resp = execute_broker_request(client, req).await?;
     if resp.status() == StatusCode::UNAUTHORIZED {
-        error!("The Broker has rejected our request with 401 Unauthorized. This is likely because our beam certificate expired.");
-        std::process::exit(401);
+        warn!("The Broker has rejected our request with 401 Unauthorized. Checking whether our beam certificate was extended.");
+        if let Err(e) = config.crypto.reload_public_key_id(config).await {
+            error!("Failed to reload public key: {e:#}. Aborting.");
+            std::process::exit(401);
+        }
+        info!("Loaded the extended beam certificate. Retrying the request.");
+        let req = sign_request(&encrypted_msg, retry_parts, config)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        resp = execute_broker_request(client, req).await?;
+        if resp.status() == StatusCode::UNAUTHORIZED {
+            error!("The Broker rejected our request after trying to reload the beam certificate.");
+            std::process::exit(401);
+        }
     }
     Ok(resp)
 }
@@ -324,15 +347,15 @@ pub(crate) fn to_server_error<T>(res: Result<T, SamplyBeamError>) -> Result<T, R
     }.into_response())
 }
 
-// TODO: This could be a middleware
 pub async fn sign_request(
-    body: EncryptedMessage,
+    body: &EncryptedMessage,
     mut parts: Parts,
     config: &Config,
 ) -> Result<reqwest::Request, (StatusCode, &'static str)> {
     let from = body.get_from();
 
-    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, &config.crypto.privkey_rs256)
+    let signer = config.crypto.privkey_rs256.read().await;
+    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, &signer)
         .await
         .map_err(|e| {
             error!("Crypto failed: {}", e);
@@ -356,7 +379,7 @@ pub async fn sign_request(
     let digest =
         crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig, &from)
             .map_err(|_| ERR_INTERNALCRYPTO)?;
-    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, &config.crypto.privkey_rs256)
+    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, &signer)
         .await
         .map_err(|e| {
             error!("Crypto failed: {}", e);
@@ -479,4 +502,214 @@ async fn encrypt_request(
 async fn encrypt_msg<M: EncryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> {
     let receivers_keys = crypto::get_proxy_public_keys(msg.get_to()).await?;
     msg.encrypt(&receivers_keys)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::HashMap,
+        sync::Arc,
+        time::{Duration, SystemTime},
+    };
+
+    use axum::{
+        body::Body,
+        extract::State,
+        http::{header, HeaderMap, HeaderValue, Request, StatusCode},
+        Router,
+    };
+    use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
+    use shared::{
+        async_trait,
+        crypto::{asn_str_to_vault_str, GetCerts},
+        errors::SamplyBeamError,
+        jwt_simple::prelude::{RS256KeyPair, Token},
+        openssl::{
+            asn1::{Asn1Integer, Asn1Time},
+            bn::BigNum,
+            hash::MessageDigest,
+            pkey::{PKey, Private},
+            x509::{X509NameBuilder, X509},
+        },
+        reqwest,
+    };
+    use tokio::{net::TcpListener, sync::Mutex};
+
+    use crate::config::{Config, ConfigCrypto};
+
+    const EXPIRED_SERIAL: &str = "expired-certificate-serial";
+
+    struct TestCertGetter {
+        serial: String,
+        certificate: String,
+        intermediate: String,
+    }
+
+    #[async_trait]
+    impl GetCerts for TestCertGetter {
+        async fn certificate_list_via_network(&self) -> Result<Vec<String>, SamplyBeamError> {
+            Ok(vec![self.serial.clone()])
+        }
+
+        async fn certificate_by_serial_as_pem(
+            &self,
+            serial: &str,
+        ) -> Result<String, SamplyBeamError> {
+            assert_eq!(serial, self.serial);
+            Ok(self.certificate.clone())
+        }
+
+        async fn im_certificate_as_pem(&self) -> Result<String, SamplyBeamError> {
+            Ok(self.intermediate.clone())
+        }
+    }
+
+    fn build_certificate(
+        common_name: &str,
+        serial: u32,
+        key: &PKey<Private>,
+        issuer: Option<(&X509, &PKey<Private>)>,
+    ) -> X509 {
+        let mut name = X509NameBuilder::new().unwrap();
+        name.append_entry_by_text("CN", common_name).unwrap();
+        let name = name.build();
+
+        let mut builder = X509::builder().unwrap();
+        builder.set_version(2).unwrap();
+        let serial = Asn1Integer::from_bn(&BigNum::from_u32(serial).unwrap()).unwrap();
+        builder.set_serial_number(&serial).unwrap();
+        builder.set_subject_name(&name).unwrap();
+        builder.set_pubkey(key).unwrap();
+        if let Some((issuer_certificate, _)) = issuer {
+            builder
+                .set_issuer_name(issuer_certificate.subject_name())
+                .unwrap();
+        } else {
+            builder.set_issuer_name(&name).unwrap();
+        }
+
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let not_before = Asn1Time::from_unix(now - 60).unwrap();
+        let not_after = Asn1Time::from_unix(now + 3600).unwrap();
+        builder.set_not_before(&not_before).unwrap();
+        builder.set_not_after(&not_after).unwrap();
+        builder
+            .sign(
+                issuer.map(|(_, issuer_key)| issuer_key).unwrap_or(key),
+                MessageDigest::sha256(),
+            )
+            .unwrap();
+        builder.build()
+    }
+
+    #[tokio::test]
+    async fn reloads_certificate_serial_and_retries_unauthorized_request() {
+        beam_lib::set_broker_id("broker.samply.de".into());
+
+        let key_pair = RS256KeyPair::generate(2048).unwrap();
+        let key_pem = key_pair.to_pem().unwrap();
+        let private_key = RsaPrivateKey::from_pkcs1_pem(&key_pem)
+            .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&key_pem))
+            .unwrap();
+        let leaf_key = PKey::private_key_from_pem(key_pem.as_bytes()).unwrap();
+        let root_key = PKey::from_rsa(shared::openssl::rsa::Rsa::generate(2048).unwrap()).unwrap();
+        let root_certificate = build_certificate("root", 1, &root_key, None);
+        let intermediate_key =
+            PKey::from_rsa(shared::openssl::rsa::Rsa::generate(2048).unwrap()).unwrap();
+        let intermediate_certificate = build_certificate(
+            "intermediate",
+            2,
+            &intermediate_key,
+            Some((&root_certificate, &root_key)),
+        );
+        let renewed_certificate = build_certificate(
+            "proxy1.broker.samply.de",
+            3,
+            &leaf_key,
+            Some((&intermediate_certificate, &intermediate_key)),
+        );
+        let renewed_serial =
+            asn_str_to_vault_str(renewed_certificate.serial_number()).unwrap();
+
+        shared::crypto::init_cert_getter(TestCertGetter {
+            serial: renewed_serial.clone(),
+            certificate: String::from_utf8(renewed_certificate.to_pem().unwrap()).unwrap(),
+            intermediate: String::from_utf8(intermediate_certificate.to_pem().unwrap()).unwrap(),
+        });
+        shared::crypto::init_ca_chain(&root_certificate)
+            .await
+            .unwrap();
+
+        let crypto = ConfigCrypto {
+            privkey_rs256: Arc::new(tokio::sync::RwLock::new(
+                key_pair.with_key_id(EXPIRED_SERIAL),
+            )),
+            privkey_rsa: private_key,
+        };
+
+        let seen_serials = Arc::new(Mutex::new(Vec::new()));
+        let broker = Router::new()
+            .fallback(
+                |State(seen_serials): State<Arc<Mutex<Vec<String>>>>,
+                 headers: HeaderMap| async move {
+                    let jwt = headers[header::AUTHORIZATION]
+                        .to_str()
+                        .unwrap()
+                        .strip_prefix("SamplyJWT ")
+                        .unwrap();
+                    let serial = Token::decode_metadata(jwt)
+                        .unwrap()
+                        .key_id()
+                        .unwrap()
+                        .to_owned();
+                    let mut seen_serials = seen_serials.lock().await;
+                    seen_serials.push(serial);
+                    if seen_serials.len() == 1 {
+                        StatusCode::UNAUTHORIZED
+                    } else {
+                        StatusCode::OK
+                    }
+                },
+            )
+            .with_state(seen_serials.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let broker_addr = listener.local_addr().unwrap();
+        let broker_task = tokio::spawn(async move {
+            axum::serve(listener, broker).await.unwrap();
+        });
+
+        let config = Config {
+            broker_uri: format!("http://{broker_addr}/").parse().unwrap(),
+            broker_host_header: HeaderValue::from_str(&broker_addr.to_string()).unwrap(),
+            bind_addr: "127.0.0.1:0".parse().unwrap(),
+            proxy_id: beam_lib::ProxyId::new("proxy1.broker.samply.de").unwrap(),
+            api_keys: HashMap::new(),
+            tls_ca_certificates: Vec::new(),
+            crypto,
+            rootcert: root_certificate,
+        };
+        let sender = beam_lib::AppId::new("app1.proxy1.broker.samply.de").unwrap();
+        let request = Request::get("/v1/tasks")
+            .body(Body::empty())
+            .unwrap();
+        let client = reqwest::Client::new();
+
+        let response = tokio::time::timeout(
+            Duration::from_secs(10),
+            super::forward_request(request, &config, &sender, &client),
+        )
+        .await
+        .expect("certificate reload deadlocked")
+        .expect("request failed");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            *seen_serials.lock().await,
+            [EXPIRED_SERIAL, renewed_serial.as_str()]
+        );
+        broker_task.abort();
+    }
 }

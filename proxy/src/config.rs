@@ -3,6 +3,7 @@ use regex::Regex;
 use reqwest::Url;
 use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
 use shared::{errors::SamplyBeamError, jwt_simple::prelude::RS256KeyPair, logger::LogOptions, openssl::x509::X509, reqwest};
+use tokio::sync::RwLock;
 
 use std::{
     collections::HashMap,
@@ -11,6 +12,7 @@ use std::{
     path::{Path, PathBuf},
     process::exit,
     str::FromStr,
+    sync::Arc,
 };
 
 use axum::http::HeaderValue;
@@ -33,8 +35,23 @@ pub struct Config {
 
 #[derive(Debug, Clone)]
 pub struct ConfigCrypto {
-    pub privkey_rs256: RS256KeyPair,
+    pub privkey_rs256: Arc<RwLock<RS256KeyPair>>,
     pub privkey_rsa: RsaPrivateKey,
+}
+
+impl ConfigCrypto {
+    pub async fn reload_public_key_id(&self, config: &Config) -> Result<(), SamplyBeamError> {
+        let mut key_id = self.privkey_rs256.write().await;
+        let new = crate::crypto::load_public_crypto_for_proxy(
+            &*key_id,
+            self.privkey_rsa.clone(),
+            &config.proxy_id,
+        )
+        .await?
+        .1;
+        *key_id = Arc::into_inner(new.privkey_rs256).unwrap().into_inner();
+        Ok(())
+    }
 }
 
 pub type ApiKey = String;
@@ -167,7 +184,7 @@ fn load_private_crypto_for_proxy(privkey_file: &PathBuf, proxy_id: &ProxyId) -> 
         ))
     })?;
     Ok(ConfigCrypto {
-        privkey_rs256,
+        privkey_rs256: Arc::new(RwLock::new(privkey_rs256)),
         privkey_rsa,
     })
 }
