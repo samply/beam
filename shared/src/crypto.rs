@@ -3,20 +3,14 @@ use axum::{body::Body, http::Request, Json};
 
 use itertools::Itertools;
 use once_cell::sync::{Lazy, OnceCell};
-use openssl::{
-    asn1::{Asn1Integer, Asn1IntegerRef, Asn1Time, Asn1TimeRef},
-    error::ErrorStack,
-    rand::rand_bytes,
-    string::OpensslString,
-    x509::{CrlStatus, X509Crl, X509},
-};
-use rsa::{
-    pkcs1::DecodeRsaPublicKey, pkcs8::DecodePublicKey, RsaPrivateKey, RsaPublicKey, traits::PublicKeyParts,
+use aws_lc_rs::{
+    encoding::{AsDer, Pkcs8V1Der, PublicKeyX509Der},
+    rsa::{KeyPair, PrivateDecryptingKey as RsaPrivateKey, PublicEncryptingKey as RsaPublicKey},
 };
 use sha2::{Digest, Sha256};
 use std::{
     borrow::BorrowMut,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     error::Error,
     fs::read_to_string,
     path::{Path, PathBuf},
@@ -25,6 +19,8 @@ use std::{
 };
 use tokio::{sync::{mpsc, oneshot, RwLock}, time::Instant};
 use tracing::{debug, error, info, warn};
+use x509_cert::{Certificate, crl::CertificateList, der::{Decode, DecodePem, Encode, EncodePem, pem::LineEnding}, ext::pkix::name::DirectoryString};
+use x509_parser::parse_x509_certificate;
 
 use beam_lib::{AppOrProxyId, ProxyId};
 use crate::{
@@ -34,6 +30,89 @@ use crate::{
 };
 
 type Serial = String;
+
+fn decode_pem(input: &[u8]) -> Result<(String, Vec<u8>), SamplyBeamError> {
+    x509_cert::der::pem::decode_vec(input)
+        .map(|(label, der)| (label.into(), der))
+        .map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))
+}
+
+#[derive(Clone)]
+pub struct X509 {
+    certificate: Arc<Certificate>,
+    rsa_public_key: RsaPublicKey,
+}
+
+impl PartialEq for X509 { fn eq(&self, other: &Self) -> bool { self.certificate == other.certificate } }
+impl Eq for X509 {}
+
+impl std::fmt::Debug for X509 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let cert = self.certificate.tbs_certificate();
+        f.debug_struct("X509").field("subject", &cert.subject().to_string())
+            .field("serial", &cert.serial_number().to_string()).finish()
+    }
+}
+
+impl X509 {
+    pub fn from_pem(input: &[u8]) -> Result<Self, SamplyBeamError> {
+        let certificate = Certificate::from_pem(input).map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))?;
+        let public_key = certificate.tbs_certificate().subject_public_key_info().to_der()
+            .map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))?;
+        let rsa_public_key = RsaPublicKey::from_der(&public_key)
+            .map_err(|_| SamplyBeamError::SignEncryptError("Certificate does not contain an RSA public key".into()))?;
+        Ok(Self { certificate: Arc::new(certificate), rsa_public_key })
+    }
+
+    fn public_key_der(&self) -> Result<Vec<u8>, SamplyBeamError> {
+        self.certificate.tbs_certificate().subject_public_key_info().to_der()
+            .map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))
+    }
+
+    pub fn raw_serial(&self) -> &[u8] {
+        self.certificate.tbs_certificate().serial_number().as_bytes()
+    }
+
+    pub fn to_pem(&self) -> Result<Vec<u8>, SamplyBeamError> {
+        self.certificate.to_pem(LineEnding::LF).map(String::into_bytes)
+            .map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))
+    }
+
+    fn common_names(&self) -> impl Iterator<Item = String> + '_ {
+        self.certificate.tbs_certificate().subject().iter()
+            .filter(|a| a.oid == x509_cert::der::oid::db::rfc4519::COMMON_NAME)
+            .filter_map(|a| DirectoryString::try_from(&a.value).ok())
+            .map(|s| s.value().into_owned())
+    }
+
+    fn not_before_timestamp(&self) -> i64 {
+        self.certificate.tbs_certificate().validity().not_before.to_unix_duration().as_secs() as i64
+    }
+
+    fn not_after_timestamp(&self) -> i64 {
+        self.certificate.tbs_certificate().validity().not_after.to_unix_duration().as_secs() as i64
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct X509Crl(Arc<HashSet<Vec<u8>>>);
+
+impl X509Crl {
+    pub fn from_pem(input: &[u8]) -> Result<Self, SamplyBeamError> {
+        let crl = CertificateList::from_pem(input).map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))?;
+        Ok(Self::from_list(crl))
+    }
+
+    pub fn from_der(input: &[u8]) -> Result<Self, SamplyBeamError> {
+        let crl = CertificateList::from_der(input).map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))?;
+        Ok(Self::from_list(crl))
+    }
+
+    fn from_list(crl: CertificateList) -> Self {
+        Self(crl.tbs_cert_list.revoked_certificates.unwrap_or_default().into_iter()
+            .map(|r| r.serial_number.as_bytes().to_vec()).collect::<HashSet<_>>().into())
+    }
+}
 
 pub struct ProxyCertInfo {
     pub proxy_name: String,
@@ -47,18 +126,8 @@ impl TryFrom<&X509> for ProxyCertInfo {
     type Error = SamplyBeamError;
 
     fn try_from(cert: &X509) -> Result<Self, Self::Error> {
-        // let remaining = Asn1Time::days_from_now(0)?.diff(cert.not_after())?;
-        let common_name = cert
-            .subject_name()
-            .entries()
-            .find(|c| c.object().nid() == openssl::nid::Nid::COMMONNAME)
-            .ok_or(CertificateInvalidReason::NoCommonName)?
-            .data()
-            .as_utf8()?
-            .to_string();
-
-        const SERIALERR: SamplyBeamError =
-            SamplyBeamError::CertificateError(CertificateInvalidReason::WrongSerial);
+        let common_name = cert.common_names().next().ok_or(CertificateInvalidReason::NoCommonName)?;
+        let validity = cert.certificate.tbs_certificate().validity();
 
         let certinfo = ProxyCertInfo {
             proxy_name: common_name
@@ -67,15 +136,9 @@ impl TryFrom<&X509> for ProxyCertInfo {
                 .ok_or(CertificateInvalidReason::InvalidCommonName)?
                 .into(),
             common_name,
-            valid_since: cert.not_before().to_string(),
-            valid_until: cert.not_after().to_string(),
-            serial: cert
-                .serial_number()
-                .to_bn()
-                .map_err(|_e| SERIALERR)?
-                .to_hex_str()
-                .map_err(|_e| SERIALERR)?
-                .to_string(),
+            valid_since: validity.not_before.to_string(),
+            valid_until: validity.not_after.to_string(),
+            serial: cert.certificate.tbs_certificate().serial_number().to_string().replace(':', ""),
         };
         Ok(certinfo)
     }
@@ -145,10 +208,7 @@ impl CertificateCache {
                 } else {
                     None
                 })
-                .min_by(|cert_a, cert_b| cert_a.not_after().compare(cert_b.not_after()).unwrap_or_else(|err| {
-                    error!("Got error sorting certs: {err}");
-                    std::cmp::Ordering::Greater
-                }))
+                .min_by_key(|cert| cert.not_after_timestamp())
                 .cloned()
         };
         // if we dont have any certs yet, wait
@@ -158,7 +218,7 @@ impl CertificateCache {
             return;
         };
         // Sleep until expired
-        let expire_date = match asn1_time_to_system_time(oldest_cert.not_after()) {
+        let expire_date = match timestamp_to_system_time(oldest_cert.not_after_timestamp()) {
             Ok(t) => t,
             Err(e) => {
                 error!("Unable to read a certificate's expiration date: {:?}. Cert expiration will not work until this application is restarted. Offending certificate: {:?}", e, oldest_cert);
@@ -273,7 +333,7 @@ impl CertificateCache {
         let mut revoked_certs = 0;
         self.serial_to_x509.values_mut().for_each(|cert_entry| {
             if let CertificateCacheEntry::Valid(ref cert) = cert_entry {
-                if is_revoked(crl.get_by_cert(cert)) {
+                if is_revoked(crl, cert) {
                     *cert_entry = CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked);
                     revoked_certs += 1;
                 }
@@ -331,7 +391,7 @@ impl CertificateCache {
                 }
                 Ok(cert) => cert,
             };
-            let opensslcert = match X509::from_pem(certificate.as_bytes()) {
+            let parsed_cert = match X509::from_pem(certificate.as_bytes()) {
                 Ok(x) => x,
                 Err(err) => {
                     error!("Skipping unparsable certificate {serial}: {err}");
@@ -339,15 +399,13 @@ impl CertificateCache {
                 }
             };
             // Check if the new cert is already revoked
-            if certificate_revocation_list.as_ref().is_some_and(|list| is_revoked(list.get_by_cert(&opensslcert))) {
+            if certificate_revocation_list.as_ref().is_some_and(|list| is_revoked(list, &parsed_cert)) {
                 self.serial_to_x509.insert(serial.clone(), CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked));
                 revoked_certs += 1;
                 continue;
             };
-            let commonnames: Vec<ProxyId> = opensslcert
-                .subject_name()
-                .entries()
-                .map(|x| x.data().as_utf8().as_ref().map(OpensslString::to_string).unwrap_or(String::new()))
+            let commonnames: Vec<ProxyId> = parsed_cert
+                .common_names()
                 .flat_map(|x| ProxyId::new(x).map_err(|e| warn!("Internal error: Vault returned certificate with invalid common name: {e}")))
                 .collect();
 
@@ -355,7 +413,7 @@ impl CertificateCache {
                 if commonnames.is_empty() {
                     Some(CertificateInvalidReason::NoCommonName)
                 } else if let Err(e) = verify_cert(
-                    &opensslcert,
+                    &parsed_cert,
                     &self
                         .im_cert
                         .as_ref()
@@ -375,7 +433,7 @@ impl CertificateCache {
                     .first()
                     .expect("Internal error: common names empty; this should not happen");
                 self.serial_to_x509
-                    .insert(serial.clone(), CertificateCacheEntry::Valid(opensslcert));
+                    .insert(serial.clone(), CertificateCacheEntry::Valid(parsed_cert));
                 match self.cn_to_serial.get_mut(cn) {
                     Some(serials) => serials.push(serial.clone()),
                     None => {
@@ -440,8 +498,8 @@ impl CertificateCache {
             error!("Intermediate certificate is invalid: {e:#}");
             error!(
                 "Please send this info to the central beam admin for debugging:\n---BEGIN DEBUG---\n{}\nroot\n{}\n---END DEBUG---",
-                im_cert.to_text().as_deref().map(String::from_utf8_lossy).unwrap_or("Cannot convert intermediate certificate to text".into()),
-                root_cert.to_text().as_deref().map(String::from_utf8_lossy).unwrap_or("Cannot convert root certificate to text".into())
+                format!("{im_cert:?}"),
+                format!("{root_cert:?}")
             );
             std::process::exit(1);
         }
@@ -469,7 +527,7 @@ async fn get_all_certs_from_cache_by_cname(cname: &ProxyId) -> Vec<CertificateCa
                 let x509 = cache.serial_to_x509.get(serial);
                 if let Some(x509) = x509 {
                     match x509 {
-                        CertificateCacheEntry::Invalid(reason) => {
+                        CertificateCacheEntry::Invalid(_reason) => {
                             result.push(x509.clone());
                             invalid += 1;
                         }
@@ -596,7 +654,8 @@ async fn get_all_certs_by_cname(cname: &ProxyId) -> Vec<CertificateCacheEntry> {
 pub struct CryptoPublicPortion {
     pub beam_id: ProxyId,
     pub cert: X509,
-    pub pubkey: String,
+    pub rsa_public_key: RsaPublicKey,
+    pub jwt_public_key_der: Vec<u8>,
 }
 
 pub async fn get_all_certs_and_clients_by_cname_as_pemstr(
@@ -638,40 +697,14 @@ pub async fn get_newest_certs_for_cnames_as_pemstr(
 }
 
 fn extract_x509(cert: &X509) -> Result<CryptoPublicPortion, CertificateInvalidReason> {
-    // Public key
-    let pubkey = cert
-        .public_key()
-        .map_err(|_e| CertificateInvalidReason::InvalidPublicKey)?
-        .public_key_to_pem()
-        .map_err(|_e| CertificateInvalidReason::InvalidPublicKey)
-        .and_then(|v| {
-            String::from_utf8(v).map_err(|_e| CertificateInvalidReason::InvalidPublicKey)
-        })?;
-
-    let cn = cert.subject_name().entries().next();
-    if cn.is_none() {
-        return Err(CertificateInvalidReason::NoCommonName);
-    }
-    let verified_sender = cn
-        .and_then(|s| Some(s.data()))
-        .and_then(|s| match s.as_utf8() {
-            Ok(s) => Some(s),
-            Err(_) => None,
-        })
-        .and_then(|s| Some(s.to_string()));
-    let verified_sender = match verified_sender {
-        None => return Err(CertificateInvalidReason::InvalidCommonName),
-        Some(x) => match ProxyId::new(&x) {
-            Ok(x) => x,
-            Err(_err) => {
-                return Err(CertificateInvalidReason::InvalidCommonName);
-            }
-        },
-    };
+    let common_name = cert.common_names().next().ok_or(CertificateInvalidReason::NoCommonName)?;
+    let verified_sender = ProxyId::new(common_name)
+        .map_err(|_| CertificateInvalidReason::InvalidCommonName)?;
     Ok(CryptoPublicPortion {
         beam_id: verified_sender,
         cert: cert.clone(),
-        pubkey: pubkey.into(),
+        rsa_public_key: cert.rsa_public_key.clone(),
+        jwt_public_key_der: cert.certificate.tbs_certificate().subject_public_key_info().subject_public_key.raw_bytes().to_vec(),
     })
 }
 
@@ -680,21 +713,16 @@ pub fn verify_cert(
     certificate: &X509,
     root_ca_cert: &X509,
 ) -> Result<(), CertificateInvalidReason> {
-    let client_ok = certificate
-        .verify(
-            root_ca_cert
-                .public_key()
-                .map_err(|_e| CertificateInvalidReason::InvalidPublicKey)?
-                .as_ref(),
-        )
-        .map_err(|e| CertificateInvalidReason::Other(e.to_string()))?;
-    let date_ok =
-        x509_date_valid(&certificate).map_err(|_err| CertificateInvalidReason::InvalidDate)?;
-
-    match (client_ok, date_ok) {
-        (true, true) => Ok(()), // TODO: Check if actually constant time
-        (true, false) => Err(CertificateInvalidReason::InvalidDate),
-        (false, _) => Err(CertificateInvalidReason::InvalidPublicKey),
+    let certificate_der = certificate.certificate.to_der().map_err(|e| CertificateInvalidReason::Other(e.to_string()))?;
+    let issuer_der = root_ca_cert.certificate.to_der().map_err(|e| CertificateInvalidReason::Other(e.to_string()))?;
+    let (_, certificate) = parse_x509_certificate(&certificate_der).map_err(|e| CertificateInvalidReason::Other(e.to_string()))?;
+    let (_, issuer) = parse_x509_certificate(&issuer_der).map_err(|e| CertificateInvalidReason::Other(e.to_string()))?;
+    certificate.verify_signature(Some(issuer.public_key()))
+        .map_err(|_| CertificateInvalidReason::InvalidPublicKey)?;
+    if certificate.validity().is_valid() {
+        Ok(())
+    } else {
+        Err(CertificateInvalidReason::InvalidDate)
     }
 }
 
@@ -710,33 +738,14 @@ pub(crate) fn hash(data: &[u8]) -> Result<[u8; 32], SamplyBeamError> {
 
 /// Extracts the pem-encoded public key from a x509 certificate
 pub fn x509_cert_to_x509_public_key(cert: &X509) -> Result<Vec<u8>, SamplyBeamError> {
-    match cert.public_key() {
-        Ok(key) => key.public_key_to_pem().or_else(|_| {
-            Err(SamplyBeamError::SignEncryptError(
-                "Invalid public key in x509 certificate.".into(),
-            ))
-        }),
-        Err(_) => Err(SamplyBeamError::SignEncryptError(
-            "Unable to extract public key from certificate.".into(),
-        )),
-    }
+    cert.public_key_der()
 }
 
 /// Converts the x509 pem-encoded public key to the rsa public key
 pub fn x509_public_key_to_rsa_pub_key(cert_key: &Vec<u8>) -> Result<RsaPublicKey, SamplyBeamError> {
-    let rsa_key = RsaPublicKey::from_pkcs1_pem(std::str::from_utf8(cert_key).or_else(|e| {
-        Err(SamplyBeamError::SignEncryptError(format!(
-            "Invalid character in certificate public key because {}",
-            e
-        )))
-    })?)
-    .or_else(|e| {
-        Err(SamplyBeamError::SignEncryptError(format!(
-            "Can not extract public rsa key from certificate because {}",
-            e
-        )))
-    });
-    rsa_key
+    RsaPublicKey::from_der(cert_key).map_err(|e| SamplyBeamError::SignEncryptError(format!(
+        "Can not extract public RSA key from certificate: {e}"
+    )))
 }
 
 /// Convenience function to extract a rsa public key from a x509 certificate. Calls x509_cert_to_x509_public_key and x509_public_key_to_rsa_pub_key internally.
@@ -744,41 +753,39 @@ pub fn x509_cert_to_rsa_pub_key(cert: &X509) -> Result<RsaPublicKey, SamplyBeamE
     x509_public_key_to_rsa_pub_key(&x509_cert_to_x509_public_key(cert)?)
 }
 
-/// Converts the asn.1 time (e.g., from a certificate exiration date) to rust's SystemTime. From https://github.com/sfackler/rust-openssl/issues/1157#issuecomment-1016737160
-pub fn asn1_time_to_system_time(time: &Asn1TimeRef) -> Result<SystemTime, ErrorStack> {
-    let unix_time = Asn1Time::from_unix(0)?.diff(time)?;
-    Ok(SystemTime::UNIX_EPOCH
-        + Duration::from_secs(unix_time.days as u64 * 86400 + unix_time.secs as u64))
+pub fn rsa_private_key_from_pem(input: &[u8]) -> Result<RsaPrivateKey, SamplyBeamError> {
+    let (label, der) = decode_pem(input)?;
+    match label.as_str() {
+        "PRIVATE KEY" => RsaPrivateKey::from_pkcs8(&der)
+            .map_err(|e| SamplyBeamError::SignEncryptError(e.to_string())),
+        "RSA PRIVATE KEY" => {
+            let key_pair = KeyPair::from_der(&der)
+                .map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))?;
+            let pkcs8 = AsDer::<Pkcs8V1Der>::as_der(&key_pair)
+                .map_err(|_| SamplyBeamError::SignEncryptError("Unable to convert PKCS#1 RSA key to PKCS#8".into()))?;
+            RsaPrivateKey::from_pkcs8(pkcs8.as_ref())
+                .map_err(|e| SamplyBeamError::SignEncryptError(e.to_string()))
+        }
+        tag => Err(SamplyBeamError::SignEncryptError(format!("Unsupported private key PEM tag: {tag}"))),
+    }
 }
 
-pub fn asn_str_to_vault_str(asn: &Asn1IntegerRef) -> Result<String, SamplyBeamError> {
-    let mut a = asn
-        .to_bn()
-        .map_err(|e| {
-            SamplyBeamError::SignEncryptError(format!("Unable to parse your certificate: {}", e))
-        })?
-        .to_hex_str()
-        .map_err(|e| {
-            SamplyBeamError::SignEncryptError(format!("Unable to parse your certificate: {}", e))
-        })?
-        .to_string()
-        .to_ascii_lowercase();
+/// Converts the asn.1 time (e.g., from a certificate exiration date) to rust's SystemTime. From https://github.com/sfackler/rust-openssl/issues/1157#issuecomment-1016737160
+pub fn timestamp_to_system_time(timestamp: i64) -> Result<SystemTime, SamplyBeamError> {
+    u64::try_from(timestamp)
+        .map(|seconds| SystemTime::UNIX_EPOCH + Duration::from_secs(seconds))
+        .map_err(|_| SamplyBeamError::SignEncryptError("Certificate timestamp predates UNIX epoch".into()))
+}
 
-    let mut i = 2;
-    while i < a.len() {
-        a.insert(i, ':');
-        i += 3;
-    }
-
-    Ok(a)
+pub fn asn_str_to_vault_str(serial: &[u8]) -> Result<String, SamplyBeamError> {
+    Ok(serial.iter().map(|byte| format!("{byte:02x}")).join(":"))
 }
 
 /// Checks if SystemTime::now() is between the not_before and the not_after dates of a x509 certificate
-pub fn x509_date_valid(cert: &X509) -> Result<bool, ErrorStack> {
-    let expirydate = asn1_time_to_system_time(cert.not_after())?;
-    let startdate = asn1_time_to_system_time(cert.not_before())?;
+pub fn x509_date_valid(cert: &X509) -> Result<bool, SamplyBeamError> {
+    let validity = cert.certificate.tbs_certificate().validity();
     let now = SystemTime::now();
-    return Ok(expirydate > now && now > startdate);
+    Ok(validity.not_before.to_system_time() <= now && now <= validity.not_after.to_system_time())
 }
 
 pub fn load_certificates_from_file(ca_file: PathBuf) -> Result<X509, SamplyBeamError> {
@@ -823,10 +830,10 @@ pub fn load_certificates_from_dir(ca_dir: Option<PathBuf>) -> Result<Vec<reqwest
 }
 
 /// Checks whether or not a x509 certificate matches a private key by comparing the (public) modulus
-pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool, ErrorStack> {
-    let cert_rsa = cert.public_key()?.rsa()?;
-    let cert_mod = rsa::BoxedUint::from_be_slice_vartime(&cert_rsa.n().to_vec());
-    let is_equal = cert_mod.cmp(&key.n()) == std::cmp::Ordering::Equal;
+pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool, SamplyBeamError> {
+    let key_der = AsDer::<PublicKeyX509Der>::as_der(&key.public_key())
+        .map_err(|_| SamplyBeamError::SignEncryptError("Unable to encode public key".into()))?;
+    let is_equal = cert.public_key_der()?.as_slice() == key_der.as_ref();
     if !is_equal {
         match ProxyCertInfo::try_from(cert) {
             Ok(x) => {
@@ -843,28 +850,18 @@ pub fn is_cert_from_privkey(cert: &X509, key: &RsaPrivateKey) -> Result<bool, Er
     return Ok(is_equal);
 }
 
-pub fn parse_crl(der: &[u8]) -> Result<openssl::x509::X509Crl, SamplyBeamError> {
-    Ok(openssl::x509::X509Crl::from_der(der)?)
+pub fn parse_crl(der: &[u8]) -> Result<X509Crl, SamplyBeamError> {
+    X509Crl::from_der(der)
 }
 
-fn is_revoked(status: CrlStatus<'_>) -> bool {
-    match status {
-        CrlStatus::NotRevoked => false,
-        CrlStatus::Revoked(..) => true,
-        CrlStatus::RemoveFromCrl(..) => {
-            warn!("Saw a `remove from crl` status");
-            false
-        },
-    }
+fn is_revoked(crl: &X509Crl, cert: &X509) -> bool {
+    crl.0.contains(cert.raw_serial())
 }
 
 /// Selects the newest certificate from a vector of certs by comparing the `not_before` time
 pub fn get_newest_cert(certs: &mut Vec<CryptoPublicPortion>) -> Option<CryptoPublicPortion> {
     certs.sort_by(|a, b| {
-        a.cert
-            .not_before()
-            .compare(b.cert.not_before())
-            .expect("Unable to select newest certificate")
+        a.cert.not_before_timestamp().cmp(&b.cert.not_before_timestamp())
     }); // sort: newest last
     certs.pop() // return last (newest) certificate
 }
@@ -918,10 +915,7 @@ pub async fn get_proxy_public_keys(
         crypto::get_newest_certs_for_cnames_as_pemstr(proxy_receivers).await;
     let (receivers_keys, proxies_with_invalid_certs): (Vec<_>, Vec<_>) = receivers_crypto_bundle
         .into_iter()
-        .map(|crypt_publ_res| {
-            crypt_publ_res.and_then(|crypto|
-                rsa::RsaPublicKey::from_public_key_pem(&crypto.pubkey).map_err(|_| crypto.beam_id))
-        })
+        .map(|crypt_publ_res| crypt_publ_res.map(|crypto| crypto.rsa_public_key))
         .partition_result();
     if proxies_with_invalid_certs.is_empty() {
         Ok(receivers_keys)
@@ -932,67 +926,13 @@ pub async fn get_proxy_public_keys(
 
 #[cfg(test)]
 mod tests {
-    use openssl::{x509::{X509NameBuilder, extension::{BasicConstraints, KeyUsage, SubjectKeyIdentifier}}, bn::{BigNum, MsbOption}, pkey::PKey, rsa::Rsa, hash::MessageDigest};
-
     use super::*;
 
     #[test]
     fn hex_str() {
-        let bn = BigNum::from_hex_str("440E0D94F36966391117BC9F867D84F0C48CFCB7").unwrap();
-        let input = Asn1Integer::from_bn(&bn).unwrap();
+        let input = [0x44, 0x0e, 0x0d, 0x94, 0xf3, 0x69, 0x66, 0x39, 0x11, 0x17, 0xbc, 0x9f, 0x86, 0x7d, 0x84, 0xf0, 0xc4, 0x8c, 0xfc, 0xb7];
         let expected = "44:0e:0d:94:f3:69:66:39:11:17:bc:9f:86:7d:84:f0:c4:8c:fc:b7";
         assert_eq!(expected, asn_str_to_vault_str(&input).unwrap());
-    }
-
-    fn build_x509(ttl: Duration) -> X509 {
-        let mut builder = X509::builder().unwrap();
-        let duration = SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap() + ttl;
-        let not_after = Asn1Time::from_unix(duration.as_secs() as i64).unwrap();
-        builder.set_not_after(&not_after).unwrap();
-        builder.build()
-    }
-
-    #[tokio::test]
-    async fn test_invalidation() {
-        // Setup fake CertGetter that does nothing
-        struct DummyCertGetter;
-        #[async_trait]
-        impl GetCerts for DummyCertGetter {
-            async fn certificate_list_via_network(&self) ->  Result<Vec<String>, SamplyBeamError> {
-                todo!()
-            }
-            async fn certificate_by_serial_as_pem(&self, _serial: &str) ->  Result<String, SamplyBeamError> {
-                todo!()
-            }
-            async fn im_certificate_as_pem(&self) ->  Result<String,SamplyBeamError> {
-                todo!()
-            }
-        }
-        CERT_GETTER.set(Box::new(DummyCertGetter)).unwrap_or_else(|_| panic!("Could not set cert"));
-        let certs: HashMap<Serial, CertificateCacheEntry> = [1, 5, 10].into_iter()
-            .map(Duration::from_secs)
-            .map(build_x509)
-            .map(CertificateCacheEntry::Valid)
-            .enumerate()
-            .map(|(a, b)| (a.to_string(), b))
-            .collect();
-        let n = certs.len();
-    
-        let (tx, rx) = mpsc::unbounded_channel();
-        let cert_cache = CertificateCache { 
-            serial_to_x509: certs,
-            update_trigger: tx,
-            cn_to_serial: Default::default(),
-            im_cert: None,
-            root_cert: None,
-        };
-        let cache = Arc::new(RwLock::new(cert_cache));
-        let (_tx, mut rx) = mpsc::channel(1);
-    
-        for _ in 0..n {
-            CertificateCache::wait_and_remove_oldest_cert(cache.clone(), &mut rx).await;
-        }
-        assert!(cache.read().await.serial_to_x509.values().all(|cert| matches!(cert, CertificateCacheEntry::Invalid(CertificateInvalidReason::InvalidDate))));
     }
 
     const CERT_TO_REVOKE: &[u8] = b"-----BEGIN CERTIFICATE-----\nMIIDLjCCAhYCFCNuyAi2zfAyORDDiwsJnfJojBk8MA0GCSqGSIb3DQEBCwUAMFQx\nCzAJBgNVBAYTAkRFMRMwEQYDVQQIDApIZWlkZWxiZXJnMSEwHwYDVQQKDBhJbnRl\ncm5ldCBXaWRnaXRzIFB0eSBMdGQxDTALBgNVBAMMBHRlc3QwHhcNMjMwODI0MDc1\nMjM1WhcNMjMwOTIzMDc1MjM1WjBTMQswCQYDVQQGEwJERTETMBEGA1UECAwKU29t\nZS1TdGF0ZTEhMB8GA1UECgwYSW50ZXJuZXQgV2lkZ2l0cyBQdHkgTHRkMQwwCgYD\nVQQDDANmb28wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDd2aLmn3EX\nkSMIxdMWXe8oQNyWBktyBoNK+gSyYBO3SkIcRKM41Ama4GgeIJnDRbL2XLC3Gkhv\nHyvBocVYeP/kWtw8Zvmmi/9Ztv04pVn6LzX2Yaqtm9X78Jo3n2ug2cC8IEoMaYbF\nTcUuV7IX1oSF4Fo3KRRoAUki6yok3uEFVH5cl/UPYyYRJ+CKvoras4c9arZ3Nk3G\na9ImlniBPZ3qQwnkJX5pKcKFzYka7xrNbCpInF/v68R9Hiy4YwUQbGeTfTM+W3i9\nn5ZnSWuwY5lew3WSnpcfYKJQCLhJ9iAXq13+oYbDFSA12pSBIEz0xve3/zR5Cg81\nLGKtvpllzfGVAgMBAAEwDQYJKoZIhvcNAQELBQADggEBAGk2Zii31WPqXwzAUNc0\nS6GjTkHMP5gzdTjYspdBOm8bdJROEp9O/vjAc2Oci4waI9FT6oZPhwX/a6TDtUGs\nAZeQYt9vlS4LPgs6RTF4sFXy+pl7EA/wYqb7e0LSVsx7feTpeRRCIbFXenTKa7m+\nMXsDRCR9weplJdFeyBodFBsNMpShOe3WbnQ7Gi3jLYCUb7acX4I4H4VA7HdakZJr\nEJzP0TQzt/vrSwA2GsNWgO5sOXYkYvjieqzfi89fqY6ZT2jWQ+v+wc7kDiBRbkVU\nGooK1Vo2TJYeaPPmyNomRZtlpgXBGztYyJTfPY0A0M1Fky8Y8QLObtxG0/fkWOft\nHyU=\n-----END CERTIFICATE-----";
@@ -1001,16 +941,10 @@ mod tests {
     #[test]
     fn test_revokation() {
         let mut cache = CertificateCache::new(mpsc::unbounded_channel().0);
-        let mut certs: Vec<_> = [1, 5, 10].into_iter()
-            .map(Duration::from_secs)
-            .map(build_x509)
-            .collect();
-        certs.push(X509::from_pem(CERT_TO_REVOKE).unwrap());
-        cache.serial_to_x509 = certs.into_iter().enumerate().map(|(i, cert)| (i.to_string(), CertificateCacheEntry::Valid(cert))).collect();
+        cache.serial_to_x509.insert("revoked".into(), CertificateCacheEntry::Valid(X509::from_pem(CERT_TO_REVOKE).unwrap()));
         let crl = X509Crl::from_pem(CRL).unwrap();
         cache.invalidate_revoked_certs(&crl);
         
-        assert!(matches!(cache.serial_to_x509.get("3"), Some(&CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked))), "Certificate was not revoked");
-        assert_eq!(cache.serial_to_x509.values().filter(|cert| matches!(cert, CertificateCacheEntry::Valid(..))).count(), 3, "No other certs have been invalidated");
+        assert!(matches!(cache.serial_to_x509.get("revoked"), Some(&CertificateCacheEntry::Invalid(CertificateInvalidReason::Revoked))), "Certificate was not revoked");
     }
 }

@@ -22,8 +22,8 @@ axum = { version = "0.8", features = [] }
 bytes = "1.4"
 futures.workspace = true
 
-# This includes all default features of reqwest but uses native-tls aka openssl as we depend on it for encryption anyways
-reqwest = { workspace = true, features = ["stream", "native-tls", "charset", "system-proxy", "http2"] }
+# Keep TLS on the same AWS-LC backend used by the application's cryptography.
+reqwest = { workspace = true, features = ["stream", "rustls", "charset", "system-proxy", "http2"] }
 
 # Logging
 tracing = "0.1"
@@ -31,12 +31,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # Crypto
 rand.workspace = true
-rsa.workspace = true
+aws-lc-rs.workspace = true
 sha2 = "0.11"
 chacha20poly1305.workspace = true
-openssl = "0.10"
 itertools = "0.15.0"
-jwt-simple = "0.11"
+jsonwebtoken = { version = "11", default-features = false, features = ["aws_lc_rs", "use_pem"] }
+x509-cert = "0.3"
+x509-parser = { version = "0.18", features = ["verify-aws"] }
+base64 = "0.22"
 
 # Global variables
 once_cell = "1"

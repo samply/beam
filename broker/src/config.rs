@@ -5,7 +5,7 @@ use crate::{
 };
 use axum::http::Uri;
 use clap::Parser;
-use shared::{logger::LogOptions, openssl::x509::X509, reqwest::{self, Url}};
+use shared::{crypto::X509, logger::LogOptions, reqwest::{self, Url}};
 use std::str::FromStr;
 use tracing::info;
 

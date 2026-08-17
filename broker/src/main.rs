@@ -18,7 +18,7 @@ use clap::Parser;
 use crypto::GetCertsFromPki;
 use serve_health::{Health, InitStatus};
 use once_cell::sync::Lazy;
-use shared::{errors::SamplyBeamError, openssl::x509::X509, *};
+use shared::{crypto::X509, errors::SamplyBeamError, *};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 

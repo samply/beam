@@ -12,7 +12,6 @@ use futures::{
     Stream, TryFutureExt,
 };
 use httpdate::fmt_http_date;
-use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::{AppId, AppOrProxyId, ProxyId};

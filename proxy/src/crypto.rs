@@ -2,9 +2,8 @@ use std::{fs, path::PathBuf};
 
 use axum::{body::Bytes, http::{header, request, Method, Request, StatusCode, Uri}, response::Response, Json};
 use beam_lib::{AppOrProxyId, ProxyId};
-use rsa::{pkcs1::{DecodeRsaPrivateKey, DecodeRsaPublicKey}, pkcs8::DecodePrivateKey, RsaPrivateKey, RsaPublicKey};
 use shared::{
-    async_trait, crypto::{self, asn_str_to_vault_str, get_all_certs_and_clients_by_cname_as_pemstr, get_best_own_certificate, x509_cert_to_x509_public_key, CryptoPublicPortion, GetCerts, ProxyCertInfo}, errors::{CertificateInvalidReason, SamplyBeamError}, http_client::SamplyHttpClient, jwt_simple::prelude::RS256KeyPair, openssl::x509::X509, reqwest, EncryptedMessage, MsgEmpty
+    async_trait, crypto::{self, asn_str_to_vault_str, get_all_certs_and_clients_by_cname_as_pemstr, get_best_own_certificate, CryptoPublicPortion, GetCerts, ProxyCertInfo}, errors::{CertificateInvalidReason, SamplyBeamError}, http_client::SamplyHttpClient, reqwest, EncryptedMessage, MsgEmpty
 };
 use tracing::{debug, info, warn, error};
 
@@ -124,7 +123,7 @@ pub async fn load_public_crypto_for_proxy(
             "Unable to choose valid, newest certificate for this proxy".into(),
         ),
     )?;
-    let serial = asn_str_to_vault_str(public.cert.serial_number())?;
+    let serial = asn_str_to_vault_str(public.cert.raw_serial())?;
     let mut crypto_with_kid = config.crypto.clone();
     crypto_with_kid.privkey_rs256 = crypto_with_kid.privkey_rs256.with_key_id(&serial);
     Ok((public, crypto_with_kid))

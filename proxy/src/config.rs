@@ -1,8 +1,8 @@
 use clap::Parser;
 use regex::Regex;
 use reqwest::Url;
-use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
-use shared::{errors::SamplyBeamError, jwt_simple::prelude::RS256KeyPair, logger::LogOptions, openssl::x509::X509, reqwest};
+use aws_lc_rs::rsa::PrivateDecryptingKey as RsaPrivateKey;
+use shared::{crypto::{X509, rsa_private_key_from_pem}, crypto_jwt::JwtSigningKey, errors::SamplyBeamError, logger::LogOptions, reqwest};
 
 use std::{
     collections::HashMap,
@@ -31,7 +31,7 @@ pub struct Config {
 
 #[derive(Debug, Clone)]
 pub struct ConfigCrypto {
-    pub privkey_rs256: RS256KeyPair,
+    pub privkey_rs256: JwtSigningKey,
     pub privkey_rsa: RsaPrivateKey,
 }
 
@@ -149,15 +149,14 @@ fn load_private_crypto_for_proxy(privkey_file: &PathBuf, proxy_id: &ProxyId) -> 
         })?
         .trim()
         .to_string();
-    let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
-        .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
+    let privkey_rsa = rsa_private_key_from_pem(privkey_pem.as_bytes())
         .map_err(|e| {
             SamplyBeamError::ConfigurationFailed(format!(
                 "Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}",
                 e
             ))
         })?;
-    let privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem).map_err(|e| {
+    let privkey_rs256 = JwtSigningKey::from_pem(privkey_pem.as_bytes()).map_err(|e| {
         SamplyBeamError::ConfigurationFailed(format!(
             "Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}",
             e
