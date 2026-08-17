@@ -25,33 +25,32 @@ where
             StatusCode::UNAUTHORIZED,
             [(header::WWW_AUTHENTICATE, SCHEME)],
         );
-        if let Some(auth) = parts.headers.get(header::AUTHORIZATION) {
-            let auth_str = auth.to_str().map_err(|_| UNAUTH_ERR)?;
-            let mut auth = auth_str.split(' ');
-            if auth.next() != Some(SCHEME) {
-                warn!(auth_str, "Invalid auth scheme");
-                return Err(UNAUTH_ERR);
-            }
-            let Some(client_id) = auth.next().and_then(|s| AppId::new(s).ok()) else {
-                warn!(auth_str, "Invalid app id");
-                return Err(UNAUTH_ERR);
-            };
-            let config = <&'static Config>::from_ref(state);
-            let Some(api_key_actual) = config.api_keys.get(&client_id) else {
-                warn!("App {client_id} not registered in proxy");
-                return Err(UNAUTH_ERR);
-            };
-            let api_key_claimed = auth.next().ok_or(UNAUTH_ERR)?;
-            if api_key_claimed != api_key_actual {
-                warn!("App {client_id} provided the wrong api key");
-                return Err(UNAUTH_ERR);
-            }
-            debug!("Request authenticated (ClientID {})", client_id);
-            Span::current().record("from", client_id.hide_broker_name());
-            Ok(Self(client_id))
-        } else {
+        let Some(auth) = parts.headers.get(header::AUTHORIZATION) else {
             warn!("No auth header provided");
-            Err(UNAUTH_ERR)
+            return Err(UNAUTH_ERR);
+        };
+        let auth_str = str::from_utf8(auth.as_bytes()).map_err(|_| UNAUTH_ERR)?;
+        let mut auth = auth_str.split(' ');
+        if auth.next() != Some(SCHEME) {
+            warn!(auth_str, "Invalid auth scheme");
+            return Err(UNAUTH_ERR);
         }
+        let Some(client_id) = auth.next().and_then(|s| AppId::new(s).ok()) else {
+            warn!(auth_str, "Invalid app id");
+            return Err(UNAUTH_ERR);
+        };
+        let config = <&'static Config>::from_ref(state);
+        let Some(api_key_actual) = config.api_keys.get(&client_id) else {
+            warn!("App {client_id} not registered in proxy");
+            return Err(UNAUTH_ERR);
+        };
+        let api_key_claimed = auth.next().ok_or(UNAUTH_ERR)?;
+        if !constant_time_eq::constant_time_eq(api_key_claimed.as_bytes(), api_key_actual.as_bytes()) {
+            warn!(provided_key = api_key_claimed, "App {client_id} provided the wrong api key");
+            return Err(UNAUTH_ERR);
+        }
+        debug!("Request authenticated (ClientID {})", client_id);
+        Span::current().record("from", client_id.hide_broker_name());
+        Ok(Self(client_id))
     }
 }

@@ -17,6 +17,7 @@ bytes = { version = "1" }
 httpdate = "1.0"
 clap.workspace = true
 regex = "1"
+constant_time_eq = "0.5"
 
 # Error handling
 anyhow = "1"
