@@ -23,12 +23,14 @@ use beam_lib::{AppOrProxyId, ProxyId};
 use jsonwebtoken::{
     decode, decode_header, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation,
 };
+use once_cell::sync::Lazy;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info_span, warn, Span};
 
 const MAX_TOKEN_LENGTH: usize = 1024 * 1024 * 100;
+static JWT_VALIDATION: Lazy<Validation> = Lazy::new(|| Validation::new(Algorithm::RS256));
 
 #[derive(Clone, Debug)]
 pub struct JwtSigningKey {
@@ -67,7 +69,7 @@ fn verify_token<T: DeserializeOwned>(
             jsonwebtoken::errors::ErrorKind::InvalidToken,
         ));
     }
-    decode::<JwtClaims<T>>(token, key, &Validation::new(Algorithm::RS256))
+    decode::<JwtClaims<T>>(token, key, &JWT_VALIDATION)
         .map(|data| data.claims)
 }
 
@@ -105,7 +107,7 @@ pub type Authorized = MsgSigned<MsgEmpty>;
 #[tracing::instrument]
 pub async fn extract_jwt<T: DeserializeOwned + Serialize>(
     token: &str,
-) -> Result<(crypto::CryptoPublicPortion, DecodingKey, JwtClaims<T>), SamplyBeamError> {
+) -> Result<(crypto::CryptoPublicPortion, JwtClaims<T>), SamplyBeamError> {
     let metadata = decode_header(token).map_err(|e| {
         SamplyBeamError::RequestValidationFailed(format!("Unable to decode JWT metadata: {}", e))
     })?;
@@ -137,24 +139,23 @@ pub async fn extract_jwt<T: DeserializeOwned + Serialize>(
             SamplyBeamError::RequestValidationFailed("Invalid JWT body in header".to_string())
         })?;
         let proxy_id: ProxyId = json.custom.from.proxy_id();
-        let mut certs = crypto::get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
+        let certs = crypto::get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
             .await
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
         // Get newest Certificate
-        crypto::get_newest_cert(&mut certs).ok_or(SamplyBeamError::CertificateError(
+        crypto::get_newest_cert(certs).ok_or(SamplyBeamError::CertificateError(
             CertificateInvalidReason::NoCommonName,
         ))?
     };
-    let pubkey = DecodingKey::from_rsa_der(&public.jwt_public_key_der);
-    let content = verify_token::<T>(token, &pubkey).map_err(|e| {
+    let content = verify_token::<T>(token, &public.cert.jwt_decoding_key).map_err(|e| {
         SamplyBeamError::RequestValidationFailed(format!(
             "Unable to verify token and extract claims from JWT: {}",
             e
         ))
     })?;
-    Ok((public, pubkey, content))
+    Ok((public, content))
 }
 
 /// This verifys a Msg from sent to the Broker
@@ -181,7 +182,7 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
     let token_with_extended_signature =
         token_with_extended_signature.trim_start_matches("SamplyJWT ");
 
-    let (proxy_public_info, pubkey, header_claims) =
+    let (proxy_public_info, header_claims) =
         extract_jwt::<HeaderClaim>(token_with_extended_signature)
             .await
             .map_err(|e| {
@@ -198,7 +199,7 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
     let sender_claimed = custom.from;
 
     // Check if short token matches the long token
-    let msg = verify_token::<M>(token_without_extended_signature, &pubkey)
+    let msg = verify_token::<M>(token_without_extended_signature, &proxy_public_info.cert.jwt_decoding_key)
         .map_err(|e| {
             warn!(
                 "Unable to verify short token {}: {}",

@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 use axum::{body::Bytes, http::{header, request, Method, Request, StatusCode, Uri}, response::Response, Json};
 use beam_lib::{AppOrProxyId, ProxyId};
 use shared::{
-    async_trait, crypto::{self, asn_str_to_vault_str, get_all_certs_and_clients_by_cname_as_pemstr, get_best_own_certificate, CryptoPublicPortion, GetCerts, ProxyCertInfo}, errors::{CertificateInvalidReason, SamplyBeamError}, http_client::SamplyHttpClient, reqwest, EncryptedMessage, MsgEmpty
+    async_trait, crypto::{self, asn_str_to_vault_str, get_all_certs_and_clients_by_cname_as_pemstr, get_best_own_certificate, CryptoPublicPortion, GetCerts}, errors::{CertificateInvalidReason, SamplyBeamError}, http_client::SamplyHttpClient, reqwest, EncryptedMessage, MsgEmpty
 };
 use tracing::{debug, info, warn, error};
 
@@ -96,15 +96,6 @@ impl GetCerts for GetCertsFromBroker {
         debug!("Retrieving intermediate CA certificate ...");
         self.query("/v1/pki/certs/im-ca").await
     }
-}
-
-pub async fn init_public_crypto_for_proxy(
-    config: &Config
-) -> Result<(ProxyCertInfo, config::ConfigCrypto), SamplyBeamError> {
-    let (public_info, new_crypto) = load_public_crypto_for_proxy(config).await?;
-
-    let cert_info = ProxyCertInfo::try_from(&public_info.cert)?;
-    Ok((cert_info, new_crypto))
 }
 
 pub async fn load_public_crypto_for_proxy(

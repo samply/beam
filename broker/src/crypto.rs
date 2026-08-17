@@ -3,7 +3,7 @@ use std::{future::Future, mem::discriminant, sync::Arc};
 use axum::http::{header, method, uri::Scheme, Method, Request, StatusCode, Uri};
 use serde::{Deserialize, Serialize};
 use shared::{
-    async_trait, crypto::{parse_crl, CertificateCache, CertificateCacheUpdate, GetCerts, X509Crl}, errors::SamplyBeamError, http_client::{self, SamplyHttpClient}, reqwest::{self, Url}
+    async_trait, crypto::{CertificateCache, CertificateCacheUpdate, GetCerts, X509Crl}, errors::SamplyBeamError, http_client::{self, SamplyHttpClient}, reqwest::{self, Url}
 };
 use std::time::Duration;
 use tokio::{sync::RwLock, time::timeout};
@@ -240,6 +240,6 @@ impl GetCerts for GetCertsFromPki {
             Some(100),
         )
         .await?;
-        parse_crl(&resp.bytes().await?).map(Some)
+        X509Crl::from_der(&resp.bytes().await?).map(Some)
     }
 }
