@@ -348,6 +348,7 @@ pub async fn sign_request(
             ERR_INTERNALCRYPTO
         })?;
     let mut headers_mut = parts.headers;
+    headers_mut.clear();
     headers_mut.insert(
         header::DATE,
         HeaderValue::from_str(&fmt_http_date(SystemTime::now()))
@@ -366,8 +367,6 @@ pub async fn sign_request(
     let mut auth_header = String::from("SamplyJWT ");
     auth_header.push_str(&token_with_extended_signature);
 
-    headers_mut.remove(header::HOST);
-    headers_mut.remove(header::CONTENT_LENGTH);
     headers_mut.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_str("application/jwt").unwrap(),
