@@ -255,10 +255,7 @@ pub fn make_extra_fields_digest(
     sig: &str,
     from: &AppOrProxyId,
 ) -> Result<HeaderClaim, SamplyBeamError> {
-    const HEADERS_TO_SIGN: [HeaderName; 1] = [
-        // header::HOST, // Host header differs from proxy to broker
-        header::DATE,
-    ];
+    const HEADERS_TO_SIGN: [HeaderName; 1] = [header::DATE];
 
     let mut buf: Vec<u8> = Vec::new();
     buf.append(&mut method.as_str().as_bytes().to_vec());

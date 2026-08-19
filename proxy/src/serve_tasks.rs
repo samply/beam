@@ -365,7 +365,6 @@ pub async fn sign_request(
     let body: reqwest::Body = token_without_extended_signature.into();
     let mut auth_header = String::from("SamplyJWT ");
     auth_header.push_str(&token_with_extended_signature);
-    headers_mut.insert(header::HOST, config.broker_host_header.clone());
 
     headers_mut.remove(header::CONTENT_LENGTH);
     headers_mut.insert(

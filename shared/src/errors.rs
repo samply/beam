@@ -9,8 +9,6 @@ use beam_lib::ProxyId;
 pub enum SamplyBeamError {
     #[error("Invalid bind address supplied: {0}")]
     BindAddr(AddrParseError),
-    #[error("Invalid broker address supplied: {0}")]
-    WrongBrokerUri(&'static str),
     #[error("The request could not be validated: {0}.")]
     RequestValidationFailed(String),
     #[error("Invalid path supplied")]

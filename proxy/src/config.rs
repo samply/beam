@@ -13,7 +13,6 @@ use std::{
     str::FromStr,
 };
 
-use axum::http::HeaderValue;
 use serde::Deserialize;
 use tracing::{debug, info, warn};
 
@@ -22,7 +21,6 @@ use beam_lib::{AppId, ProxyId};
 #[derive(Clone, Debug)]
 pub struct Config {
     pub broker_uri: Url,
-    pub broker_host_header: HeaderValue,
     pub bind_addr: SocketAddr,
     pub proxy_id: ProxyId,
     pub api_keys: HashMap<AppId, ApiKey>,
@@ -126,7 +124,6 @@ impl Config {
             ))
         })?;
         let config = Config {
-            broker_host_header: uri_to_host_header(&cli_args.broker_url)?,
             broker_uri: cli_args.broker_url,
             bind_addr: cli_args.bind_addr,
             crypto: load_private_crypto_for_proxy(&cli_args.privkey_file, &proxy_id)?,
@@ -181,22 +178,6 @@ fn get_enrollment_msg(proxy_id: &str) -> String {
         divider,
         proxy_id
     )
-}
-
-
-fn uri_to_host_header(uri: &Url) -> Result<HeaderValue, SamplyBeamError> {
-    let hostname: String = uri
-        .host()
-        .ok_or(SamplyBeamError::WrongBrokerUri("URI's host is empty."))?
-        .to_string();
-    let port = match uri.port() {
-        Some(p) => format!(":{}", p),
-        None => String::from(""),
-    };
-    let host_header = hostname + &port;
-    let host_header: HeaderValue = HeaderValue::from_str(&host_header)
-        .map_err(|_| SamplyBeamError::WrongBrokerUri("Unable to parse broker URL"))?;
-    Ok(host_header)
 }
 
 #[cfg(test)]
