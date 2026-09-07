@@ -9,7 +9,7 @@ use clap::Parser;
 use futures::future::Ready;
 use futures::StreamExt;
 use shared::{reqwest, EncryptedMessage, MsgEmpty, PlainMessage};
-use shared::crypto::{CryptoPublicPortion, ProxyCertInfo};
+use shared::crypto::CryptoPublicPortion;
 use shared::errors::SamplyBeamError;
 use shared::http_client::{self, SamplyHttpClient};
 use sse_stream::SseStream;
@@ -112,7 +112,7 @@ where
 }
 
 async fn init_crypto(config: &Config) -> Result<config::ConfigCrypto, SamplyBeamError> {
-    shared::crypto::init_ca_chain(&config.rootcert).await?;
+    shared::crypto::init_ca_chain(config.rootcert).await?;
 
     let _public_info: Vec<_> =
         shared::crypto::get_all_certs_and_clients_by_cname_as_pemstr(&config.proxy_id)
@@ -123,13 +123,20 @@ async fn init_crypto(config: &Config) -> Result<config::ConfigCrypto, SamplyBeam
                     .ok()
             })
             .collect();
-    let (ProxyCertInfo { serial, common_name, .. }, new_crpto) =
-        crate::crypto::init_public_crypto_for_proxy(&config).await?;
+    let (public_info, new_crpto) = crate::crypto::load_public_crypto_for_proxy(&config).await?;
+    let common_name = public_info
+        .cert
+        .common_names()
+        .next()
+        .ok_or(shared::errors::CertificateInvalidReason::NoCommonName)?;
     if &common_name != config.proxy_id.as_ref() {
         return Err(SamplyBeamError::ConfigurationFailed(format!("Unable to retrieve a certificate matching your Proxy ID. Expected {common_name}, got {}. Please check your configuration", config.proxy_id.as_ref())));
     }
 
-    info!("Certificate retrieved for our proxy ID {common_name} (serial {serial})");
+    info!(
+        "Certificate retrieved for our proxy ID {common_name} (serial {})",
+        public_info.cert.serial_number()
+    );
 
     Ok(new_crpto)
 }

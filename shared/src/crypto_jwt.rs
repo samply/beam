@@ -1,25 +1,77 @@
-use std::net::{SocketAddr, IpAddr};
+use std::net::{IpAddr, SocketAddr};
 
-use beam_lib::{AppOrProxyId, ProxyId};
 use crate::{
     crypto::{self, CryptoPublicPortion},
     errors::{CertificateInvalidReason, SamplyBeamError},
     Msg, MsgEmpty, MsgId, MsgSigned,
 };
-use axum::{body::HttpBody, extract::{{FromRequest, ConnectInfo, FromRequestParts}, Request}, http::{header, request::Parts, uri::PathAndQuery, HeaderMap, HeaderName, Method, StatusCode, Uri}, BoxError, RequestExt};
-use jwt_simple::{
-    claims::JWTClaims,
-    prelude::{
-        Base64, Base64UrlSafeNoPadding, Claims, Duration, KeyMetadata, RS256KeyPair,
-        RS256PublicKey, RSAKeyPairLike, RSAPublicKeyLike, Token, VerificationOptions,
+use axum::{
+    body::HttpBody,
+    extract::{
+        Request, {ConnectInfo, FromRequest, FromRequestParts},
     },
-    reexports::ct_codecs::Decoder,
+    http::{
+        header, request::Parts, uri::PathAndQuery, HeaderMap, HeaderName, Method, StatusCode, Uri,
+    },
+    BoxError, RequestExt,
 };
-use once_cell::unsync::Lazy;
-use openssl::base64;
+use base64::{
+    engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
+    Engine,
+};
+use beam_lib::{AppOrProxyId, ProxyId};
+use jsonwebtoken::{
+    decode, decode_header, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation,
+};
+use once_cell::sync::Lazy;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
-use tracing::{debug, error, warn, Span, info_span};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{debug, error, info_span, warn, Span};
+
+const MAX_TOKEN_LENGTH: usize = 1024 * 1024 * 100;
+static JWT_VALIDATION: Lazy<Validation> = Lazy::new(|| Validation::new(Algorithm::RS256));
+
+#[derive(Clone, Debug)]
+pub struct JwtSigningKey {
+    key: EncodingKey,
+    key_id: Option<String>,
+}
+
+impl JwtSigningKey {
+    pub fn from_pem(pem: &[u8]) -> Result<Self, jsonwebtoken::errors::Error> {
+        Ok(Self {
+            key: EncodingKey::from_rsa_pem(pem)?,
+            key_id: None,
+        })
+    }
+
+    pub fn with_key_id(mut self, key_id: impl Into<String>) -> Self {
+        self.key_id = Some(key_id.into());
+        self
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct JwtClaims<T> {
+    pub exp: u64,
+    pub iat: u64,
+    #[serde(flatten)]
+    pub custom: T,
+}
+
+fn verify_token<T: DeserializeOwned>(
+    token: &str,
+    key: &DecodingKey,
+) -> Result<JwtClaims<T>, jsonwebtoken::errors::Error> {
+    if token.len() > MAX_TOKEN_LENGTH {
+        return Err(jsonwebtoken::errors::Error::from(
+            jsonwebtoken::errors::ErrorKind::InvalidToken,
+        ));
+    }
+    decode::<JwtClaims<T>>(token, key, &JWT_VALIDATION)
+        .map(|data| data.claims)
+}
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
 // const ERR_CERT: (StatusCode, &str) = (StatusCode::BAD_REQUEST, "Unable to retrieve matching certificate.");
@@ -55,18 +107,11 @@ pub type Authorized = MsgSigned<MsgEmpty>;
 #[tracing::instrument]
 pub async fn extract_jwt<T: DeserializeOwned + Serialize>(
     token: &str,
-) -> Result<
-    (
-        crypto::CryptoPublicPortion,
-        RS256PublicKey,
-        jwt_simple::prelude::JWTClaims<T>,
-    ),
-    SamplyBeamError,
-> {
-    let metadata = Token::decode_metadata(token).map_err(|e| {
+) -> Result<(crypto::CryptoPublicPortion, JwtClaims<T>), SamplyBeamError> {
+    let metadata = decode_header(token).map_err(|e| {
         SamplyBeamError::RequestValidationFailed(format!("Unable to decode JWT metadata: {}", e))
     })?;
-    let public = if let Some(serial) = metadata.key_id() {
+    let public = if let Some(serial) = metadata.kid.as_deref() {
         crypto::get_cert_and_client_by_serial_as_pemstr(serial)
             .await
             .ok_or_else(|| {
@@ -85,44 +130,33 @@ pub async fn extract_jwt<T: DeserializeOwned + Serialize>(
             .ok_or(SamplyBeamError::RequestValidationFailed(
                 "Invalid JWT in header".to_string(),
             ))?;
-        let data = Base64UrlSafeNoPadding::decode_to_vec(data, None).map_err(|e| {
+        let data = URL_SAFE_NO_PAD.decode(data).map_err(|e| {
             warn!("Failed to b64decode {data:?}. Err: {e}");
             SamplyBeamError::RequestValidationFailed("Invalid JWT in header".to_string())
         })?;
-        let json = serde_json::from_slice::<JWTClaims<HeaderClaim>>(&data).map_err(|e| {
+        let json = serde_json::from_slice::<JwtClaims<HeaderClaim>>(&data).map_err(|e| {
             warn!("Failed to decode {data:?} to JwtClaims<HeaderClaims>. Err: {e}");
             SamplyBeamError::RequestValidationFailed("Invalid JWT body in header".to_string())
         })?;
         let proxy_id: ProxyId = json.custom.from.proxy_id();
-        let mut certs = crypto::get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
+        let certs = crypto::get_all_certs_and_clients_by_cname_as_pemstr(&proxy_id)
             .await
             .into_iter()
             .flatten()
             .collect::<Vec<_>>();
         // Get newest Certificate
-        crypto::get_newest_cert(&mut certs).ok_or(SamplyBeamError::CertificateError(
+        crypto::get_newest_cert(certs).ok_or(SamplyBeamError::CertificateError(
             CertificateInvalidReason::NoCommonName,
         ))?
     };
-    let pubkey = RS256PublicKey::from_pem(&public.pubkey).map_err(|e| {
-        SamplyBeamError::SignEncryptError(format!("Unable to initialize public key: {}", e))
+    let content = verify_token::<T>(token, &public.cert.jwt_decoding_key).map_err(|e| {
+        SamplyBeamError::RequestValidationFailed(format!(
+            "Unable to verify token and extract claims from JWT: {}",
+            e
+        ))
     })?;
-    let content = pubkey
-        .verify_token::<T>(token, Some(JWT_VERIFICATION_OPTIONS.clone()))
-        .map_err(|e| {
-            SamplyBeamError::RequestValidationFailed(format!(
-                "Unable to verify token and extract claims from JWT: {}",
-                e
-            ))
-        })?;
-    Ok((public, pubkey, content))
+    Ok((public, content))
 }
-
-pub const JWT_VERIFICATION_OPTIONS: Lazy<VerificationOptions> = Lazy::new(|| VerificationOptions {
-    accept_future: true,
-    max_token_length: Some(1024 * 1024 * 100), //100MB
-    ..Default::default()
-});
 
 /// This verifys a Msg from sent to the Broker
 /// The Message is encoded in the JWT Claims of the body which is a JWT.
@@ -133,7 +167,8 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
     token_without_extended_signature: &str,
 ) -> Result<MsgSigned<M>, (StatusCode, &'static str)> {
     let ip = get_ip(req).await;
-    let token_with_extended_signature = req.headers
+    let token_with_extended_signature = req
+        .headers
         .get(header::AUTHORIZATION)
         .ok_or_else(|| {
             warn!(%ip, "Missing Authorization header");
@@ -147,7 +182,7 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
     let token_with_extended_signature =
         token_with_extended_signature.trim_start_matches("SamplyJWT ");
 
-    let (proxy_public_info, pubkey, header_claims) =
+    let (proxy_public_info, header_claims) =
         extract_jwt::<HeaderClaim>(token_with_extended_signature)
             .await
             .map_err(|e| {
@@ -164,11 +199,7 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
     let sender_claimed = custom.from;
 
     // Check if short token matches the long token
-    let msg = pubkey
-        .verify_token::<M>(
-            token_without_extended_signature,
-            Some(JWT_VERIFICATION_OPTIONS.clone()),
-        )
+    let msg = verify_token::<M>(token_without_extended_signature, &proxy_public_info.cert.jwt_decoding_key)
         .map_err(|e| {
             warn!(
                 "Unable to verify short token {}: {}",
@@ -227,14 +258,24 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
 
 pub async fn sign_to_jwt(
     input: impl Serialize,
-    privkey: &RS256KeyPair,
+    privkey: &JwtSigningKey,
 ) -> Result<String, SamplyBeamError> {
-    let json = serde_json::to_value(input)
+    let custom = serde_json::to_value(input)
         .map_err(|e| SamplyBeamError::SignEncryptError(format!("Serialization failed: {}", e)))?;
-    let claims = Claims::with_custom_claims::<Value>(json, Duration::from_hours(1)); // TODO: Make variable
-
-    let token = privkey
-        .sign(claims)
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| {
+            SamplyBeamError::SignEncryptError(format!("System clock is before UNIX epoch: {e}"))
+        })?
+        .as_secs();
+    let claims = JwtClaims {
+        exp: now + 60 * 60,
+        iat: now,
+        custom,
+    };
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = privkey.key_id.clone();
+    let token = encode(&header, &claims, &privkey.key)
         .map_err(|e| SamplyBeamError::SignEncryptError(format!("Unable to sign JWT: {}", e)))?;
 
     Ok(token)
@@ -279,7 +320,7 @@ pub fn make_extra_fields_digest(
     buf.append(&mut from.to_string().as_bytes().to_vec());
 
     let digest = crypto::hash(&buf)?;
-    let digest = base64::encode_block(&digest);
+    let digest = STANDARD.encode(digest);
 
     Ok(HeaderClaim {
         sig: digest,
@@ -288,12 +329,57 @@ pub fn make_extra_fields_digest(
 }
 
 async fn get_ip(parts: &mut Parts) -> IpAddr {
-    let source_ip = ConnectInfo::<SocketAddr>::from_request_parts(parts, &()).await.expect("The server is configured to keep connect info").0.ip();
+    let source_ip = ConnectInfo::<SocketAddr>::from_request_parts(parts, &())
+        .await
+        .expect("The server is configured to keep connect info")
+        .0
+        .ip();
     const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
-    parts.headers
+    parts
+        .headers
         .get(X_FORWARDED_FOR)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.split(',').next())
         .and_then(|v| v.parse().ok())
         .unwrap_or(source_ip)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aws_lc_rs::{
+        encoding::{AsDer, Pkcs8V1Der},
+        rsa::{KeyPair, KeySize},
+        signature::KeyPair as _,
+    };
+    use base64::{engine::general_purpose::STANDARD, Engine};
+
+    #[tokio::test]
+    async fn jsonwebtoken_uses_aws_lc_rsa_keys() {
+        let key_pair = KeyPair::generate(KeySize::Rsa2048).unwrap();
+        let private_der = AsDer::<Pkcs8V1Der>::as_der(&key_pair).unwrap();
+        let encoded = STANDARD.encode(private_der.as_ref());
+        let body = encoded
+            .as_bytes()
+            .chunks(64)
+            .map(|line| std::str::from_utf8(line).unwrap())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let private_pem =
+            format!("-----BEGIN PRIVATE KEY-----\n{body}\n-----END PRIVATE KEY-----\n");
+        let signing_key = JwtSigningKey::from_pem(private_pem.as_bytes())
+            .unwrap()
+            .with_key_id("serial");
+        let token = sign_to_jwt(serde_json::json!({ "message": "hello" }), &signing_key)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            decode_header(&token).unwrap().kid.as_deref(),
+            Some("serial")
+        );
+        let public_key = key_pair.public_key().as_ref();
+        let claims = verify_token::<Value>(&token, &DecodingKey::from_rsa_der(public_key)).unwrap();
+        assert_eq!(claims.custom, serde_json::json!({ "message": "hello" }));
+    }
 }

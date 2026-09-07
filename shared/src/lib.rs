@@ -7,16 +7,21 @@ use chacha20poly1305::{
 use crypto_jwt::extract_jwt;
 use errors::SamplyBeamError;
 use itertools::Itertools;
-use jwt_simple::prelude::{RS256PublicKey, RSAPublicKeyLike};
-use openssl::base64;
-use rsa::{RsaPrivateKey, RsaPublicKey, Oaep};
+use aws_lc_rs::{
+    rand::{SecureRandom, SystemRandom},
+    rsa::{
+        KeySize, OaepPrivateDecryptingKey, OaepPublicEncryptingKey,
+        PrivateDecryptingKey as RsaPrivateKey,
+        OAEP_SHA256_MGF1SHA256,
+    },
+};
 use serde_json::{json, Value};
-use sha2::Sha256;
 use tracing::debug;
 
 use std::{
     fmt::{Debug, Display},
     ops::Deref,
+    sync::Arc,
     time::{Duration, Instant, SystemTime}, net::SocketAddr, error::Error,
 };
 
@@ -28,10 +33,10 @@ use serde::{
 use std::{collections::HashMap, str::FromStr};
 use uuid::Uuid;
 
-use crate::{crypto_jwt::JWT_VERIFICATION_OPTIONS, serde_helpers::*};
-// Reexport b64 implementation
-pub use jwt_simple::reexports::ct_codecs;
-pub use jwt_simple;
+use crate::{crypto::CryptoPublicPortion, serde_helpers::*};
+// Reexport the base64 implementation used by the wire formats.
+pub use base64;
+pub use jsonwebtoken;
 pub use reqwest;
 pub use async_trait::async_trait;
 
@@ -61,9 +66,6 @@ pub mod middleware;
 
 pub mod sse_event;
 
-// Reexports
-pub use openssl;
-
 pub const CLAP_FOOTER: &str = "For proxy support, environment variables HTTP_PROXY, HTTPS_PROXY, ALL_PROXY and NO_PROXY (and their lower-case variants) are supported. Usually, you want to set HTTP_PROXY *and* HTTPS_PROXY or set ALL_PROXY if both values are the same.\n\nFor updates and detailed usage instructions, visit https://github.com/samply/beam";
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
@@ -81,7 +83,7 @@ pub struct MsgSigned<M: Msg> {
 
 impl<M: Msg + DeserializeOwned> MsgSigned<M> {
     pub async fn verify(token: &str) -> Result<Self, SamplyBeamError> {
-        let msg = extract_jwt(token).await?.2.custom;
+        let msg = extract_jwt(token).await?.1.custom;
 
         debug!("Message has been verified successfully.");
         Ok(MsgSigned {
@@ -225,7 +227,7 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
     fn decrypt(
         self,
         my_id: &AppOrProxyId,
-        my_priv_key: &RsaPrivateKey,
+        decrypting_key: &OaepPrivateDecryptingKey,
     ) -> Result<Self::Output, SamplyBeamError> {
 
         let Some(Encrypted {
@@ -261,11 +263,14 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
         let encrypted_decryption_key = &encryption_keys[to_array_index];
 
         // Cryptographic Operations
-        let symmetric_key = my_priv_key.decrypt(
-            Oaep::<sha2::Sha256>::new(),
-            &encrypted_decryption_key,
-        )?;
-        let symmetric_key = aead::Key::<XChaCha20Poly1305>::try_from(symmetric_key.as_slice())
+        let mut plaintext = vec![0; decrypting_key.min_output_size()];
+        let symmetric_key = decrypting_key.decrypt(
+            &OAEP_SHA256_MGF1SHA256,
+            encrypted_decryption_key,
+            &mut plaintext,
+            None,
+        ).map_err(|_| SamplyBeamError::SignEncryptError("Unable to decrypt RSA-OAEP key".into()))?;
+        let symmetric_key = aead::Key::<XChaCha20Poly1305>::try_from(&*symmetric_key)
             .map_err(|_| {
                 SamplyBeamError::SignEncryptError(
                     "Decryption error: Invalid symmetric key length".into(),
@@ -311,9 +316,9 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
     fn get_plain(&self) -> &Plain;
 
     #[allow(clippy::or_fun_call)]
-    fn encrypt(
+    fn encrypt<'a>(
         self,
-        receivers_public_keys: &Vec<RsaPublicKey>,
+        receivers_public_keys: impl IntoIterator<Item = &'a OaepPublicEncryptingKey>,
     ) -> Result<Self::Output, SamplyBeamError> {
         // Generate Symmetric Key and Nonce
         let mut rng = rng();
@@ -322,13 +327,15 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
 
         // Encrypt symmetric key with receivers' public keys
         let Ok(encrypted_keys) = receivers_public_keys
-            .iter()
+            .into_iter()
             .map(|key| {
+                let mut ciphertext = vec![0; key.ciphertext_size()];
                 key.encrypt(
-                    &mut rng,
-                    Oaep::<sha2::Sha256>::new(),
+                    &OAEP_SHA256_MGF1SHA256,
                     symmetric_key.as_slice(),
-                )
+                    &mut ciphertext,
+                    None,
+                ).map(|encrypted| encrypted.to_vec())
             })
             .collect()
         else {
@@ -704,7 +711,7 @@ pub struct MsgPing {
 impl MsgPing {
     pub fn new(from: AppOrProxyId, to: AppOrProxyId) -> Self {
         let mut nonce = [0; 16];
-        openssl::rand::rand_bytes(&mut nonce)
+        SystemRandom::new().fill(&mut nonce)
             .expect("Critical Error: Failed to generate random byte array.");
         MsgPing {
             id: MsgId::new(),
@@ -781,14 +788,14 @@ mod tests {
         };
 
         //Setup Keypairs
-        let mut rng = rand::rng();
-        let rsa_length: usize = 2048;
-        let p1_private = RsaPrivateKey::new(&mut rng, rsa_length)
+        let p1_private = RsaPrivateKey::generate(KeySize::Rsa2048)
             .expect("Failed to generate private key for proxy 1");
-        let p2_private = RsaPrivateKey::new(&mut rng, rsa_length)
+        let p2_private = RsaPrivateKey::generate(KeySize::Rsa2048)
             .expect("Failed to generate private key for proxy 2");
-        let p1_public = RsaPublicKey::from(&p1_private);
-        let p2_public = RsaPublicKey::from(&p2_private);
+        let p1_public = OaepPublicEncryptingKey::new(p1_private.public_key()).unwrap();
+        let p2_public = OaepPublicEncryptingKey::new(p2_private.public_key()).unwrap();
+        let p1_decrypting = OaepPrivateDecryptingKey::new(p1_private).unwrap();
+        let p2_decrypting = OaepPrivateDecryptingKey::new(p2_private).unwrap();
 
         // Encrypt Message
         let receivers_public_keys = vec![p1_public, p2_public];
@@ -799,10 +806,10 @@ mod tests {
         // Decrypt for both proxies
         let msg_p1_decr = msg_encr
             .clone()
-            .decrypt(&p1_id, &p1_private)
+            .decrypt(&p1_id, &p1_decrypting)
             .expect("Cannot decrypt message");
         let msg_p2_decr = msg_encr
-            .decrypt(&p2_id, &p2_private)
+            .decrypt(&p2_id, &p2_decrypting)
             .expect("Cannot decrypt message");
 
         assert_eq!(msg_p1_decr, msg_p2_decr);
@@ -827,14 +834,14 @@ mod tests {
         };
 
         //Setup Keypairs
-        let mut rng = rand::rng();
-        let rsa_length: usize = 2048;
-        let p1_private = RsaPrivateKey::new(&mut rng, rsa_length)
+        let p1_private = RsaPrivateKey::generate(KeySize::Rsa2048)
             .expect("Failed to generate private key for proxy 1");
-        let p2_private = RsaPrivateKey::new(&mut rng, rsa_length)
+        let p2_private = RsaPrivateKey::generate(KeySize::Rsa2048)
             .expect("Failed to generate private key for proxy 2");
-        let p1_public = RsaPublicKey::from(&p1_private);
-        let p2_public = RsaPublicKey::from(&p2_private);
+        let p1_public = OaepPublicEncryptingKey::new(p1_private.public_key()).unwrap();
+        let p2_public = OaepPublicEncryptingKey::new(p2_private.public_key()).unwrap();
+        let p1_decrypting = OaepPrivateDecryptingKey::new(p1_private).unwrap();
+        let p2_decrypting = OaepPrivateDecryptingKey::new(p2_private).unwrap();
 
         // Encrypt Message
         let receivers_public_keys = vec![p1_public, p2_public];
@@ -845,11 +852,11 @@ mod tests {
         // Decrypt for both proxies
         let msg_p1_decr = msg_encr
             .clone()
-            .decrypt(&p1_id, &p1_private)
+            .decrypt(&p1_id, &p1_decrypting)
             .expect("Cannot decrypt message");
         let msg_p2_decr = msg_encr
             .clone()
-            .decrypt(&p2_id, &p2_private)
+            .decrypt(&p2_id, &p2_decrypting)
             .expect("Cannot decrypt message");
 
         assert_eq!(msg_p1_decr, msg_p2_decr);
@@ -874,12 +881,13 @@ mod tests {
             metadata: "".into(),
         };
 
-        let mut rng = rand::rng();
-        let rsa_length: usize = 2048;
-        let p1_private = RsaPrivateKey::new(&mut rng, rsa_length).unwrap();
-        let p2_private = RsaPrivateKey::new(&mut rng, rsa_length).unwrap();
-        let p3_private = RsaPrivateKey::new(&mut rng, rsa_length).unwrap();
-        let p2_public = RsaPublicKey::from(&p2_private);
+        let p1_private = RsaPrivateKey::generate(KeySize::Rsa2048).unwrap();
+        let p2_private = RsaPrivateKey::generate(KeySize::Rsa2048).unwrap();
+        let p3_private = RsaPrivateKey::generate(KeySize::Rsa2048).unwrap();
+        let p2_public = OaepPublicEncryptingKey::new(p2_private.public_key()).unwrap();
+        let p1_decrypting = OaepPrivateDecryptingKey::new(p1_private).unwrap();
+        let p2_decrypting = OaepPrivateDecryptingKey::new(p2_private).unwrap();
+        let p3_decrypting = OaepPrivateDecryptingKey::new(p3_private).unwrap();
 
         // Encrypted for proxy2 only.
         let msg_encr = msg.encrypt(&vec![p2_public]).expect("Could not encrypt message");
@@ -887,18 +895,18 @@ mod tests {
         // Proxy2 can decrypt
         let as_recipient = msg_encr
             .clone()
-            .decrypt(&p2_id, &p2_private)
+            .decrypt(&p2_id, &p2_decrypting)
             .expect("Recipient must be able to decrypt");
         assert_eq!(as_recipient.body.body.as_deref(), Some("Testbody"));
 
         // Proxy1 gets <encrypted> body
         let as_creator = msg_encr
             .clone()
-            .decrypt(&p1_id, &p1_private)
+            .decrypt(&p1_id, &p1_decrypting)
             .expect("Creator must receive the task with <encrypted> body");
         assert_eq!(as_creator.body.body.as_deref(), Some("<encrypted>"));
 
         // Non-sender or non-reciever is rejected
-        assert!(msg_encr.decrypt(&p3_id, &p3_private).is_err());
+        assert!(msg_encr.decrypt(&p3_id, &p3_decrypting).is_err());
    }
 }

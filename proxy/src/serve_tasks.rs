@@ -12,7 +12,6 @@ use futures::{
     Stream, TryFutureExt,
 };
 use httpdate::fmt_http_date;
-use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::{AppId, AppOrProxyId, ProxyId};
@@ -423,7 +422,7 @@ pub(crate) async fn validate_and_decrypt(json: Value, config: &Config) -> Result
 fn decrypt_msg<M: DecryptableMsg>(msg: M, config: &Config) -> Result<M::Output, SamplyBeamError> {
     msg.decrypt(
         &AppOrProxyId::Proxy(config.proxy_id.to_owned()),
-        &config.crypto.privkey_rsa,
+        &config.crypto.privkey_oaep,
     )
 }
 
@@ -478,5 +477,5 @@ async fn encrypt_request(
 
 async fn encrypt_msg<M: EncryptableMsg>(msg: M) -> Result<M::Output, SamplyBeamError> {
     let receivers_keys = crypto::get_proxy_public_keys(msg.get_to()).await?;
-    msg.encrypt(&receivers_keys)
+    msg.encrypt(receivers_keys.iter().map(|recv| &recv.cert.oaep_public_key))
 }

@@ -41,31 +41,31 @@ pub mod serialize_time {
 // https://github.com/serde-rs/json/issues/360#issuecomment-330095360
 pub mod serde_base64 {
     use serde::{Serializer, de, ser, Deserialize, Deserializer};
-    use openssl::base64;
+    use base64::{Engine, engine::general_purpose::STANDARD};
 
     pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
         where S: Serializer
     {
-        serializer.serialize_str(&base64::encode_block(bytes))
+        serializer.serialize_str(&STANDARD.encode(bytes))
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
         where D: Deserializer<'de>
     {
-        base64::decode_block(<&str>::deserialize(deserializer)?).map_err(de::Error::custom)
+        STANDARD.decode(<&str>::deserialize(deserializer)?).map_err(de::Error::custom)
     }
 
     pub mod nested {
         use serde::ser::SerializeSeq;
 
-        use super::{ser, de, Serializer, Deserializer, base64};
+        use super::{ser, de, Serializer, Deserializer, Engine, STANDARD};
 
         pub fn serialize<S>(bytes: &[Vec<u8>], serializer: S) -> Result<S::Ok, S::Error>
             where S: Serializer
         {
             let mut seq_serializer = serializer.serialize_seq(Some(bytes.len()))?;
             for byte_seq in bytes {
-                seq_serializer.serialize_element(&base64::encode_block(&byte_seq))?;
+                seq_serializer.serialize_element(&STANDARD.encode(byte_seq))?;
             }
             seq_serializer.end()
         }
@@ -75,7 +75,7 @@ pub mod serde_base64 {
         {
             <Vec<&str> as serde::Deserialize>::deserialize(deserializer)?
                 .into_iter()
-                .map(base64::decode_block)
+                .map(|value| STANDARD.decode(value))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(de::Error::custom)
         }

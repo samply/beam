@@ -3,7 +3,6 @@ use std::{collections::HashSet, ops::Deref, time::Duration};
 use axum::http::{Request, Response, Uri};
 use itertools::Itertools;
 use once_cell::sync::OnceCell;
-use openssl::x509::X509;
 use reqwest::{Certificate, Client, ClientBuilder};
 use tracing::{debug, info, warn};
 
