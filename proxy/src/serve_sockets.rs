@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use beam_lib::AppOrProxyId;
 use shared::{
-    ct_codecs::{self, Base64UrlSafeNoPadding, Decoder as B64Decoder, Encoder as B64Encoder}, expire_map::LazyExpireMap, http_client::SamplyHttpClient, reqwest, MessageType, MsgEmpty, MsgId, MsgSocketRequest, Plain
+    base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD}, expire_map::LazyExpireMap, http_client::SamplyHttpClient, reqwest, MessageType, MsgEmpty, MsgId, MsgSocketRequest, Plain
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf, ReadHalf, WriteHalf};
 use tokio_util::{
@@ -100,9 +100,7 @@ async fn create_socket_con(
 ) -> Response {
     let task_id = MsgId::new();
     let secret = SocketEncKey::generate();
-    let Ok(secret_encoded) = secret.to_b64_str() else {
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    };
+    let secret_encoded = secret.to_b64_str();
     const TTL: Duration = Duration::from_secs(60);
     task_secret_map.insert_for(TTL, task_id.clone(), secret);
     let metadata = req
@@ -238,8 +236,8 @@ impl SocketEncKey {
         SocketEncKey(Key::generate())
     }
 
-    fn to_b64_str(&self) -> Result<String, ct_codecs::Error> {
-        Base64UrlSafeNoPadding::encode_to_string(self.0.as_slice())
+    fn to_b64_str(&self) -> String {
+        URL_SAFE_NO_PAD.encode(self.0.as_slice())
     }
 }
 
@@ -248,7 +246,7 @@ impl Serialize for SocketEncKey {
     where
         S: serde::Serializer,
     {
-        self.to_b64_str().map_err(serde::ser::Error::custom)?.serialize(serializer)
+        self.to_b64_str().serialize(serializer)
     }
 }
 
@@ -257,7 +255,7 @@ impl<'de> Deserialize<'de> for SocketEncKey {
     where
         D: serde::Deserializer<'de>,
     {
-        let bytes = Base64UrlSafeNoPadding::decode_to_vec(String::deserialize(deserializer)?, None).map_err(serde::de::Error::custom)?;
+        let bytes = URL_SAFE_NO_PAD.decode(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)?;
         let key = Key::try_from(bytes.as_slice())
             .map_err(|_| serde::de::Error::custom("Key does not match required key length"))?;
         Ok(SocketEncKey(key))

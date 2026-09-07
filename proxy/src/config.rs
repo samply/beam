@@ -1,8 +1,8 @@
 use clap::Parser;
 use regex::Regex;
 use reqwest::Url;
-use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::DecodePrivateKey, RsaPrivateKey};
-use shared::{errors::SamplyBeamError, jwt_simple::prelude::RS256KeyPair, logger::LogOptions, openssl::x509::X509, reqwest};
+use aws_lc_rs::rsa::{OaepPrivateDecryptingKey, PrivateDecryptingKey as RsaPrivateKey};
+use shared::{crypto::{X509, rsa_private_key_from_pem}, crypto_jwt::JwtSigningKey, errors::SamplyBeamError, logger::LogOptions, reqwest};
 
 use std::{
     collections::HashMap,
@@ -11,6 +11,7 @@ use std::{
     path::{Path, PathBuf},
     process::exit,
     str::FromStr,
+    sync::Arc,
 };
 
 use serde::Deserialize;
@@ -26,13 +27,15 @@ pub struct Config {
     pub api_keys: HashMap<AppId, ApiKey>,
     pub tls_ca_certificates: Vec<reqwest::Certificate>,
     pub crypto: ConfigCrypto,
-    pub rootcert: X509,
+    pub rootcert: &'static X509,
 }
 
 #[derive(Debug, Clone)]
 pub struct ConfigCrypto {
-    pub privkey_rs256: RS256KeyPair,
+    pub privkey_rs256: JwtSigningKey,
     pub privkey_rsa: RsaPrivateKey,
+    // FIXME: Remove the Arc and make the whole config not cloneable
+    pub privkey_oaep: Arc<OaepPrivateDecryptingKey>,
 }
 
 pub type ApiKey = String;
@@ -123,6 +126,7 @@ impl Config {
                 e
             ))
         })?;
+        let rootcert = shared::crypto::load_certificates_from_file(cli_args.rootcert_file)?;
         let config = Config {
             broker_uri: cli_args.broker_url,
             bind_addr: cli_args.bind_addr,
@@ -130,7 +134,7 @@ impl Config {
             proxy_id,
             api_keys,
             tls_ca_certificates,
-            rootcert: shared::crypto::load_certificates_from_file(cli_args.rootcert_file)?,
+            rootcert: Box::leak(Box::new(rootcert)),
         };
         info!("Successfully read config and API keys from CLI and secrets file.");
         Ok(config)
@@ -149,23 +153,26 @@ fn load_private_crypto_for_proxy(privkey_file: &PathBuf, proxy_id: &ProxyId) -> 
         })?
         .trim()
         .to_string();
-    let privkey_rsa = RsaPrivateKey::from_pkcs1_pem(&privkey_pem)
-        .or_else(|_| RsaPrivateKey::from_pkcs8_pem(&privkey_pem))
+    let privkey_rsa = rsa_private_key_from_pem(privkey_pem.as_bytes())
         .map_err(|e| {
             SamplyBeamError::ConfigurationFailed(format!(
                 "Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}",
                 e
             ))
         })?;
-    let privkey_rs256 = RS256KeyPair::from_pem(&privkey_pem).map_err(|e| {
+    let privkey_rs256 = JwtSigningKey::from_pem(privkey_pem.as_bytes()).map_err(|e| {
         SamplyBeamError::ConfigurationFailed(format!(
             "Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}",
             e
         ))
     })?;
+    let privkey_oaep = Arc::new(OaepPrivateDecryptingKey::new(privkey_rsa.clone()).map_err(|_| {
+        SamplyBeamError::ConfigurationFailed("Unable to initialize RSA-OAEP private key".into())
+    })?);
     Ok(ConfigCrypto {
         privkey_rs256,
         privkey_rsa,
+        privkey_oaep,
     })
 }
 
