@@ -36,7 +36,7 @@ rsa.workspace = true
 # Server-sent Events (SSE) support
 tokio-util = "0.7"
 futures.workspace = true
-sse-stream = "0.2.3"
+sse-stream = "0.2.6"
 async-stream = "0.3"
 
 # Socket dependencies
