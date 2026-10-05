@@ -1,9 +1,7 @@
 use std::{fmt::Write, net::SocketAddr};
 
 use axum::extract::DefaultBodyLimit;
-use shared::{
-    errors::SamplyBeamError, http_client::SamplyHttpClient,
-};
+use shared::{errors::SamplyBeamError, http_client::SamplyHttpClient};
 use tokio::net::TcpListener;
 use tracing::{debug, error, info, warn};
 
@@ -40,9 +38,12 @@ pub(crate) async fn serve(
     );
 
     let listener = TcpListener::bind(config.bind_addr).await?;
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .with_graceful_shutdown(shared::graceful_shutdown::wait_for_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shared::graceful_shutdown::wait_for_signal())
+    .await?;
 
     Ok(())
 }

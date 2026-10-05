@@ -69,8 +69,7 @@ fn verify_token<T: DeserializeOwned>(
             jsonwebtoken::errors::ErrorKind::InvalidToken,
         ));
     }
-    decode::<JwtClaims<T>>(token, key, &JWT_VALIDATION)
-        .map(|data| data.claims)
+    decode::<JwtClaims<T>>(token, key, &JWT_VALIDATION).map(|data| data.claims)
 }
 
 const ERR_SIG: (StatusCode, &str) = (StatusCode::UNAUTHORIZED, "Signature could not be verified");
@@ -199,15 +198,18 @@ pub async fn verify_with_extended_header<M: Msg + DeserializeOwned>(
     let sender_claimed = custom.from;
 
     // Check if short token matches the long token
-    let msg = verify_token::<M>(token_without_extended_signature, &proxy_public_info.cert.jwt_decoding_key)
-        .map_err(|e| {
-            warn!(
-                "Unable to verify short token {}: {}",
-                token_without_extended_signature, e
-            );
-            ERR_SIG
-        })?
-        .custom;
+    let msg = verify_token::<M>(
+        token_without_extended_signature,
+        &proxy_public_info.cert.jwt_decoding_key,
+    )
+    .map_err(|e| {
+        warn!(
+            "Unable to verify short token {}: {}",
+            token_without_extended_signature, e
+        );
+        ERR_SIG
+    })?
+    .custom;
 
     let Some((_, sig)) = token_without_extended_signature.rsplit_once('.') else {
         warn!("Cannot split signature from body token");

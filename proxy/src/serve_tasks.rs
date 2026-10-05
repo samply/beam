@@ -5,18 +5,29 @@ use std::{
 };
 
 use axum::{
-    body::Bytes, extract::{FromRef, Request, State}, http::{header, request::Parts, HeaderMap, HeaderValue, StatusCode, Uri}, response::{sse::Event, IntoResponse, Response, Sse}, routing::{any, get, put}, Json, RequestExt, Router
+    body::Bytes,
+    extract::{FromRef, Request, State},
+    http::{header, request::Parts, HeaderMap, HeaderValue, StatusCode, Uri},
+    response::{sse::Event, IntoResponse, Response, Sse},
+    routing::{any, get, put},
+    Json, RequestExt, Router,
 };
-use futures::{
-    stream::StreamExt,
-    Stream, TryFutureExt,
-};
+use beam_lib::{AppId, AppOrProxyId, ProxyId};
+use futures::{stream::StreamExt, Stream, TryFutureExt};
 use httpdate::fmt_http_date;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
-use beam_lib::{AppId, AppOrProxyId, ProxyId};
 use shared::{
-    DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, PlainMessage, crypto::{self, CryptoPublicPortion}, crypto_jwt, errors::SamplyBeamError, format_to_without_broker, http_client::SamplyHttpClient, reqwest, sse_event::SseEventType
+    crypto::{self, CryptoPublicPortion},
+    crypto_jwt,
+    errors::SamplyBeamError,
+    format_to_without_broker,
+    http_client::SamplyHttpClient,
+    reqwest,
+    sse_event::SseEventType,
+    DecryptableMsg, EncryptableMsg, EncryptedMessage, EncryptedMsgTaskRequest,
+    EncryptedMsgTaskResult, MessageType, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest,
+    MsgTaskResult, PlainMessage,
 };
 use sse_stream::SseStream;
 use tokio::{io::BufReader, task::id};
@@ -84,13 +95,21 @@ pub(crate) async fn forward_request(
     );
     let (encrypted_msg, parts) = encrypt_request(req, &sender).await?;
     match &encrypted_msg {
-        MessageType::MsgTaskRequest(task) => info!(from = %sender.hide_broker_name(), to = %format_to_without_broker(&task.to), id = %task.id, "Sending task"),
-        MessageType::MsgTaskResult(result) => info!(from = %sender.hide_broker_name(), for = %result.task, "Submitting result"),
+        MessageType::MsgTaskRequest(task) => {
+            info!(from = %sender.hide_broker_name(), to = %format_to_without_broker(&task.to), id = %task.id, "Sending task")
+        }
+        MessageType::MsgTaskResult(result) => {
+            info!(from = %sender.hide_broker_name(), for = %result.task, "Submitting result")
+        }
         #[cfg(feature = "sockets")]
-        MessageType::MsgSocketRequest(socket_req) => info!(from = %socket_req.get_from().hide_broker(), to = %format_to_without_broker(&socket_req.get_to()), id = %socket_req.id, "Submitting socket request"),
-        MessageType::MsgEmpty(..) => {},
+        MessageType::MsgSocketRequest(socket_req) => {
+            info!(from = %socket_req.get_from().hide_broker(), to = %format_to_without_broker(&socket_req.get_to()), id = %socket_req.id, "Submitting socket request")
+        }
+        MessageType::MsgEmpty(..) => {}
     };
-    let req = sign_request(encrypted_msg, parts, &config).await.map_err(IntoResponse::into_response)?;
+    let req = sign_request(encrypted_msg, parts, &config)
+        .await
+        .map_err(IntoResponse::into_response)?;
     trace!("Requesting: {:?}", req);
     let resp = client.execute(req).await.map_err(|e| {
         if e.is_timeout() {
@@ -99,7 +118,8 @@ pub(crate) async fn forward_request(
         } else {
             warn!("Request to broker failed: {}", e.to_string());
             (StatusCode::BAD_GATEWAY, "Upstream error; see server logs.")
-        }.into_response()
+        }
+        .into_response()
     })?;
     if resp.status() == StatusCode::UNAUTHORIZED {
         error!("The Broker has rejected our request with 401 Unauthorized. This is likely because our beam certificate expired.");
@@ -151,10 +171,13 @@ async fn handler_tasks_nostream(
 
     let (mut parts, body) = resp.into_parts();
     // Is this stupid? Yes. Is there an other way to do this? Yes by depending on hyper-body-util. Do you want to do that? No
-    let mut bytes = reqwest::Response::from(axum::http::Response::new(body)).bytes().await.map_err(|e| {
-        error!("Error receiving reply from the broker: {}", e);
-        ERR_UPSTREAM.into_response()
-    })?;
+    let mut bytes = reqwest::Response::from(axum::http::Response::new(body))
+        .bytes()
+        .await
+        .map_err(|e| {
+            error!("Error receiving reply from the broker: {}", e);
+            ERR_UPSTREAM.into_response()
+        })?;
 
     // TODO: Always return application/jwt from server.
     if !bytes.is_empty() {
@@ -191,10 +214,13 @@ async fn handler_tasks_stream(
     // Validate Query, forward to server, get response.
 
     let resp = forward_request(req, &config, &sender, &client).await?;
-    
+
     let code = resp.status();
     if !code.is_success() {
-        let error_msg = resp.text().await.unwrap_or("(unable to parse reply)".into());
+        let error_msg = resp
+            .text()
+            .await
+            .unwrap_or("(unable to parse reply)".into());
         warn!("Got unexpected response code from server: {code}. Returning error message as-is: \"{error_msg}\"");
         return Err((code, error_msg).into_response());
     }
@@ -331,12 +357,13 @@ pub async fn sign_request(
 ) -> Result<reqwest::Request, (StatusCode, &'static str)> {
     let from = body.get_from();
 
-    let token_without_extended_signature = crypto_jwt::sign_to_jwt(&body, &config.crypto.privkey_rs256)
-        .await
-        .map_err(|e| {
-            error!("Crypto failed: {}", e);
-            ERR_INTERNALCRYPTO
-        })?;
+    let token_without_extended_signature =
+        crypto_jwt::sign_to_jwt(&body, &config.crypto.privkey_rs256)
+            .await
+            .map_err(|e| {
+                error!("Crypto failed: {}", e);
+                ERR_INTERNALCRYPTO
+            })?;
     let (_, sig) = token_without_extended_signature
         .rsplit_once('.')
         .ok_or_else(|| {
@@ -355,12 +382,13 @@ pub async fn sign_request(
     let digest =
         crypto_jwt::make_extra_fields_digest(&parts.method, &parts.uri, &headers_mut, sig, &from)
             .map_err(|_| ERR_INTERNALCRYPTO)?;
-    let token_with_extended_signature = crypto_jwt::sign_to_jwt(&digest, &config.crypto.privkey_rs256)
-        .await
-        .map_err(|e| {
-            error!("Crypto failed: {}", e);
-            ERR_INTERNALCRYPTO
-        })?;
+    let token_with_extended_signature =
+        crypto_jwt::sign_to_jwt(&digest, &config.crypto.privkey_rs256)
+            .await
+            .map_err(|e| {
+                error!("Crypto failed: {}", e);
+                ERR_INTERNALCRYPTO
+            })?;
     let body: reqwest::Body = token_without_extended_signature.into();
     let mut auth_header = String::from("SamplyJWT ");
     auth_header.push_str(&token_with_extended_signature);
@@ -381,7 +409,10 @@ pub async fn sign_request(
 }
 
 // This requires rustc 1.77
-pub(crate) async fn validate_and_decrypt(json: Value, config: &Config) -> Result<Value, SamplyBeamError> {
+pub(crate) async fn validate_and_decrypt(
+    json: Value,
+    config: &Config,
+) -> Result<Value, SamplyBeamError> {
     // It might be possible to use MsgSigned directly instead but there are issues impl Deserialize for MsgSigned<EncryptedMessage>
     #[derive(Deserialize)]
     struct MsgSignedHelper {
@@ -400,11 +431,17 @@ pub(crate) async fn validate_and_decrypt(json: Value, config: &Config) -> Result
                     .await?
                     .msg;
                 match &msg {
-                    MessageType::MsgTaskRequest(task) => info!(from = %task.get_from().hide_broker(), id = %task.id, "New task"),
-                    MessageType::MsgTaskResult(result) => info!(from = %result.get_from().hide_broker(), for = %result.task, "New result"),
+                    MessageType::MsgTaskRequest(task) => {
+                        info!(from = %task.get_from().hide_broker(), id = %task.id, "New task")
+                    }
+                    MessageType::MsgTaskResult(result) => {
+                        info!(from = %result.get_from().hide_broker(), for = %result.task, "New result")
+                    }
                     #[cfg(feature = "sockets")]
-                    MessageType::MsgSocketRequest(socket_req) => info!(from = %socket_req.get_from().hide_broker(), id = %socket_req.id, "New socket request"),
-                    MessageType::MsgEmpty(..) => {},
+                    MessageType::MsgSocketRequest(socket_req) => {
+                        info!(from = %socket_req.get_from().hide_broker(), id = %socket_req.id, "New socket request")
+                    }
+                    MessageType::MsgEmpty(..) => {}
                 };
                 Ok(serde_json::to_value(decrypt_msg(msg, config)?).expect("Should serialize fine"))
             }
@@ -461,15 +498,13 @@ async fn encrypt_request(
     if msg.get_from() != sender {
         return Err(ERR_FAKED_FROM.into_response());
     }
-    let body = encrypt_msg(msg).await.map_err(|e| {
-        match e {
-            SamplyBeamError::InvalidReceivers(proxies) => {
-                (StatusCode::FAILED_DEPENDENCY, Json(proxies)).into_response()
-            }
-            e => {
-                warn!("Encryption failed with: {e}");
-                ERR_INTERNALCRYPTO.into_response()
-            }
+    let body = encrypt_msg(msg).await.map_err(|e| match e {
+        SamplyBeamError::InvalidReceivers(proxies) => {
+            (StatusCode::FAILED_DEPENDENCY, Json(proxies)).into_response()
+        }
+        e => {
+            warn!("Encryption failed with: {e}");
+            ERR_INTERNALCRYPTO.into_response()
         }
     })?;
     Ok((body, parts))

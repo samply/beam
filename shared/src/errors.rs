@@ -1,8 +1,8 @@
 use std::{net::AddrParseError, str::Utf8Error, string::FromUtf8Error};
 
+use beam_lib::ProxyId;
 use reqwest::StatusCode;
 use tokio::time::error::Elapsed;
-use beam_lib::ProxyId;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SamplyBeamError {
@@ -51,7 +51,7 @@ pub enum SamplyBeamError {
     #[error("Timeout executing HTTP request: {0}")]
     HttpTimeoutError(Elapsed),
     #[error("Invalid receivers: {0:?}")]
-    InvalidReceivers(Vec<ProxyId>)
+    InvalidReceivers(Vec<ProxyId>),
 }
 
 impl From<AddrParseError> for SamplyBeamError {

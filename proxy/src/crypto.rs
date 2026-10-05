@@ -1,13 +1,28 @@
 use std::{fs, path::PathBuf};
 
-use axum::{body::Bytes, http::{header, request, Method, Request, StatusCode, Uri}, response::Response, Json};
+use axum::{
+    body::Bytes,
+    http::{header, request, Method, Request, StatusCode, Uri},
+    response::Response,
+    Json,
+};
 use beam_lib::{AppOrProxyId, ProxyId};
 use shared::{
-    async_trait, crypto::{self, asn_str_to_vault_str, get_all_certs_and_clients_by_cname_as_pemstr, get_best_own_certificate, CryptoPublicPortion, GetCerts}, errors::{CertificateInvalidReason, SamplyBeamError}, http_client::SamplyHttpClient, reqwest, EncryptedMessage, MsgEmpty
+    async_trait,
+    crypto::{
+        self, asn_str_to_vault_str, get_all_certs_and_clients_by_cname_as_pemstr,
+        get_best_own_certificate, CryptoPublicPortion, GetCerts,
+    },
+    errors::{CertificateInvalidReason, SamplyBeamError},
+    http_client::SamplyHttpClient,
+    reqwest, EncryptedMessage, MsgEmpty,
 };
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
-use crate::{config::{self, Config}, serve_tasks::sign_request};
+use crate::{
+    config::{self, Config},
+    serve_tasks::sign_request,
+};
 
 pub(crate) struct GetCertsFromBroker {
     client: SamplyHttpClient,
@@ -69,7 +84,7 @@ impl GetCertsFromBroker {
                 serde_json::from_slice(&resp).map_err(|e| {
                     SamplyBeamError::VaultOtherError(format!("Unable to parse vault reply: {}", e))
                 })
-            },
+            }
             StatusCode::NO_CONTENT => {
                 debug!("Broker rejected to send us invalid certificate on path {path}");
                 Err(CertificateInvalidReason::NotDisclosedByBroker.into())
@@ -101,14 +116,15 @@ impl GetCerts for GetCertsFromBroker {
 pub async fn load_public_crypto_for_proxy(
     config: &Config,
 ) -> Result<(CryptoPublicPortion, config::ConfigCrypto), SamplyBeamError> {
-    let publics: Vec<CryptoPublicPortion> = get_all_certs_and_clients_by_cname_as_pemstr(&config.proxy_id)
-        .await
-        .into_iter()
-        .filter_map(|r| {
-            r.map_err(|e| debug!("Unable to parse Certificate: {e}"))
-                .ok()
-        })
-        .collect();
+    let publics: Vec<CryptoPublicPortion> =
+        get_all_certs_and_clients_by_cname_as_pemstr(&config.proxy_id)
+            .await
+            .into_iter()
+            .filter_map(|r| {
+                r.map_err(|e| debug!("Unable to parse Certificate: {e}"))
+                    .ok()
+            })
+            .collect();
     let public = get_best_own_certificate(publics, &config.crypto.privkey_rsa).ok_or(
         SamplyBeamError::SignEncryptError(
             "Unable to choose valid, newest certificate for this proxy".into(),

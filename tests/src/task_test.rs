@@ -1,12 +1,12 @@
 use std::time::Duration;
 
-use anyhow::{Result, bail};
-use beam_lib::{MsgId, TaskRequest, TaskResult, WorkStatus, BlockingOptions};
+use anyhow::{bail, Result};
+use beam_lib::{BlockingOptions, MsgId, TaskRequest, TaskResult, WorkStatus};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use tokio::sync::oneshot;
 
-use crate::{client1, APP1, APP2, client2};
+use crate::{client1, client2, APP1, APP2};
 
 #[tokio::test]
 async fn test_full_task_cycle() -> Result<()> {
@@ -14,7 +14,12 @@ async fn test_full_task_cycle() -> Result<()> {
     let client = async {
         let id = post_task(()).await?;
         id_tx.send(id).expect("Sender dropped");
-        assert_eq!(poll_result::<()>(id, &BlockingOptions::from_count(1)).await?.body, ());
+        assert_eq!(
+            poll_result::<()>(id, &BlockingOptions::from_count(1))
+                .await?
+                .body,
+            ()
+        );
         Ok(())
     };
     let server = async {
@@ -29,7 +34,10 @@ async fn test_full_task_cycle() -> Result<()> {
 async fn test_task_claiming() -> Result<()> {
     let id = post_task(()).await?;
     put_result(id, (), Some(WorkStatus::Claimed)).await?;
-    assert!(poll_task::<()>(id).await.is_err(), "Got task although it was already claimed by us");
+    assert!(
+        poll_task::<()>(id).await.is_err(),
+        "Got task although it was already claimed by us"
+    );
     // Test waiting for 1 ready result which is not there yet
     let block = BlockingOptions::from_count(1);
     tokio::select! {
@@ -38,7 +46,10 @@ async fn test_task_claiming() -> Result<()> {
         }
         _ = tokio::time::sleep(Duration::from_secs(2)) => ()
     };
-    let block = BlockingOptions { wait_time: Some(Duration::from_secs(1)), wait_count: Some(1) };
+    let block = BlockingOptions {
+        wait_time: Some(Duration::from_secs(1)),
+        wait_count: Some(1),
+    };
     tokio::select! {
         res = poll_result::<()>(id, &block) => {
             assert_eq!(res?.status, WorkStatus::Claimed, "Workstatus did not match")
@@ -46,7 +57,12 @@ async fn test_task_claiming() -> Result<()> {
         _ = tokio::time::sleep(Duration::from_secs(2)) => bail!("This took longer than 2s when it should have returned the claimed result!")
     };
     put_result(id, (), None).await?;
-    assert_eq!(poll_result::<()>(id, &BlockingOptions::from_count(1)).await?.status, WorkStatus::Succeeded);
+    assert_eq!(
+        poll_result::<()>(id, &BlockingOptions::from_count(1))
+            .await?
+            .status,
+        WorkStatus::Succeeded
+    );
     Ok(())
 }
 
@@ -60,7 +76,11 @@ async fn test_claim_after_success() -> Result<()> {
     let id = post_task(()).await?;
     put_result(id, (), Some(WorkStatus::Succeeded)).await?;
     put_result(id, (), Some(WorkStatus::Claimed)).await?;
-    let res = tokio::time::timeout(Duration::from_secs(10), poll_result::<()>(id, &BlockingOptions::from_count(1))).await??;
+    let res = tokio::time::timeout(
+        Duration::from_secs(10),
+        poll_result::<()>(id, &BlockingOptions::from_count(1)),
+    )
+    .await??;
     assert_eq!(res.status, WorkStatus::Succeeded);
     Ok(())
 }
@@ -69,8 +89,13 @@ async fn test_claim_after_success() -> Result<()> {
 async fn test_polling_tasks_yields_more_than_specified_wait_count() -> Result<()> {
     let id1 = post_task(()).await?;
     let id2 = post_task(()).await?;
-    let tasks = client2().poll_pending_tasks::<Value>(&BlockingOptions::from_count(1)).await?;
-    assert_eq!(tasks.iter().filter(|t| [id1, id2].contains(&t.id)).count(), 2);
+    let tasks = client2()
+        .poll_pending_tasks::<Value>(&BlockingOptions::from_count(1))
+        .await?;
+    assert_eq!(
+        tasks.iter().filter(|t| [id1, id2].contains(&t.id)).count(),
+        2
+    );
     Ok(())
 }
 
@@ -79,8 +104,20 @@ async fn test_get_task_by_id() -> Result<()> {
     let id = post_task(()).await?;
     let block = BlockingOptions::from_count(1);
     // One is sender, one reciever so both calls should work
-    assert_eq!(client1().get_task::<beam_lib::RawString>(&id, &block).await?.map(|t| t.id), Some(id));
-    assert_eq!(client2().get_task::<beam_lib::RawString>(&id, &block).await?.map(|t| t.id), Some(id));
+    assert_eq!(
+        client1()
+            .get_task::<beam_lib::RawString>(&id, &block)
+            .await?
+            .map(|t| t.id),
+        Some(id)
+    );
+    assert_eq!(
+        client2()
+            .get_task::<beam_lib::RawString>(&id, &block)
+            .await?
+            .map(|t| t.id),
+        Some(id)
+    );
     Ok(())
 }
 
@@ -89,15 +126,24 @@ async fn test_get_task_by_id_unauthorized() -> Result<()> {
     // From APP1 to APP1, App2 unauthorized
     let id = post_task_to((), vec![APP1.clone()]).await?;
     let block = BlockingOptions::from_time(Duration::from_secs(1));
-    assert_eq!(client1().get_task::<()>(&id, &block).await?.map(|t| t.id), Some(id));
-    assert!(client2().get_task::<()>(&id, &block).await?.is_none(), "Unauthorized app was able to read task");
+    assert_eq!(
+        client1().get_task::<()>(&id, &block).await?.map(|t| t.id),
+        Some(id)
+    );
+    assert!(
+        client2().get_task::<()>(&id, &block).await?.is_none(),
+        "Unauthorized app was able to read task"
+    );
     Ok(())
 }
 
 #[tokio::test]
 async fn test_get_task_by_id_not_found() -> Result<()> {
     let block = BlockingOptions::from_time(Duration::from_secs(1));
-    assert!(client1().get_task::<()>(&MsgId::new(), &block).await?.is_none());
+    assert!(client1()
+        .get_task::<()>(&MsgId::new(), &block)
+        .await?
+        .is_none());
     Ok(())
 }
 
@@ -105,23 +151,34 @@ async fn test_get_task_by_id_not_found() -> Result<()> {
 async fn test_get_task_by_id_long_poll() -> Result<()> {
     let id = MsgId::new();
     let getter = async {
-        let block = BlockingOptions { wait_time: Some(Duration::from_secs(5)), wait_count: Some(1) };
-        let task = client1().get_task::<beam_lib::RawString>(&id, &block).await?;
-        assert_eq!(task.map(|t| t.id), Some(id), "Long-poll did not return the task before time out");
+        let block = BlockingOptions {
+            wait_time: Some(Duration::from_secs(5)),
+            wait_count: Some(1),
+        };
+        let task = client1()
+            .get_task::<beam_lib::RawString>(&id, &block)
+            .await?;
+        assert_eq!(
+            task.map(|t| t.id),
+            Some(id),
+            "Long-poll did not return the task before time out"
+        );
         Ok::<_, anyhow::Error>(())
     };
     let poster = async {
         // Wait with sending until long-poll is established
         tokio::time::sleep(Duration::from_millis(500)).await;
-        client1().post_task(&TaskRequest {
-            id,
-            from: APP1.clone(),
-            to: vec![APP2.clone()],
-            body: (),
-            ttl: "10s".to_string(),
-            failure_strategy: beam_lib::FailureStrategy::Discard,
-            metadata: serde_json::Value::Null,
-        }).await?;
+        client1()
+            .post_task(&TaskRequest {
+                id,
+                from: APP1.clone(),
+                to: vec![APP2.clone()],
+                body: (),
+                ttl: "10s".to_string(),
+                failure_strategy: beam_lib::FailureStrategy::Discard,
+                metadata: serde_json::Value::Null,
+            })
+            .await?;
         Ok::<_, anyhow::Error>(())
     };
     tokio::try_join!(getter, poster)?;
@@ -145,47 +202,85 @@ pub async fn post_task<T: Serialize + 'static>(body: T) -> Result<MsgId> {
     post_task_to(body, vec![APP2.clone()]).await
 }
 
-pub async fn post_task_to<T: Serialize + 'static>(body: T, to: Vec<beam_lib::AddressingId>) -> Result<MsgId> {
+pub async fn post_task_to<T: Serialize + 'static>(
+    body: T,
+    to: Vec<beam_lib::AddressingId>,
+) -> Result<MsgId> {
     let id = MsgId::new();
-    client1().post_task(&TaskRequest {
-        id,
-        from: APP1.clone(),
-        to,
-        body,
-        ttl: "10s".to_string(),
-        failure_strategy: beam_lib::FailureStrategy::Discard,
-        metadata: serde_json::Value::Null,
-    }).await?;
+    client1()
+        .post_task(&TaskRequest {
+            id,
+            from: APP1.clone(),
+            to,
+            body,
+            ttl: "10s".to_string(),
+            failure_strategy: beam_lib::FailureStrategy::Discard,
+            metadata: serde_json::Value::Null,
+        })
+        .await?;
     Ok(id)
 }
 
-pub async fn poll_task<T: DeserializeOwned + 'static>(expected_id: MsgId) -> Result<TaskRequest<T>> {
-    client2().poll_pending_tasks::<Value>(&BlockingOptions::from_time(Duration::from_secs(1)))
+pub async fn poll_task<T: DeserializeOwned + 'static>(
+    expected_id: MsgId,
+) -> Result<TaskRequest<T>> {
+    client2()
+        .poll_pending_tasks::<Value>(&BlockingOptions::from_time(Duration::from_secs(1)))
         .await?
         .into_iter()
         .find(|t| t.id == expected_id)
         .ok_or(anyhow::anyhow!("Did not find expected task"))
-        .and_then(|TaskRequest { id, from, to, body, ttl, failure_strategy, metadata }| Ok(TaskRequest {
-            id, from, to, ttl, failure_strategy, metadata,
-            body: serde_json::from_value(body)?
-        }))
+        .and_then(
+            |TaskRequest {
+                 id,
+                 from,
+                 to,
+                 body,
+                 ttl,
+                 failure_strategy,
+                 metadata,
+             }| {
+                Ok(TaskRequest {
+                    id,
+                    from,
+                    to,
+                    ttl,
+                    failure_strategy,
+                    metadata,
+                    body: serde_json::from_value(body)?,
+                })
+            },
+        )
 }
 
-pub async fn poll_result<T: DeserializeOwned + 'static>(task_id: MsgId, block: &BlockingOptions) -> Result<TaskResult<T>> {
-    client1().poll_results(&task_id, block)
+pub async fn poll_result<T: DeserializeOwned + 'static>(
+    task_id: MsgId,
+    block: &BlockingOptions,
+) -> Result<TaskResult<T>> {
+    client1()
+        .poll_results(&task_id, block)
         .await?
         .pop()
         .ok_or(anyhow::anyhow!("Got no task"))
 }
 
-pub async fn put_result<T: Serialize + 'static>(task_id: MsgId, body: T, status: Option<beam_lib::WorkStatus>) -> Result<()> {
-    client2().put_result(&TaskResult {
-        from: APP2.clone(),
-        to: vec![APP1.clone()],
-        task: task_id,
-        status: status.unwrap_or(beam_lib::WorkStatus::Succeeded),
-        body,
-        metadata: serde_json::Value::Null,
-    }, &task_id).await?;
+pub async fn put_result<T: Serialize + 'static>(
+    task_id: MsgId,
+    body: T,
+    status: Option<beam_lib::WorkStatus>,
+) -> Result<()> {
+    client2()
+        .put_result(
+            &TaskResult {
+                from: APP2.clone(),
+                to: vec![APP1.clone()],
+                task: task_id,
+                status: status.unwrap_or(beam_lib::WorkStatus::Succeeded),
+                body,
+                metadata: serde_json::Value::Null,
+            },
+            &task_id,
+        )
+        .await?;
     Ok(())
 }

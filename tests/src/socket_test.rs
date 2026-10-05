@@ -1,10 +1,10 @@
 use std::time::Duration;
 
+use crate::*;
+use anyhow::Result;
 use beam_lib::{BlockingOptions, MsgId};
 use rand::Rng;
-use tokio::io::{AsyncWriteExt, AsyncReadExt, AsyncRead, AsyncWrite};
-use anyhow::Result;
-use crate::*;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 async fn test_connection<T: AsyncRead + AsyncWrite + Unpin>(mut a: T, mut b: T) -> Result<()> {
     const N: usize = 2_usize.pow(8);
@@ -30,7 +30,10 @@ async fn test_full() -> Result<()> {
         "id": id
     });
     let app1 = async {
-        client1().create_socket_with_metadata(&APP2, &metadata).await.map_err(anyhow::Error::from)
+        client1()
+            .create_socket_with_metadata(&APP2, &metadata)
+            .await
+            .map_err(anyhow::Error::from)
     };
     let app2 = async {
         let task = client2()

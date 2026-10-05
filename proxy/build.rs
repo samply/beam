@@ -4,7 +4,10 @@
 /// 0.4.0-a12dds-SNAPSHOT (if git commit is dirty, should not happen in CI/CD builds)
 fn get_version() -> String {
     let mut version = String::from(env!("CARGO_PKG_VERSION"));
-    let (branch, commit) = match (build_data::get_git_branch(), build_data::get_git_commit_short()) {
+    let (branch, commit) = match (
+        build_data::get_git_branch(),
+        build_data::get_git_commit_short(),
+    ) {
         (Ok(branch), Ok(commit)) => (branch, commit),
         _ => {
             println!("cargo:warning=Unable to read git info. Is this a git repository?");
@@ -39,11 +42,12 @@ fn set_features() {
     let env_vars: Vec<_> = std::env::vars().collect();
     println!(
         "cargo:rustc-env=FEATURES={}",
-            env_vars.iter()
-                .filter_map(|(name, _)| name.strip_prefix("CARGO_FEATURE_"))
-                .collect::<Vec<_>>()
-                .join(", ")
-                .to_lowercase()
+        env_vars
+            .iter()
+            .filter_map(|(name, _)| name.strip_prefix("CARGO_FEATURE_"))
+            .collect::<Vec<_>>()
+            .join(", ")
+            .to_lowercase()
     );
 }
 

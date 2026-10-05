@@ -1,8 +1,14 @@
+use aws_lc_rs::rsa::{OaepPrivateDecryptingKey, PrivateDecryptingKey as RsaPrivateKey};
 use clap::Parser;
 use regex::Regex;
 use reqwest::Url;
-use aws_lc_rs::rsa::{OaepPrivateDecryptingKey, PrivateDecryptingKey as RsaPrivateKey};
-use shared::{crypto::{X509, rsa_private_key_from_pem}, crypto_jwt::JwtSigningKey, errors::SamplyBeamError, logger::LogOptions, reqwest};
+use shared::{
+    crypto::{rsa_private_key_from_pem, X509},
+    crypto_jwt::JwtSigningKey,
+    errors::SamplyBeamError,
+    logger::LogOptions,
+    reqwest,
+};
 
 use std::{
     collections::HashMap,
@@ -85,9 +91,14 @@ fn parse_apikeys(proxy_id: &ProxyId) -> Result<HashMap<AppId, ApiKey>, SamplyBea
     let env_vars = std::env::vars().collect::<HashMap<String, ApiKey>>();
     let mut api_keys = HashMap::new();
     // TODO: Do we really need a regex for that?
-    let pattern = Regex::new(&format!("{APP_PREFIX}_([A-Za-z0-9-]+)_KEY")).expect("This is a valid regex");
+    let pattern =
+        Regex::new(&format!("{APP_PREFIX}_([A-Za-z0-9-]+)_KEY")).expect("This is a valid regex");
     for (env_var_name, secret) in env_vars {
-        if let Some(app_name) = pattern.captures_iter(&env_var_name).next().and_then(|cap| cap.get(1)) {
+        if let Some(app_name) = pattern
+            .captures_iter(&env_var_name)
+            .next()
+            .and_then(|cap| cap.get(1))
+        {
             let Ok(app_id) = AppId::new(&format!("{}.{proxy_id}", app_name.as_str())) else {
                 // Only warn here as there might be other env vars that could match this pattern
                 warn!("Failed to create app id from env var: {env_var_name}. Skipping");
@@ -141,7 +152,10 @@ impl Config {
     }
 }
 
-fn load_private_crypto_for_proxy(privkey_file: &PathBuf, proxy_id: &ProxyId) -> Result<ConfigCrypto, SamplyBeamError> {
+fn load_private_crypto_for_proxy(
+    privkey_file: &PathBuf,
+    proxy_id: &ProxyId,
+) -> Result<ConfigCrypto, SamplyBeamError> {
     let privkey_pem = fs::read_to_string(privkey_file)
         .map_err(|e| {
             SamplyBeamError::ConfigurationFailed(format!(
@@ -153,22 +167,23 @@ fn load_private_crypto_for_proxy(privkey_file: &PathBuf, proxy_id: &ProxyId) -> 
         })?
         .trim()
         .to_string();
-    let privkey_rsa = rsa_private_key_from_pem(privkey_pem.as_bytes())
-        .map_err(|e| {
-            SamplyBeamError::ConfigurationFailed(format!(
-                "Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}",
-                e
-            ))
-        })?;
+    let privkey_rsa = rsa_private_key_from_pem(privkey_pem.as_bytes()).map_err(|e| {
+        SamplyBeamError::ConfigurationFailed(format!(
+            "Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}",
+            e
+        ))
+    })?;
     let privkey_rs256 = JwtSigningKey::from_pem(privkey_pem.as_bytes()).map_err(|e| {
         SamplyBeamError::ConfigurationFailed(format!(
             "Unable to interpret private key PEM as PKCS#1 or PKCS#8: {}",
             e
         ))
     })?;
-    let privkey_oaep = Arc::new(OaepPrivateDecryptingKey::new(privkey_rsa.clone()).map_err(|_| {
-        SamplyBeamError::ConfigurationFailed("Unable to initialize RSA-OAEP private key".into())
-    })?);
+    let privkey_oaep = Arc::new(OaepPrivateDecryptingKey::new(privkey_rsa.clone()).map_err(
+        |_| {
+            SamplyBeamError::ConfigurationFailed("Unable to initialize RSA-OAEP private key".into())
+        },
+    )?);
     Ok(ConfigCrypto {
         privkey_rs256,
         privkey_rsa,

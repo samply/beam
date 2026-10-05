@@ -1,23 +1,23 @@
 #![allow(unused_imports)]
 
 mod banner;
-mod crypto;
+mod compare_client_server_version;
 mod config;
+mod crypto;
 mod serve;
 mod serve_health;
 mod serve_pki;
-mod serve_tasks;
 #[cfg(feature = "sockets")]
 mod serve_sockets;
+mod serve_tasks;
 mod task_manager;
-mod compare_client_server_version;
 
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use clap::Parser;
 use crypto::GetCertsFromPki;
-use serve_health::{Health, InitStatus};
 use once_cell::sync::Lazy;
+use serve_health::{Health, InitStatus};
 use shared::{crypto::X509, errors::SamplyBeamError, *};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
@@ -47,6 +47,8 @@ async fn init_broker_ca_chain(health: Arc<RwLock<Health>>, rootcert: &'static X5
     {
         health.write().await.initstatus = InitStatus::FetchingIntermediateCert
     }
-    shared::crypto::init_ca_chain(rootcert).await.expect("Failed to init broker ca chain");
+    shared::crypto::init_ca_chain(rootcert)
+        .await
+        .expect("Failed to init broker ca chain");
     health.write().await.initstatus = InitStatus::Done;
 }

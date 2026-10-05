@@ -1,28 +1,31 @@
 #![allow(unused_imports)]
 
-use beam_lib::{AppId, AppOrProxyId, ProxyId, FailureStrategy, WorkStatus};
-use chacha20poly1305::{
-    aead, XChaCha20Poly1305, XNonce, aead::{Aead, AeadCore, Generate, KeyInit, array::typenum::Unsigned}
-};
-use crypto_jwt::extract_jwt;
-use errors::SamplyBeamError;
-use itertools::Itertools;
 use aws_lc_rs::{
     rand::{SecureRandom, SystemRandom},
     rsa::{
         KeySize, OaepPrivateDecryptingKey, OaepPublicEncryptingKey,
-        PrivateDecryptingKey as RsaPrivateKey,
-        OAEP_SHA256_MGF1SHA256,
+        PrivateDecryptingKey as RsaPrivateKey, OAEP_SHA256_MGF1SHA256,
     },
 };
+use beam_lib::{AppId, AppOrProxyId, FailureStrategy, ProxyId, WorkStatus};
+use chacha20poly1305::{
+    aead,
+    aead::{array::typenum::Unsigned, Aead, AeadCore, Generate, KeyInit},
+    XChaCha20Poly1305, XNonce,
+};
+use crypto_jwt::extract_jwt;
+use errors::SamplyBeamError;
+use itertools::Itertools;
 use serde_json::{json, Value};
 use tracing::debug;
 
 use std::{
+    error::Error,
     fmt::{Debug, Display},
+    net::SocketAddr,
     ops::Deref,
     sync::Arc,
-    time::{Duration, Instant, SystemTime}, net::SocketAddr, error::Error,
+    time::{Duration, Instant, SystemTime},
 };
 
 use rand::{rng, Rng};
@@ -35,10 +38,10 @@ use uuid::Uuid;
 
 use crate::{crypto::CryptoPublicPortion, serde_helpers::*};
 // Reexport the base64 implementation used by the wire formats.
+pub use async_trait::async_trait;
 pub use base64;
 pub use jsonwebtoken;
 pub use reqwest;
-pub use async_trait::async_trait;
 
 pub type MsgId = beam_lib::MsgId;
 pub type MsgType = String;
@@ -47,11 +50,11 @@ pub type TaskResponse = String;
 pub mod crypto;
 pub mod crypto_jwt;
 pub mod errors;
-pub mod serde_helpers;
 pub mod logger;
-mod traits;
+pub mod serde_helpers;
 #[cfg(test)]
 mod serializing_compatibility_test;
+mod traits;
 
 #[cfg(feature = "expire_map")]
 pub mod expire_map;
@@ -115,7 +118,6 @@ impl Msg for MsgEmpty {
     }
 }
 
-
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum MessageType<State>
@@ -141,7 +143,7 @@ impl EncryptableMsg for PlainMessage {
             Self::MsgTaskResult(m) => Self::Output::MsgTaskResult(m.convert_self(body)),
             Self::MsgEmpty(m) => Self::Output::MsgEmpty(m),
             #[cfg(feature = "sockets")]
-            Self::MsgSocketRequest(m) => Self::Output::MsgSocketRequest(m.convert_self(body))
+            Self::MsgSocketRequest(m) => Self::Output::MsgSocketRequest(m.convert_self(body)),
         }
     }
 
@@ -156,7 +158,6 @@ impl EncryptableMsg for PlainMessage {
     }
 }
 
-
 impl DecryptableMsg for EncryptedMessage {
     type Output = PlainMessage;
 
@@ -166,7 +167,7 @@ impl DecryptableMsg for EncryptedMessage {
             Self::MsgTaskResult(m) => Self::Output::MsgTaskResult(m.convert_self(body)),
             Self::MsgEmpty(m) => Self::Output::MsgEmpty(m),
             #[cfg(feature = "sockets")]
-            Self::MsgSocketRequest(m) => Self::Output::MsgSocketRequest(m.convert_self(body))
+            Self::MsgSocketRequest(m) => Self::Output::MsgSocketRequest(m.convert_self(body)),
         }
     }
 
@@ -229,49 +230,52 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
         my_id: &AppOrProxyId,
         decrypting_key: &OaepPrivateDecryptingKey,
     ) -> Result<Self::Output, SamplyBeamError> {
-
         let Some(Encrypted {
             encrypted,
             encryption_keys,
-        }) = self.get_encryption() else {
+        }) = self.get_encryption()
+        else {
             // We have something that is not encryptable
             return Ok(self.convert_self(String::new()));
         };
 
-        let to_array_index = self
-            .get_to()
-            .iter()
-            .position(|entry| {
-                let entry_str = entry.to_string();
+        let to_array_index = self.get_to().iter().position(|entry| {
+            let entry_str = entry.to_string();
 
-                let mut matched = entry_str.ends_with(&my_id.to_string());
-                matched &= match entry_str.find(&my_id.to_string()) {
-                    Some(0) => true,                                      // Begins with id
-                    Some(i) => entry_str.chars().nth(i - 1) == Some('.'), // Ends with id, but before is a separator (e.g. appId)
-                    None => false,
-                };
-                matched
-            });
+            let mut matched = entry_str.ends_with(&my_id.to_string());
+            matched &= match entry_str.find(&my_id.to_string()) {
+                Some(0) => true,                                      // Begins with id
+                Some(i) => entry_str.chars().nth(i - 1) == Some('.'), // Ends with id, but before is a separator (e.g. appId)
+                None => false,
+            };
+            matched
+        });
         let Some(to_array_index) = to_array_index else {
             if self.get_from().proxy_id() == my_id.proxy_id() {
                 return Ok(self.convert_self("<encrypted>".to_string()));
             } else {
-                return Err(SamplyBeamError::SignEncryptError("Decryption error: This client cannot be found in 'to' list".into()));
+                return Err(SamplyBeamError::SignEncryptError(
+                    "Decryption error: This client cannot be found in 'to' list".into(),
+                ));
             }
         };
-        
+
         let encrypted_decryption_key = &encryption_keys[to_array_index];
 
         // Cryptographic Operations
         let mut plaintext = vec![0; decrypting_key.min_output_size()];
-        let symmetric_key = decrypting_key.decrypt(
-            &OAEP_SHA256_MGF1SHA256,
-            encrypted_decryption_key,
-            &mut plaintext,
-            None,
-        ).map_err(|_| SamplyBeamError::SignEncryptError("Unable to decrypt RSA-OAEP key".into()))?;
-        let symmetric_key = aead::Key::<XChaCha20Poly1305>::try_from(&*symmetric_key)
+        let symmetric_key = decrypting_key
+            .decrypt(
+                &OAEP_SHA256_MGF1SHA256,
+                encrypted_decryption_key,
+                &mut plaintext,
+                None,
+            )
             .map_err(|_| {
+                SamplyBeamError::SignEncryptError("Unable to decrypt RSA-OAEP key".into())
+            })?;
+        let symmetric_key =
+            aead::Key::<XChaCha20Poly1305>::try_from(&*symmetric_key).map_err(|_| {
                 SamplyBeamError::SignEncryptError(
                     "Decryption error: Invalid symmetric key length".into(),
                 )
@@ -284,9 +288,11 @@ pub trait DecryptableMsg: Msg + Serialize + Sized {
             .ok_or(SamplyBeamError::SignEncryptError(
                 "Decryption error: Missing or invalid nonce".into(),
             ))?;
-        let ciphertext = encrypted.get(NONCE_SIZE..).ok_or(SamplyBeamError::SignEncryptError(
-            "Decryption error: Missing ciphertext".into(),
-        ))?;
+        let ciphertext = encrypted
+            .get(NONCE_SIZE..)
+            .ok_or(SamplyBeamError::SignEncryptError(
+                "Decryption error: Missing ciphertext".into(),
+            ))?;
         let plaintext = String::from_utf8(
             cipher_engine
                 .decrypt(&nonce, ciphertext.as_ref())
@@ -335,7 +341,8 @@ pub trait EncryptableMsg: Msg + Serialize + Sized {
                     symmetric_key.as_slice(),
                     &mut ciphertext,
                     None,
-                ).map(|encrypted| encrypted.to_vec())
+                )
+                .map(|encrypted| encrypted.to_vec())
             })
             .collect()
         else {
@@ -414,7 +421,6 @@ impl<T: MsgState> Msg for MsgTaskResult<T> {
     }
 }
 
-
 pub trait MsgState: Serialize + Eq + PartialEq + Default {
     fn is_empty(&self) -> bool {
         false
@@ -423,9 +429,9 @@ pub trait MsgState: Serialize + Eq + PartialEq + Default {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
 pub struct Encrypted {
-    #[serde(with = "serde_base64" )]
+    #[serde(with = "serde_base64")]
     pub encrypted: Vec<u8>,
-    #[serde(with = "serde_base64::nested" )]
+    #[serde(with = "serde_base64::nested")]
     pub encryption_keys: Vec<Vec<u8>>,
 }
 
@@ -451,7 +457,8 @@ impl Debug for Plain {
         match &self.body {
             Some(body) if body.len() < 1000 => formatted.field("body len", &body.len()),
             _ => formatted.field("body", &self.body),
-        }.finish()
+        }
+        .finish()
     }
 }
 
@@ -711,7 +718,8 @@ pub struct MsgPing {
 impl MsgPing {
     pub fn new(from: AppOrProxyId, to: AppOrProxyId) -> Self {
         let mut nonce = [0; 16];
-        SystemRandom::new().fill(&mut nonce)
+        SystemRandom::new()
+            .fill(&mut nonce)
             .expect("Critical Error: Failed to generate random byte array.");
         MsgPing {
             id: MsgId::new(),
@@ -744,7 +752,9 @@ pub fn format_to_without_broker(to: &[AppOrProxyId]) -> impl Display + use<'_> {
 
     impl<'a> std::fmt::Display for Helper<'a> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.debug_list().entries(self.to.iter().map(|to| to.hide_broker())).finish()
+            f.debug_list()
+                .entries(self.to.iter().map(|to| to.hide_broker()))
+                .finish()
         }
     }
 
@@ -890,7 +900,9 @@ mod tests {
         let p3_decrypting = OaepPrivateDecryptingKey::new(p3_private).unwrap();
 
         // Encrypted for proxy2 only.
-        let msg_encr = msg.encrypt(&vec![p2_public]).expect("Could not encrypt message");
+        let msg_encr = msg
+            .encrypt(&vec![p2_public])
+            .expect("Could not encrypt message");
 
         // Proxy2 can decrypt
         let as_recipient = msg_encr
@@ -908,5 +920,5 @@ mod tests {
 
         // Non-sender or non-reciever is rejected
         assert!(msg_encr.decrypt(&p3_id, &p3_decrypting).is_err());
-   }
+    }
 }

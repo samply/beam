@@ -1,7 +1,10 @@
-use anyhow::{Result, bail, anyhow};
+use anyhow::{anyhow, bail, Result};
 use beam_lib::TaskResult;
 use futures::StreamExt;
-use reqwest::{header::{self, HeaderValue}, Method};
+use reqwest::{
+    header::{self, HeaderValue},
+    Method,
+};
 use sse_stream::SseStream;
 
 use crate::{client1, task_test};
@@ -10,10 +13,7 @@ use crate::{client1, task_test};
 async fn test_sse() -> Result<()> {
     let id = task_test::post_task("test").await?;
     let res = client1()
-        .raw_beam_request(
-            Method::GET,
-            &format!("v1/tasks/{id}/results?wait_count=1"),
-        )
+        .raw_beam_request(Method::GET, &format!("v1/tasks/{id}/results?wait_count=1"))
         .header(
             header::ACCEPT,
             HeaderValue::from_static("text/event-stream"),
@@ -27,7 +27,10 @@ async fn test_sse() -> Result<()> {
     assert_body(stream.next().await, "foo")?;
     assert_body(stream.next().await, "foo")?;
     assert_body(stream.next().await, "bar")?;
-    assert!(matches!(stream.next().await, None), "Got more results than specified");
+    assert!(
+        matches!(stream.next().await, None),
+        "Got more results than specified"
+    );
     Ok(())
 }
 

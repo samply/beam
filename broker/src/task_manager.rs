@@ -1,20 +1,29 @@
 use std::{
-    borrow::Cow, collections::{hash_map::Entry, HashMap}, convert::Infallible, ops::Deref, sync::Arc, time::{Duration, SystemTime}
+    borrow::Cow,
+    collections::{hash_map::Entry, HashMap},
+    convert::Infallible,
+    ops::Deref,
+    sync::Arc,
+    time::{Duration, SystemTime},
 };
 
-use axum::{response::{IntoResponse, sse::Event, Sse}, Json, http::StatusCode};
+use axum::{
+    http::StatusCode,
+    response::{sse::Event, IntoResponse, Sse},
+    Json,
+};
+use beam_lib::{AppOrProxyId, MsgEmpty, MsgId, WorkStatus};
 use dashmap::DashMap;
 use futures::Stream;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use serde_json::json;
-use beam_lib::{AppOrProxyId, MsgEmpty, MsgId, WorkStatus};
 use shared::{
-    HasWaitId, HowLongToBlock, Msg, MsgSigned,
-    MsgState, MsgTaskRequest, MsgTaskResult, sse_event::SseEventType,
+    sse_event::SseEventType, HasWaitId, HowLongToBlock, Msg, MsgSigned, MsgState, MsgTaskRequest,
+    MsgTaskResult,
 };
 use tokio::{sync::broadcast, time::Instant};
-use tracing::{warn, error};
+use tracing::{error, warn};
 
 pub trait Task {
     type Result;
@@ -35,15 +44,20 @@ impl<State: MsgState> Task for MsgTaskRequest<State> {
     fn insert_result(&mut self, result: Self::Result) -> bool {
         match self.results.entry(result.get_from().clone()) {
             // Don't override a successful result. See tests::task_test::test_claim_after_success for more details
-            Entry::Occupied(prev) if prev.get().msg.status == WorkStatus::Succeeded && result.msg.status == WorkStatus::Claimed => false,
+            Entry::Occupied(prev)
+                if prev.get().msg.status == WorkStatus::Succeeded
+                    && result.msg.status == WorkStatus::Claimed =>
+            {
+                false
+            }
             Entry::Occupied(mut prev) => {
                 prev.insert(result);
                 true
-            },
+            }
             Entry::Vacant(empty) => {
                 empty.insert(result);
                 false
-            },
+            }
         }
     }
 
@@ -56,9 +70,7 @@ impl<State: MsgState> Task for MsgTaskRequest<State> {
     }
 }
 
-static EMPTY_MAP: Lazy<HashMap<AppOrProxyId, ()>> = Lazy::new(|| {
-    HashMap::with_capacity(0)
-});
+static EMPTY_MAP: Lazy<HashMap<AppOrProxyId, ()>> = Lazy::new(|| HashMap::with_capacity(0));
 
 #[cfg(feature = "sockets")]
 impl<State: MsgState> Task for shared::MsgSocketRequest<State> {
@@ -68,7 +80,9 @@ impl<State: MsgState> Task for shared::MsgSocketRequest<State> {
         &EMPTY_MAP
     }
 
-    fn insert_result(&mut self, _result: Self::Result) -> bool { false }
+    fn insert_result(&mut self, _result: Self::Result) -> bool {
+        false
+    }
 
     fn is_expired(&self) -> bool {
         self.expire < SystemTime::now()
@@ -108,11 +122,13 @@ impl<T: HasWaitId<MsgId> + Task + Msg + Send + Sync + 'static> TaskManager<T> {
         std::thread::spawn(move || {
             loop {
                 std::thread::sleep(Self::EXPIRE_CHECK_INTERVAL);
-                tm.tasks.retain(|_, task| if task.msg.is_expired() {
-                    tm.new_results.remove(&task.msg.wait_id());
-                    false
-                } else {
-                    true
+                tm.tasks.retain(|_, task| {
+                    if task.msg.is_expired() {
+                        tm.new_results.remove(&task.msg.wait_id());
+                        false
+                    } else {
+                        true
+                    }
                 });
                 // If the memory footprint of the Dashmap will get too large we might need to consider calling DashMap::shrink_to_fit or find a better solution as
                 // this would need to lock the whole map making it inaccessible until everything is reallocated
@@ -124,16 +140,24 @@ impl<T: HasWaitId<MsgId> + Task + Msg + Send + Sync + 'static> TaskManager<T> {
 }
 
 impl<T: HasWaitId<MsgId> + Task + Msg> TaskManager<T> {
-
-    pub fn get(&self, task_id: &MsgId) -> Result<impl Deref<Target = MsgSigned<T>> + '_, TaskManagerError> {
+    pub fn get(
+        &self,
+        task_id: &MsgId,
+    ) -> Result<impl Deref<Target = MsgSigned<T>> + '_, TaskManagerError> {
         self.tasks.get(task_id).ok_or(TaskManagerError::NotFound)
     }
 
     pub fn remove(&self, task_id: &MsgId) -> Result<MsgSigned<T>, TaskManagerError> {
-        self.tasks.remove(task_id).ok_or(TaskManagerError::NotFound).map(|v| v.1)
+        self.tasks
+            .remove(task_id)
+            .ok_or(TaskManagerError::NotFound)
+            .map(|v| v.1)
     }
 
-    pub fn get_tasks_by(&self, filter: impl Fn(&T) -> bool) -> impl Iterator<Item = impl Deref<Target = MsgSigned<T>> + '_> {
+    pub fn get_tasks_by(
+        &self,
+        filter: impl Fn(&T) -> bool,
+    ) -> impl Iterator<Item = impl Deref<Target = MsgSigned<T>> + '_> {
         self.tasks
             .iter()
             .filter(move |entry| filter(&entry.msg))
@@ -205,7 +229,10 @@ fn decide_blocking_conditions(block: &HowLongToBlock) -> (usize, Instant) {
         // Wait for as long as specified regardless of the number of elements
         (None, Some(wait_time)) => (usize::MAX, Instant::now() + wait_time),
         // Wait for n elements or timeout after 1h
-        (Some(wait_count), None) => (wait_count as usize, Instant::now() + Duration::from_secs(60 * 60)),
+        (Some(wait_count), None) => (
+            wait_count as usize,
+            Instant::now() + Duration::from_secs(60 * 60),
+        ),
         // Stop waiting after either some time or some number of elements
         (Some(wait_count), Some(wait_time)) => (wait_count as usize, Instant::now() + wait_time),
     }
@@ -271,11 +298,11 @@ where
         self: Arc<Self>,
         task_id: MsgId,
         block: HowLongToBlock,
-        filter: impl Fn(&T::Result) -> bool + 'static + Send + Sync
+        filter: impl Fn(&T::Result) -> bool + 'static + Send + Sync,
     ) -> impl Stream<Item = Result<Event, Infallible>> + 'static + Send
-        where
-            T::Result: Serialize + Sync + Send,
-            T: Send + Sync + 'static
+    where
+        T::Result: Serialize + Sync + Send,
+        T: Send + Sync + 'static,
     {
         async_stream::stream! {
             let Ok(task) = self.get(&task_id) else {
@@ -411,10 +438,13 @@ impl From<TaskManagerError> for StatusCode {
 }
 
 fn to_event(json: impl Serialize, event_type: impl AsRef<str>) -> Event {
-    Event::default().event(event_type).json_data(json).unwrap_or_else(|e| {
-        error!("Unable to serialize message: {e}");
-        Event::default()
-            .event(SseEventType::Error)
-            .data("Internal error: Unable to serialize message.")
-    })
+    Event::default()
+        .event(event_type)
+        .json_data(json)
+        .unwrap_or_else(|e| {
+            error!("Unable to serialize message: {e}");
+            Event::default()
+                .event(SseEventType::Error)
+                .data("Internal error: Unable to serialize message.")
+        })
 }
