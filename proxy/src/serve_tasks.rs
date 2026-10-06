@@ -6,8 +6,8 @@ use std::{
 
 use axum::{
     body::Bytes,
-    extract::{FromRef, Request, State},
-    http::{header, request::Parts, HeaderMap, HeaderValue, StatusCode, Uri},
+    extract::{FromRef, MatchedPath, Request, State},
+    http::{header, request::Parts, HeaderMap, HeaderValue, Method, StatusCode, Uri},
     response::{sse::Event, IntoResponse, Response, Sse},
     routing::{any, get, put},
     Json, RequestExt, Router,
@@ -467,7 +467,7 @@ async fn encrypt_request(
     mut req: Request,
     sender: &AppId,
 ) -> Result<(EncryptedMessage, Parts), Response> {
-    let parts = req.extract_parts().await.unwrap();
+    let parts: Parts = req.extract_parts().await.unwrap();
     let body: bytes::Bytes = req.extract().await.map_err(|e| {
         warn!("Unable to read message body: {e}");
         ERR_BODY.into_response()
@@ -479,7 +479,20 @@ async fn encrypt_request(
             from: sender.clone().into(),
         })
     } else {
-        match serde_json::from_slice(&body) {
+        let route = parts
+            .extensions
+            .get::<MatchedPath>()
+            .map(MatchedPath::as_str);
+        let parsed = match (&parts.method, route) {
+            (&Method::POST, Some("/v1/tasks")) => {
+                serde_json::from_slice(&body).map(PlainMessage::MsgTaskRequest)
+            }
+            (&Method::PUT, Some("/v1/tasks/{task_id}/results/{app_id}")) => {
+                serde_json::from_slice(&body).map(PlainMessage::MsgTaskResult)
+            }
+            _ => serde_json::from_slice(&body),
+        };
+        match parsed {
             Ok(val) => {
                 debug!("Body is valid json");
                 val
@@ -490,7 +503,7 @@ async fn encrypt_request(
                     e,
                     std::str::from_utf8(&body).unwrap_or("(not valid UTF-8)")
                 );
-                return Err(ERR_BODY.into_response());
+                return Err((StatusCode::BAD_REQUEST, format!("Invalid body: {e}")).into_response());
             }
         }
     };
