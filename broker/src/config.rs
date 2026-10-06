@@ -1,11 +1,13 @@
 use std::{fs::read_to_string, net::SocketAddr, path::PathBuf};
 
-use crate::{
-    errors::SamplyBeamError,
-};
+use crate::errors::SamplyBeamError;
 use axum::http::Uri;
 use clap::Parser;
-use shared::{crypto::X509, logger::LogOptions, reqwest::{self, Url}};
+use shared::{
+    crypto::X509,
+    logger::LogOptions,
+    reqwest::{self, Url},
+};
 use std::str::FromStr;
 use tracing::info;
 
@@ -88,8 +90,13 @@ impl Config {
             pki_address: cli_args.pki_address,
             pki_realm: cli_args.pki_realm,
             pki_token,
-            tls_ca_certificates: shared::crypto::load_certificates_from_dir(cli_args.tls_ca_certificates_dir).map_err(|e| {
-                SamplyBeamError::ConfigurationFailed(format!("Unable to read from TLS CA directory: {e:#}"))
+            tls_ca_certificates: shared::crypto::load_certificates_from_dir(
+                cli_args.tls_ca_certificates_dir,
+            )
+            .map_err(|e| {
+                SamplyBeamError::ConfigurationFailed(format!(
+                    "Unable to read from TLS CA directory: {e:#}"
+                ))
             })?,
             monitoring_api_key: cli_args.monitoring_api_key,
             rootcert: shared::crypto::load_certificates_from_file(cli_args.rootcert_file)?,

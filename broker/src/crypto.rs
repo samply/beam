@@ -3,13 +3,20 @@ use std::{future::Future, mem::discriminant, sync::Arc};
 use axum::http::{header, method, uri::Scheme, Method, Request, StatusCode, Uri};
 use serde::{Deserialize, Serialize};
 use shared::{
-    async_trait, crypto::{CertificateCache, CertificateCacheUpdate, GetCerts, X509Crl}, errors::SamplyBeamError, http_client::{self, SamplyHttpClient}, reqwest::{self, Url}
+    async_trait,
+    crypto::{CertificateCache, CertificateCacheUpdate, GetCerts, X509Crl},
+    errors::SamplyBeamError,
+    http_client::{self, SamplyHttpClient},
+    reqwest::{self, Url},
 };
 use std::time::Duration;
 use tokio::{sync::RwLock, time::timeout};
-use tracing::{debug, error, warn, info};
+use tracing::{debug, error, info, warn};
 
-use crate::{config::Config, serve_health::{Health, VaultStatus}};
+use crate::{
+    config::Config,
+    serve_health::{Health, VaultStatus},
+};
 
 pub struct GetCertsFromPki {
     pki_realm: String,
@@ -44,7 +51,8 @@ impl GetCertsFromPki {
             &config.tls_ca_certificates,
             Some(Duration::from_secs(30)),
             Some(Duration::from_secs(20)),
-        ).build()?;
+        )
+        .build()?;
 
         Ok(Self {
             pki_realm: config.pki_realm.clone(),
@@ -114,14 +122,19 @@ impl GetCertsFromPki {
             if tries > 0 {
                 tokio::time::sleep(Duration::from_secs(3)).await;
             }
-            let resp = self.hyper_client
+            let resp = self
+                .hyper_client
                 .request(method.clone(), uri.clone())
                 .header("X-Vault-Token", &self.vault_token)
                 .header("User-Agent", env!("SAMPLY_USER_AGENT"))
                 .send()
                 .await;
             let Ok(resp) = resp else {
-                warn!("Samply.PKI: Unable to communicate to vault: {}; retrying (failed attempt #{})", resp.unwrap_err(), tries+2);
+                warn!(
+                    "Samply.PKI: Unable to communicate to vault: {}; retrying (failed attempt #{})",
+                    resp.unwrap_err(),
+                    tries + 2
+                );
                 self.report_vault_health(VaultStatus::Unreachable).await;
                 continue;
             };
@@ -228,18 +241,15 @@ impl GetCerts for GetCertsFromPki {
                 warn!("Unable to update CertificateCache. Maybe it stopped? Reason: {e}.");
                 CertificateCacheUpdate::UnChanged
             }
-            Ok(update) => update
+            Ok(update) => update,
         }
     }
 
     async fn get_crl(&self) -> Result<Option<X509Crl>, SamplyBeamError> {
         debug!("Getting crl");
-        let resp = self.resilient_vault_request(
-            &Method::GET,
-            &format!("{}/crl", self.pki_realm),
-            Some(100),
-        )
-        .await?;
+        let resp = self
+            .resilient_vault_request(&Method::GET, &format!("{}/crl", self.pki_realm), Some(100))
+            .await?;
         X509Crl::from_der(&resp.bytes().await?).map(Some)
     }
 }

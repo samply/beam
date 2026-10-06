@@ -1,4 +1,3 @@
-
 use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
@@ -93,7 +92,6 @@ impl From<ProxyId> for AppOrProxyId {
     }
 }
 
-
 #[cfg(feature = "strict-ids")]
 pub fn set_broker_id(id: String) {
     if let Err(value) = BROKER_ID.set(id) {
@@ -143,7 +141,7 @@ macro_rules! impl_id {
                     }
                 }
             }
-            
+
             pub fn new_unchecked(id: impl Into<String>) -> Self {
                 Self(id.into())
             }
@@ -224,12 +222,10 @@ impl AppId {
     }
 }
 
-
 #[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash)]
 pub struct ProxyId(String);
 
 impl ProxyId {
-
     /// Returns the proxies name without the broker id
     /// ## Example
     /// proxy1.broker => proxy1
@@ -301,7 +297,7 @@ macro_rules! impl_deserialize {
                 return Self::new(&String::deserialize(deserializer)?)
                     .map_err(serde::de::Error::custom);
                 #[cfg(not(feature = "strict-ids"))]
-                return Ok(Self::new_unchecked(String::deserialize(deserializer)?))
+                return Ok(Self::new_unchecked(String::deserialize(deserializer)?));
             }
         }
     };
@@ -351,8 +347,7 @@ mod tests {
     fn test_can_be_signed_by_label_boundary() {
         set_broker_id("broker.samply.de".to_string());
         let victim_proxy = ProxyId::new("neu-ulm.broker.samply.de").unwrap();
-        let victim_app: AppOrProxyId =
-            AppId::new("app.neu-ulm.broker.samply.de").unwrap().into();
+        let victim_app: AppOrProxyId = AppId::new("app.neu-ulm.broker.samply.de").unwrap().into();
         let attacker = ProxyId::new("ulm.broker.samply.de").unwrap();
 
         // Legitimate: a proxy signs for itself and its own apps.

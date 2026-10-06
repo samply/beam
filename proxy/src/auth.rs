@@ -2,11 +2,15 @@ use std::collections::HashMap;
 
 use axum::{
     extract::{FromRef, FromRequest, FromRequestParts},
-    http::{header::{self, HeaderName}, request::Parts, Request, StatusCode},
+    http::{
+        header::{self, HeaderName},
+        request::Parts,
+        Request, StatusCode,
+    },
 };
 use beam_lib::{AppId, AppOrProxyId};
 
-use tracing::{debug, Span, debug_span, warn};
+use tracing::{debug, debug_span, warn, Span};
 
 use crate::config::Config;
 
@@ -45,8 +49,14 @@ where
             return Err(UNAUTH_ERR);
         };
         let api_key_claimed = auth.next().ok_or(UNAUTH_ERR)?;
-        if !constant_time_eq::constant_time_eq(api_key_claimed.as_bytes(), api_key_actual.as_bytes()) {
-            warn!(provided_key = api_key_claimed, "App {client_id} provided the wrong api key");
+        if !constant_time_eq::constant_time_eq(
+            api_key_claimed.as_bytes(),
+            api_key_actual.as_bytes(),
+        ) {
+            warn!(
+                provided_key = api_key_claimed,
+                "App {client_id} provided the wrong api key"
+            );
             return Err(UNAUTH_ERR);
         }
         debug!("Request authenticated (ClientID {})", client_id);
