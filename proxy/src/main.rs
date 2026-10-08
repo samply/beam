@@ -64,7 +64,6 @@ pub async fn main() -> anyhow::Result<()> {
         })
         .max_extra_load(2.0)
         .max_retries_per_request(3);
-
     let client = http_client::builder(
         &config.tls_ca_certificates,
         Some(Duration::from_secs(PROXY_TIMEOUT)),
@@ -72,9 +71,26 @@ pub async fn main() -> anyhow::Result<()> {
     )
     .retry(retry_policy)
     .build()?;
+    let config = tokio::select! {
+        config = setup_config_and_pki(config, &client) => {
+            config?
+        },
+        () = shared::graceful_shutdown::wait_for_signal() => {
+            std::process::exit(1);
+        }
+    };
+    spawn_controller_polling(client.clone(), config);
 
+    serve::serve(config, client).await?;
+    Ok(())
+}
+
+async fn setup_config_and_pki(
+    prelim_config: Config,
+    client: &SamplyHttpClient,
+) -> Result<&'static Config, SamplyBeamError> {
     if let Err(err) = retry_notify(
-        || get_broker_health(&config, &client),
+        || get_broker_health(&prelim_config, &client),
         |err, dur| {
             warn!(
                 "Still trying to reach Broker: {err}. Retrying in {}s",
@@ -87,12 +103,15 @@ pub async fn main() -> anyhow::Result<()> {
         error!("Giving up reaching Broker: {err}");
         std::process::exit(1);
     } else {
-        info!("Connected to Broker: {}", &config.broker_uri);
+        info!("Connected to Broker: {}", &prelim_config.broker_uri);
     }
 
-    shared::crypto::init_cert_getter(GetCertsFromBroker::new(client.clone(), config.clone()));
+    shared::crypto::init_cert_getter(GetCertsFromBroker::new(
+        client.clone(),
+        prelim_config.clone(),
+    ));
     let result = retry_notify(
-        || init_crypto(&config),
+        || init_crypto(&prelim_config),
         |err, dur| {
             warn!(
                 "Still trying to initialize certificate chain: {err}. Retrying in {}s",
@@ -110,14 +129,11 @@ pub async fn main() -> anyhow::Result<()> {
             debug!("Certificate chain successfully initialized and validated");
             Box::leak(Box::new(Config {
                 crypto: crypto_config,
-                ..config
+                ..prelim_config
             }))
         }
     };
-    spawn_controller_polling(client.clone(), config);
-
-    serve::serve(config, client).await?;
-    Ok(())
+    Ok(config)
 }
 
 fn retry_notify<F, T, Fut, E, Cb>(
