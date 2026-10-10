@@ -8,7 +8,7 @@ source beamdev noop
 
 function start() {
   trap "echo; echo; clean" EXIT
-  start_bg
+  BEAMDEV_USE_PREBUILT=1 start_bg
 }
 
 function test() {
