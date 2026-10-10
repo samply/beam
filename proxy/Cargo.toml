@@ -36,7 +36,7 @@ aws-lc-rs.workspace = true
 # Server-sent Events (SSE) support
 tokio-util = "0.7"
 futures.workspace = true
-sse-stream = "0.2.6"
+sse-stream = "0.3.0"
 async-stream = "0.3"
 
 # Socket dependencies
