@@ -1,4 +1,10 @@
 
+# Unreleased
+
+## Minor changes
+
+* When rejecting a malformed task or result, Beam now returns the reason, e.g. which Beam ID is invalid (previously a generic `Invalid body`).
+
 # Samply.Beam 0.11.0 - 2026-07-06
 
 ## Minor changes

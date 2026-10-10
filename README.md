@@ -323,6 +323,8 @@ Date: Thu, 28 Sep 2023 07:16:24 GMT
 
 In this case, remove or correct these BeamIDs from the `to` field of your task and re-send.
 
+Malformed tasks and results yield `400 Bad Request` with the reason in the body, e.g. `Invalid body: invalid beam id "app1. proxy4.broker": …`.
+
 ### Retrieve tasks
 
 Workers regularly call this endpoint to retrieve submitted tasks.
