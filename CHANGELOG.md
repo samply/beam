@@ -1,9 +1,17 @@
 
-# Unreleased
+# Samply.Beam 0.12.0 - 2026-10-19
 
 ## Minor changes
 
 * When rejecting a malformed task or result, Beam now returns the reason, e.g. which Beam ID is invalid (previously a generic `Invalid body`).
+* Switched the cryptography backend from OpenSSL and RSA to aws-lc-rs, improving performance.
+* API keys are now compared in constant time and may contain non-ASCII UTF-8 characters.
+* The Beam Proxy can now be stopped while it is still waiting for the broker during startup.
+
+## Bugfixes
+
+* Fixed issues with reverse proxies (e.g. nginx over HTTP/2) caused by the proxy setting its own `Host` header on requests to the broker.
+* The proxy no longer forwards the client's `Host` header.
 
 # Samply.Beam 0.11.0 - 2026-07-06
 
