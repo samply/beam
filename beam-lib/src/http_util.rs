@@ -24,7 +24,7 @@ pub enum BeamError {
     ReqwestError(#[from] reqwest::Error),
     #[error("Unexpected status code {0}")]
     UnexpectedStatus(StatusCode),
-    #[error("The following receivers had invalid certificates which is why the request has been canceld: {0:?}")]
+    #[error("The following receivers had invalid certificates which is why the request has been canceled: {0:?}")]
     InvalidReceivers(Vec<ProxyId>),
     #[error("Other handler specific error: {0}")]
     Other(Box<dyn std::error::Error + Send + Sync>),

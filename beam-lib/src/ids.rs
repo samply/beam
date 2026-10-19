@@ -294,8 +294,12 @@ macro_rules! impl_deserialize {
         impl<'de> Deserialize<'de> for $idType {
             fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
                 #[cfg(feature = "strict-ids")]
-                return Self::new(&String::deserialize(deserializer)?)
-                    .map_err(serde::de::Error::custom);
+                {
+                    let id = String::deserialize(deserializer)?;
+                    return Self::new(&id).map_err(|e| {
+                        serde::de::Error::custom(format!("invalid beam id {id:?}: {e}"))
+                    });
+                }
                 #[cfg(not(feature = "strict-ids"))]
                 return Ok(Self::new_unchecked(String::deserialize(deserializer)?));
             }
