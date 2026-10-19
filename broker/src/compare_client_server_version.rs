@@ -1,4 +1,9 @@
-use axum::{http::{header, HeaderValue}, middleware::Next, response::Response, extract::Request};
+use axum::{
+    extract::Request,
+    http::{header, HeaderValue},
+    middleware::Next,
+    response::Response,
+};
 use tracing::{debug, warn};
 
 enum Verdict {
@@ -27,7 +32,10 @@ fn compare_version(their_version_header: &HeaderValue) -> Verdict {
         return Verdict::BeamWithInvalidVersion(their_version.into());
     };
     // Remove git hash from builds if present as we only care about a semver mismatch
-    let version_number = version_number.split_once('-').map(|v| v.0).unwrap_or(version_number);
+    let version_number = version_number
+        .split_once('-')
+        .map(|v| v.0)
+        .unwrap_or(version_number);
 
     if version_number != env!("CARGO_PKG_VERSION") {
         return Verdict::BeamWithMismatchingVersion(version_number.into());
@@ -35,17 +43,19 @@ fn compare_version(their_version_header: &HeaderValue) -> Verdict {
     Verdict::BeamWithMatchingVersion
 }
 
-pub(crate) async fn log_version_mismatch(
-    req: Request,
-    next: Next,
-) -> Response {
+pub(crate) async fn log_version_mismatch(req: Request, next: Next) -> Response {
     let user_agent = req.headers().get(header::USER_AGENT);
 
     if let Some(their_version_header) = user_agent {
         match compare_version(&their_version_header) {
             Verdict::BeamWithMatchingVersion | Verdict::NotBeam => (),
-            Verdict::BeamWithMismatchingVersion(v) => warn!("Samply.Beam.Proxy has version mismatch: ours={}, theirs={v}", env!("CARGO_PKG_VERSION")),
-            Verdict::BeamWithInvalidVersion(v) => warn!("Samply.Beam.Proxy gave invalid version number in User-Agent header: {v}"),
+            Verdict::BeamWithMismatchingVersion(v) => warn!(
+                "Samply.Beam.Proxy has version mismatch: ours={}, theirs={v}",
+                env!("CARGO_PKG_VERSION")
+            ),
+            Verdict::BeamWithInvalidVersion(v) => {
+                warn!("Samply.Beam.Proxy gave invalid version number in User-Agent header: {v}")
+            }
         }
     } else {
         warn!("No User-Agent supplied");

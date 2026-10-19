@@ -1,16 +1,13 @@
 use std::{net::AddrParseError, str::Utf8Error, string::FromUtf8Error};
 
-use openssl::error::ErrorStack;
+use beam_lib::ProxyId;
 use reqwest::StatusCode;
 use tokio::time::error::Elapsed;
-use beam_lib::ProxyId;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SamplyBeamError {
     #[error("Invalid bind address supplied: {0}")]
     BindAddr(AddrParseError),
-    #[error("Invalid broker address supplied: {0}")]
-    WrongBrokerUri(&'static str),
     #[error("The request could not be validated: {0}.")]
     RequestValidationFailed(String),
     #[error("Invalid path supplied")]
@@ -54,7 +51,7 @@ pub enum SamplyBeamError {
     #[error("Timeout executing HTTP request: {0}")]
     HttpTimeoutError(Elapsed),
     #[error("Invalid receivers: {0:?}")]
-    InvalidReceivers(Vec<ProxyId>)
+    InvalidReceivers(Vec<ProxyId>),
 }
 
 impl From<AddrParseError> for SamplyBeamError {
@@ -62,18 +59,6 @@ impl From<AddrParseError> for SamplyBeamError {
         let ret = SamplyBeamError::BindAddr(e);
         println!("Building error: {}", ret);
         ret
-    }
-}
-
-impl From<ErrorStack> for SamplyBeamError {
-    fn from(e: ErrorStack) -> Self {
-        Self::SignEncryptError(e.to_string())
-    }
-}
-
-impl From<rsa::errors::Error> for SamplyBeamError {
-    fn from(e: rsa::errors::Error) -> Self {
-        Self::SignEncryptError(e.to_string())
     }
 }
 

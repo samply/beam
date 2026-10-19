@@ -1,16 +1,18 @@
 use std::ops::Deref;
 
-use axum::{http::{header, HeaderValue, StatusCode}, response::{IntoResponse, Response}};
+use axum::{
+    http::{header, HeaderValue, StatusCode},
+    response::{IntoResponse, Response},
+};
 use bytes::BufMut;
-use serde::{Serialize, Serializer, ser::SerializeSeq};
-
+use serde::{ser::SerializeSeq, Serialize, Serializer};
 
 pub mod serialize_time {
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     use fundu::parse_duration;
     use serde::{self, Deserialize, Deserializer, Serializer};
-    use tracing::{debug, error, warn, trace};
+    use tracing::{debug, error, trace, warn};
 
     pub fn serialize<S>(time: &SystemTime, s: S) -> Result<S::Ok, S::Error>
     where
@@ -40,42 +42,48 @@ pub mod serialize_time {
 
 // https://github.com/serde-rs/json/issues/360#issuecomment-330095360
 pub mod serde_base64 {
-    use serde::{Serializer, de, ser, Deserialize, Deserializer};
-    use openssl::base64;
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use serde::{de, ser, Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error>
-        where S: Serializer
+    where
+        S: Serializer,
     {
-        serializer.serialize_str(&base64::encode_block(bytes))
+        serializer.serialize_str(&STANDARD.encode(bytes))
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-        where D: Deserializer<'de>
+    where
+        D: Deserializer<'de>,
     {
-        base64::decode_block(<&str>::deserialize(deserializer)?).map_err(de::Error::custom)
+        STANDARD
+            .decode(<&str>::deserialize(deserializer)?)
+            .map_err(de::Error::custom)
     }
 
     pub mod nested {
         use serde::ser::SerializeSeq;
 
-        use super::{ser, de, Serializer, Deserializer, base64};
+        use super::{de, ser, Deserializer, Engine, Serializer, STANDARD};
 
         pub fn serialize<S>(bytes: &[Vec<u8>], serializer: S) -> Result<S::Ok, S::Error>
-            where S: Serializer
+        where
+            S: Serializer,
         {
             let mut seq_serializer = serializer.serialize_seq(Some(bytes.len()))?;
             for byte_seq in bytes {
-                seq_serializer.serialize_element(&base64::encode_block(&byte_seq))?;
+                seq_serializer.serialize_element(&STANDARD.encode(byte_seq))?;
             }
             seq_serializer.end()
         }
 
         pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Vec<u8>>, D::Error>
-            where D: Deserializer<'de>
+        where
+            D: Deserializer<'de>,
         {
             <Vec<&str> as serde::Deserialize>::deserialize(deserializer)?
                 .into_iter()
-                .map(base64::decode_block)
+                .map(|value| STANDARD.decode(value))
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(de::Error::custom)
         }
@@ -84,14 +92,17 @@ pub mod serde_base64 {
 
 pub struct DerefSerializer {
     pub read_expected: bool,
-    buffer: bytes::Bytes
+    buffer: bytes::Bytes,
 }
 
 impl DerefSerializer {
     // Made a PR in DashMap to impl Serialize for refs but the last commit was in January
-    pub fn new<T: Serialize>(iter: impl Iterator<Item = impl Deref<Target = T>>, expected_len: Option<u16>) -> Result<DerefSerializer, serde_json::Error> {
+    pub fn new<T: Serialize>(
+        iter: impl Iterator<Item = impl Deref<Target = T>>,
+        expected_len: Option<u16>,
+    ) -> Result<DerefSerializer, serde_json::Error> {
         let mut items_read = 0;
-        let writer = bytes::BytesMut::new().writer(); 
+        let writer = bytes::BytesMut::new().writer();
         let mut serializer = serde_json::Serializer::new(writer);
         let mut seq_ser = serializer
             .serialize_seq(expected_len.map(usize::from).or(iter.size_hint().1))
@@ -104,21 +115,27 @@ impl DerefSerializer {
 
         Ok(Self {
             buffer: serializer.into_inner().into_inner().freeze(),
-            read_expected: items_read >= expected_len.unwrap_or(0)
+            read_expected: items_read >= expected_len.unwrap_or(0),
         })
     }
 }
 
 impl IntoResponse for DerefSerializer {
     fn into_response(self) -> Response {
-        let Self { buffer, read_expected } = self;
+        let Self {
+            buffer,
+            read_expected,
+        } = self;
         let mut resp = buffer.into_response();
         *resp.status_mut() = if read_expected {
             StatusCode::OK
         } else {
             StatusCode::PARTIAL_CONTENT
         };
-        resp.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        resp.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
         resp
     }
 }

@@ -1,7 +1,7 @@
-use serde::{Serialize, Deserialize, de::DeserializeOwned};
+use crate::AddressingId;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
-use crate::AddressingId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct MsgId(Uuid);
@@ -25,7 +25,10 @@ pub struct TaskRequest<T> {
     pub to: Vec<AddressingId>,
     #[serde(
         with = "serde_string",
-        bound(serialize = "T: Serialize + 'static", deserialize = "T: DeserializeOwned + 'static")
+        bound(
+            serialize = "T: Serialize + 'static",
+            deserialize = "T: DeserializeOwned + 'static"
+        )
     )]
     pub body: T,
     pub ttl: String,
@@ -41,7 +44,10 @@ pub struct TaskResult<T> {
     pub status: WorkStatus,
     #[serde(
         with = "serde_string",
-        bound(serialize = "T: Serialize + 'static", deserialize = "T: DeserializeOwned + 'static")
+        bound(
+            serialize = "T: Serialize + 'static",
+            deserialize = "T: DeserializeOwned + 'static"
+        )
     )]
     pub body: T,
     pub metadata: Value,
@@ -95,18 +101,22 @@ mod serde_string {
         if TypeId::of::<T>() == TypeId::of::<RawString>() {
             json.serialize(serializer)
         } else {
-            serializer.serialize_str(&serde_json::to_string(json).map_err(serde::ser::Error::custom)?)
+            serializer
+                .serialize_str(&serde_json::to_string(json).map_err(serde::ser::Error::custom)?)
         }
     }
 
-    pub fn deserialize<'de, D, T: DeserializeOwned + 'static>(deserializer: D) -> Result<T, D::Error>
+    pub fn deserialize<'de, D, T: DeserializeOwned + 'static>(
+        deserializer: D,
+    ) -> Result<T, D::Error>
     where
         D: Deserializer<'de>,
     {
         if TypeId::of::<T>() == TypeId::of::<RawString>() {
             T::deserialize(deserializer)
         } else {
-            serde_json::from_str(&String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+            serde_json::from_str(&String::deserialize(deserializer)?)
+                .map_err(serde::de::Error::custom)
         }
     }
 }
@@ -131,7 +141,9 @@ impl<T: Into<String>> From<T> for RawString {
 mod tests {
     use super::*;
 
-    fn test_serialize_and_deserialize<T: From<&'static str> + PartialEq + Serialize + DeserializeOwned + std::fmt::Debug + 'static>() {
+    fn test_serialize_and_deserialize<
+        T: From<&'static str> + PartialEq + Serialize + DeserializeOwned + std::fmt::Debug + 'static,
+    >() {
         use crate::AppId;
         #[cfg(feature = "strict-ids")]
         crate::set_broker_id("broker.samply.de".to_string());
@@ -145,7 +157,12 @@ mod tests {
             failure_strategy: FailureStrategy::Discard,
             metadata: Value::Null,
         };
-        assert_eq!(serde_json::from_str::<TaskRequest<T>>(&serde_json::to_string(&task).unwrap()).unwrap().body, task.body);
+        assert_eq!(
+            serde_json::from_str::<TaskRequest<T>>(&serde_json::to_string(&task).unwrap())
+                .unwrap()
+                .body,
+            task.body
+        );
     }
 
     #[test]

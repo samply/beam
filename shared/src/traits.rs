@@ -17,8 +17,18 @@ struct HowLongToBlockQueryExtractor {
 fn test_duration_parsing() {
     let mut parser = DurationParser::default();
     let parser = parser.default_unit(fundu::TimeUnit::MilliSecond);
-    assert_eq!(Duration::try_from(parser.parse("1234s").unwrap()).unwrap().as_millis(), 1234000);
-    assert_eq!(Duration::try_from(parser.parse("1234").unwrap()).unwrap().as_millis(), 1234);
+    assert_eq!(
+        Duration::try_from(parser.parse("1234s").unwrap())
+            .unwrap()
+            .as_millis(),
+        1234000
+    );
+    assert_eq!(
+        Duration::try_from(parser.parse("1234").unwrap())
+            .unwrap()
+            .as_millis(),
+        1234
+    );
 }
 
 impl<S> FromRequestParts<S> for HowLongToBlock

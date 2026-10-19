@@ -9,18 +9,26 @@ use axum::{
 };
 use serde::Deserialize;
 use shared::{
-    EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg,
-    MsgEmpty, MsgId, MsgSigned, EMPTY_VEC_APPORPROXYID,
+    EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg, MsgEmpty,
+    MsgId, MsgSigned, EMPTY_VEC_APPORPROXYID,
 };
 use tokio::{
-    net::TcpListener, sync::{
+    net::TcpListener,
+    sync::{
         broadcast::{Receiver, Sender},
         RwLock,
-    }, time
+    },
+    time,
 };
 use tracing::{debug, info, trace, warn};
 
-use crate::{banner, compare_client_server_version, config::Config, crypto, serve_health::{self, Health}, serve_pki, serve_tasks};
+use crate::{
+    banner, compare_client_server_version,
+    config::Config,
+    crypto,
+    serve_health::{self, Health},
+    serve_pki, serve_tasks,
+};
 
 pub(crate) async fn serve(broker_state: BrokerState) -> anyhow::Result<()> {
     let bind_addr = broker_state.config.bind_addr;
@@ -36,9 +44,12 @@ pub(crate) async fn serve(broker_state: BrokerState) -> anyhow::Result<()> {
         .layer(DefaultBodyLimit::disable());
 
     info!("Startup complete. Listening for requests on {bind_addr}");
-    axum::serve(TcpListener::bind(bind_addr).await?, app.into_make_service_with_connect_info::<SocketAddr>())
-        .with_graceful_shutdown(shared::graceful_shutdown::wait_for_signal())
-        .await?;
+    axum::serve(
+        TcpListener::bind(bind_addr).await?,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shared::graceful_shutdown::wait_for_signal())
+    .await?;
     Ok(())
 }
 

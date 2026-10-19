@@ -6,17 +6,20 @@ use std::{
 use axum::{
     extract::ConnectInfo,
     extract::{Path, Query, State},
-    http::{header, HeaderValue, StatusCode, HeaderMap},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{sse::Event, IntoResponse, Response, Sse},
     routing::{get, post, put},
     Json, Router,
 };
 use beam_lib::AppOrProxyId;
+use beam_lib::WorkStatus;
 use futures::{stream, Stream};
 use serde::Deserialize;
-use beam_lib::WorkStatus;
 use shared::{
-    EMPTY_VEC_APPORPROXYID, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId, HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult, errors::SamplyBeamError, format_to_without_broker, serde_helpers::DerefSerializer, sse_event::SseEventType
+    errors::SamplyBeamError, format_to_without_broker, serde_helpers::DerefSerializer,
+    sse_event::SseEventType, EncryptedMsgTaskRequest, EncryptedMsgTaskResult, HasWaitId,
+    HowLongToBlock, Msg, MsgEmpty, MsgId, MsgSigned, MsgTaskRequest, MsgTaskResult,
+    EMPTY_VEC_APPORPROXYID,
 };
 use tokio::{
     sync::{
@@ -31,7 +34,7 @@ use crate::task_manager::TaskManager;
 
 #[derive(Clone)]
 struct TasksState {
-    task_manager: Arc<TaskManager<EncryptedMsgTaskRequest>>
+    task_manager: Arc<TaskManager<EncryptedMsgTaskRequest>>,
 }
 
 pub(crate) fn router() -> Router {
@@ -47,7 +50,7 @@ pub(crate) fn router() -> Router {
 impl Default for TasksState {
     fn default() -> Self {
         TasksState {
-            task_manager: TaskManager::new()
+            task_manager: TaskManager::new(),
         }
     }
 }
@@ -103,9 +106,20 @@ async fn get_results_for_task_nostream(
         to: Some(msg.get_from().clone()),
         mode: MsgFilterMode::Or,
     };
-    let task_with_results = state.task_manager.wait_for_results(&task_id, &block, |m| filter_for_me.matches(&m.msg)).await?;
-    
-    DerefSerializer::new(task_with_results.msg.results.values().filter(|m| filter_for_me.matches(&m.msg)), block.wait_count).map_err(|e| {
+    let task_with_results = state
+        .task_manager
+        .wait_for_results(&task_id, &block, |m| filter_for_me.matches(&m.msg))
+        .await?;
+
+    DerefSerializer::new(
+        task_with_results
+            .msg
+            .results
+            .values()
+            .filter(|m| filter_for_me.matches(&m.msg)),
+        block.wait_count,
+    )
+    .map_err(|e| {
         warn!("Failed to serialize task results: {e}");
         StatusCode::INTERNAL_SERVER_ERROR
     })
@@ -130,16 +144,17 @@ async fn get_results_for_task_stream(
         return Err(StatusCode::FORBIDDEN);
     }
 
-    let filter = MsgFilterNoTask { from: None, to: Some(from), mode: MsgFilterMode::Or };
-    let stream = state.task_manager.stream_results(
-        task_id,
-        block,
-        move |m| filter.matches(&m.msg)
-    );
+    let filter = MsgFilterNoTask {
+        from: None,
+        to: Some(from),
+        mode: MsgFilterMode::Or,
+    };
+    let stream = state
+        .task_manager
+        .stream_results(task_id, block, move |m| filter.matches(&m.msg));
 
     Ok(Sse::new(stream))
 }
-
 
 #[derive(Deserialize)]
 struct TaskFilter {
@@ -197,17 +212,25 @@ async fn get_tasks(
     let filter = MsgFilterForTask {
         normal: filter,
         unanswered_by: unanswered_by.as_ref(),
-        workstatus_is_not: [WorkStatus::Succeeded, WorkStatus::PermFailed, WorkStatus::Claimed]
-            .iter()
-            .map(std::mem::discriminant)
-            .collect(),
+        workstatus_is_not: [
+            WorkStatus::Succeeded,
+            WorkStatus::PermFailed,
+            WorkStatus::Claimed,
+        ]
+        .iter()
+        .map(std::mem::discriminant)
+        .collect(),
     };
-    let tasks = state.task_manager
+    let tasks = state
+        .task_manager
         .wait_for_tasks(&block, move |m| filter.matches(m))
         .await?;
     DerefSerializer::new(tasks, block.wait_count).map_err(|e| {
         warn!("Failed to serialize tasks: {e}");
-        (StatusCode::INTERNAL_SERVER_ERROR, "Failed to serialize tasks")
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to serialize tasks",
+        )
     })
 }
 
@@ -221,19 +244,29 @@ async fn get_task_by_id(
         return Err(StatusCode::BAD_REQUEST);
     }
     block.wait_count = Some(1);
-    let Some(task) = state.task_manager
-        .wait_for_tasks(&block, |task| task.id() == &task_id && (msg.get_from() == task.get_from() || task.get_to().contains(msg.get_from())))
+    let Some(task) = state
+        .task_manager
+        .wait_for_tasks(&block, |task| {
+            task.id() == &task_id
+                && (msg.get_from() == task.get_from() || task.get_to().contains(msg.get_from()))
+        })
         .await?
         .next()
     else {
         return Err(StatusCode::NOT_FOUND);
     };
-    let body = serde_json::to_vec(&*task)
-        .map_err(|e| {
-            warn!("Failed to serialize task: {e}");
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
-    Ok(([(header::CONTENT_TYPE, HeaderValue::from_static("application/json"))], body).into_response())
+    let body = serde_json::to_vec(&*task).map_err(|e| {
+        warn!("Failed to serialize task: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        )],
+        body,
+    )
+        .into_response())
 }
 
 trait MsgFilterTrait<M: Msg> {

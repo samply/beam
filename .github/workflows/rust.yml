@@ -17,6 +17,7 @@ jobs:
       #profile: debug
       test-via-script: true
       features: '[ "", "sockets" ]'
+      cargo-fmt-check: true
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

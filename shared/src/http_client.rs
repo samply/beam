@@ -3,11 +3,10 @@ use std::{collections::HashSet, ops::Deref, time::Duration};
 use axum::http::{Request, Response, Uri};
 use itertools::Itertools;
 use once_cell::sync::OnceCell;
-use openssl::x509::X509;
 use reqwest::{Certificate, Client, ClientBuilder};
 use tracing::{debug, info, warn};
 
-use crate::{errors::SamplyBeamError};
+use crate::errors::SamplyBeamError;
 
 pub type SamplyHttpClient = reqwest::Client;
 
@@ -34,7 +33,10 @@ pub fn builder(
         warn!("Certificates for TLS termination were provided but no proxy to use. If you want to set a proxy see https://docs.rs/reqwest/#proxies");
     }
 
-    let proxies = proxies.into_iter().map(|(k, v)| format!("{k}={v}")).join(", ");
+    let proxies = proxies
+        .into_iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .join(", ");
 
     let certs = match ca_certificates.len() {
         0 => "no trusted certificate".to_string(),
@@ -53,7 +55,7 @@ mod test {
 
     use reqwest::{Request, Url};
 
-    use crate::{http_client::{self, SamplyHttpClient}};
+    use crate::http_client::{self, SamplyHttpClient};
 
     const HTTP: &str = "http://ip-api.com/json";
     const HTTPS: &str = "https://ifconfig.me/";
